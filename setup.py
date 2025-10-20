@@ -1,71 +1,132 @@
 """
-FasterAPI PostgreSQL Integration - Setup
+FasterAPI - Setup
 
-Builds the C++ native library and packages it with Python modules.
+Builds the C++ native library and Cython extensions, packages with Python modules.
 """
 
-from setuptools import setup, find_packages
+from setuptools import setup, find_packages, Extension
 from setuptools.command.build_ext import build_ext
 import os
 import sys
 import subprocess
 from pathlib import Path
 
+# Check if Cython is available
+try:
+    from Cython.Build import cythonize
+    HAS_CYTHON = True
+except ImportError:
+    HAS_CYTHON = False
+    print("Warning: Cython not available. MCP proxy bindings will not be built.")
+
 
 class CMakeBuildExt(build_ext):
     """Custom build command that uses CMake to build the C++ extension."""
-    
-    def build_extensions(self):
+
+    def run(self):
+        """Build C++ library via CMake, then build Cython extensions."""
+        # Build C++ library first
+        self.build_cpp_library()
+
+        # Then build Cython extensions if available
+        if HAS_CYTHON:
+            super().run()
+
+    def build_cpp_library(self):
         """Build C++ library via CMake."""
         build_dir = Path(self.build_temp).absolute()
         source_dir = Path(__file__).parent.absolute()
-        install_dir = Path(self.build_lib) / "fasterapi" / "pg" / "_native"
-        
-        # Create directories
+
+        # Target directory for native libraries
+        native_dir = source_dir / "fasterapi" / "_native"
+        native_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create build directory
         build_dir.mkdir(parents=True, exist_ok=True)
-        install_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Run CMake configure
         print(f"Configuring CMake in {build_dir}")
         cmake_args = [
             f"-DCMAKE_BUILD_TYPE=Release",
-            f"-DCMAKE_INSTALL_PREFIX={install_dir}",
+            f"-DFA_BUILD_MCP=ON",  # Enable MCP
+            f"-DFA_BUILD_PG=ON",   # Enable PostgreSQL
+            f"-DFA_BUILD_HTTP=ON", # Enable HTTP
         ]
-        
+
         subprocess.check_call(
             ["cmake", str(source_dir), "-Wno-dev"] + cmake_args,
             cwd=build_dir
         )
-        
+
         # Run CMake build
         print("Building C++ library")
         subprocess.check_call(
             ["cmake", "--build", ".", "--config", "Release", "-j"],
             cwd=build_dir
         )
-        
-        # Copy library to package
-        lib_dir = build_dir / "lib"
-        if lib_dir.exists():
-            for lib_file in lib_dir.glob("libfasterapi_pg.*"):
-                print(f"Copying {lib_file.name} to {install_dir}")
-                import shutil
-                shutil.copy2(lib_file, install_dir / lib_file.name)
+
+        # Copy libraries to fasterapi/_native/
+        import shutil
+
+        # Copy MCP library
+        for pattern in ["libfasterapi_mcp.*", "fasterapi_mcp.*"]:
+            for lib_file in build_dir.rglob(pattern):
+                if lib_file.is_file() and not lib_file.suffix in ['.a', '.lib']:
+                    print(f"Copying {lib_file.name} to {native_dir}")
+                    shutil.copy2(lib_file, native_dir / lib_file.name)
+
+        # Copy PG library
+        for pattern in ["libfasterapi_pg.*", "fasterapi_pg.*"]:
+            for lib_file in build_dir.rglob(pattern):
+                if lib_file.is_file() and not lib_file.suffix in ['.a', '.lib']:
+                    print(f"Copying {lib_file.name} to {native_dir}")
+                    shutil.copy2(lib_file, native_dir / lib_file.name)
+
+
+# Cython extensions
+extensions = []
+
+if HAS_CYTHON:
+    # MCP Proxy bindings
+    extensions.append(
+        Extension(
+            "fasterapi.mcp.proxy_bindings",
+            sources=["fasterapi/mcp/proxy_bindings.pyx"],
+            include_dirs=["src/cpp"],
+            library_dirs=["fasterapi/_native"],
+            libraries=["fasterapi_mcp"],
+            language="c++",
+            extra_compile_args=["-std=c++20"],
+        )
+    )
+
+    # Cythonize extensions
+    extensions = cythonize(
+        extensions,
+        compiler_directives={
+            'language_level': 3,
+            'embedsignature': True
+        }
+    )
 
 
 setup(
-    name="fasterapi-pg",
-    version="0.1.0",
-    description="High-performance PostgreSQL driver for FasterAPI with C++ pooling and codecs",
+    name="fasterapi",
+    version="0.2.0",
+    description="High-performance web framework with PostgreSQL and MCP support",
     long_description=open("README.md").read() if Path("README.md").exists() else "",
+    long_description_content_type="text/markdown",
     author="FasterAPI Contributors",
+    url="https://github.com/bengamble/FasterAPI",
     license="MIT",
-    python_requires=">=3.10",
-    packages=find_packages(),
+    python_requires=">=3.8",
+    packages=find_packages(exclude=["tests", "tests.*", "benchmarks", "benchmarks.*"]),
     package_data={
-        "fasterapi.pg": ["_native/*"],
+        "fasterapi": ["_native/*"],
+        "fasterapi.mcp": ["*.pyx", "*.pxd"],
     },
-    ext_modules=[],  # Custom build_ext handles this
+    include_package_data=True,
+    ext_modules=extensions,
     cmdclass={
         "build_ext": CMakeBuildExt,
     },
@@ -76,8 +137,28 @@ setup(
         "dev": [
             "pytest>=7.0",
             "pytest-cov>=4.0",
+            "pytest-asyncio>=0.21",
+            "cython>=3.0",
+        ],
+        "pg": [
             "psycopg[binary]>=3.0",
             "asyncpg>=0.27",
+        ],
+        "mcp": [
+            "cython>=3.0",
+        ],
+        "all": [
+            "cython>=3.0",
+            "psycopg[binary]>=3.0",
+            "asyncpg>=0.27",
+            "pytest>=7.0",
+            "pytest-cov>=4.0",
+            "pytest-asyncio>=0.21",
+        ],
+    },
+    entry_points={
+        "console_scripts": [
+            "fasterapi-mcp-proxy=fasterapi.mcp.cli:main",
         ],
     },
     classifiers=[
@@ -85,9 +166,15 @@ setup(
         "Intended Audience :: Developers",
         "License :: OSI Approved :: MIT License",
         "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
-        "Programming Language :: Cython :: 0.29",
+        "Programming Language :: C++",
+        "Programming Language :: Cython",
+        "Topic :: Software Development :: Libraries :: Application Frameworks",
+        "Topic :: Internet :: WWW/HTTP",
+        "Topic :: Database",
     ],
 )

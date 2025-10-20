@@ -12,6 +12,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # -----------------------------
 option(FA_BUILD_PG           "Build PostgreSQL integration" ON)
 option(FA_BUILD_HTTP         "Build HTTP server" ON)
+option(FA_BUILD_MCP          "Build MCP (Model Context Protocol) support" ON)
 option(FA_USE_LIBUV          "Use libuv for event loop (required on Windows)" ON)
 option(FA_USE_ASIO           "Build with standalone Asio (for Beast/H2 path)" OFF)
 option(FA_ENABLE_HTTP2       "Enable HTTP/2 support via nghttp2" ON)
@@ -758,4 +759,86 @@ if (FA_BUILD_HTTP)
     set_target_properties(1mrc_libuv_server PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks"
     )
+endif()
+
+# -----------------------------
+# MCP (Model Context Protocol) Library
+# -----------------------------
+
+if (FA_BUILD_MCP)
+    message(STATUS "Building MCP library")
+
+    # MCP sources
+    set(MCP_SOURCES
+        src/cpp/mcp/protocol/message.cpp
+        src/cpp/mcp/protocol/session.cpp
+        src/cpp/mcp/transports/stdio_transport.cpp
+        src/cpp/mcp/server/mcp_server.cpp
+        src/cpp/mcp/security/auth.cpp
+        src/cpp/mcp/security/rate_limit.cpp
+        src/cpp/mcp/security/sandbox.cpp
+        src/cpp/mcp/proxy/proxy_core.cpp
+        src/cpp/mcp/proxy/upstream_connection.cpp
+        src/cpp/mcp/mcp_lib.cpp
+    )
+
+    set(MCP_HEADERS
+        src/cpp/mcp/protocol/message.h
+        src/cpp/mcp/protocol/session.h
+        src/cpp/mcp/transports/transport.h
+        src/cpp/mcp/transports/stdio_transport.h
+        src/cpp/mcp/server/mcp_server.h
+        src/cpp/mcp/client/mcp_client.h
+        src/cpp/mcp/security/auth.h
+        src/cpp/mcp/security/rate_limit.h
+        src/cpp/mcp/security/sandbox.h
+        src/cpp/mcp/proxy/proxy_core.h
+        src/cpp/mcp/proxy/upstream_connection.h
+    )
+
+    # Build shared library
+    add_library(fasterapi_mcp SHARED ${MCP_SOURCES})
+
+    target_include_directories(fasterapi_mcp
+        PUBLIC ${CMAKE_SOURCE_DIR}/src/cpp
+        PRIVATE ${CMAKE_SOURCE_DIR}
+    )
+
+    # Link OpenSSL for JWT/OAuth (required for security features)
+    if (OPENSSL_FOUND)
+        target_link_libraries(fasterapi_mcp PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    else()
+        message(WARNING "OpenSSL not found - JWT authentication will be disabled")
+    endif()
+
+    set_target_properties(fasterapi_mcp PROPERTIES
+        OUTPUT_NAME "fasterapi_mcp"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/fasterapi/_native"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/fasterapi/_native"
+    )
+
+    # Install library
+    install(TARGETS fasterapi_mcp
+        LIBRARY DESTINATION fasterapi/_native
+        RUNTIME DESTINATION fasterapi/_native
+    )
+
+    message(STATUS "MCP library will be built at: ${CMAKE_SOURCE_DIR}/fasterapi/_native/libfasterapi_mcp.${LIB_EXTENSION}")
+
+    # MCP unit tests
+    add_executable(test_mcp_protocol tests/test_mcp_protocol.cpp)
+    target_include_directories(test_mcp_protocol PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(test_mcp_protocol PRIVATE fasterapi_mcp)
+    set_target_properties(test_mcp_protocol PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+    )
+
+    add_executable(test_mcp_transport tests/test_mcp_transport.cpp)
+    target_include_directories(test_mcp_transport PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(test_mcp_transport PRIVATE fasterapi_mcp)
+    set_target_properties(test_mcp_transport PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+    )
+
+    message(STATUS "MCP tests will be built at: ${CMAKE_BINARY_DIR}/tests/test_mcp_*")
 endif()

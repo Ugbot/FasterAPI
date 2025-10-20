@@ -1,0 +1,36 @@
+# Include documentation
+include README.md
+include LICENSE
+include CONTRIBUTING.md
+
+# Include CMake files
+include CMakeLists.txt
+recursive-include cmake *.cmake
+recursive-include src/cpp *.h *.cpp
+
+# Include Cython source files
+recursive-include fasterapi/mcp *.pyx *.pxd
+
+# Include examples
+recursive-include examples *.py
+
+# Include documentation
+recursive-include docs *.md
+
+# Exclude build artifacts
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude __pycache__
+global-exclude *.so
+global-exclude *.dylib
+global-exclude *.dll
+global-exclude *.a
+global-exclude *.lib
+global-exclude .DS_Store
+global-exclude *.swp
+
+# Exclude tests and benchmarks from distribution
+prune tests
+prune benchmarks
+prune build
+prune .git
