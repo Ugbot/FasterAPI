@@ -1,0 +1,3 @@
+/Users/bengamble/FasterAPI/build/_deps/libuv-subbuild/CMakeFiles/libuv-populate.dir
+/Users/bengamble/FasterAPI/build/_deps/libuv-subbuild/CMakeFiles/edit_cache.dir
+/Users/bengamble/FasterAPI/build/_deps/libuv-subbuild/CMakeFiles/rebuild_cache.dir

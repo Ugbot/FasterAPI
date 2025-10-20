@@ -1,0 +1,3 @@
+[submodule "benchmarks/1mrc/official"]
+	path = benchmarks/1mrc/official
+	url = https://github.com/Kavishankarks/1mrc.git

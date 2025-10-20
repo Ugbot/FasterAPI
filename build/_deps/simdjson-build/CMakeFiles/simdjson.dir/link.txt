@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -mcpu=native -flto -fno-exceptions -fno-rtti -arch arm64 -dynamiclib -Wl,-headerpad_max_install_names -compatibility_version 23.0.0 -current_version 23.0.0 -o libsimdjson.23.0.0.dylib -install_name @rpath/libsimdjson.23.dylib CMakeFiles/simdjson.dir/src/simdjson.cpp.o

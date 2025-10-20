@@ -1,0 +1,20 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/bengamble/FasterAPI/build/cmake_install.cmake",
+		"/Users/bengamble/FasterAPI/build/_deps/mimalloc-build/cmake_install.cmake",
+		"/Users/bengamble/FasterAPI/build/_deps/libuv-build/cmake_install.cmake",
+		"/Users/bengamble/FasterAPI/build/_deps/simdjson-build/cmake_install.cmake",
+		"/Users/bengamble/FasterAPI/build/_deps/nghttp2-build/cmake_install.cmake",
+		"/Users/bengamble/FasterAPI/build/_deps/nghttp2-build/lib/cmake_install.cmake",
+		"/Users/bengamble/FasterAPI/build/_deps/nghttp2-build/lib/includes/cmake_install.cmake",
+		"/Users/bengamble/FasterAPI/build/_deps/nghttp2-build/third-party/cmake_install.cmake",
+		"/Users/bengamble/FasterAPI/build/_deps/nghttp2-build/src/cmake_install.cmake",
+		"/Users/bengamble/FasterAPI/build/_deps/nghttp2-build/examples/cmake_install.cmake",
+		"/Users/bengamble/FasterAPI/build/_deps/nghttp2-build/doc/cmake_install.cmake",
+		"/Users/bengamble/FasterAPI/build/_deps/nghttp2-build/contrib/cmake_install.cmake",
+		"/Users/bengamble/FasterAPI/build/_deps/nghttp2-build/script/cmake_install.cmake",
+		"/Users/bengamble/FasterAPI/build/_deps/nghttp2-build/bpf/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

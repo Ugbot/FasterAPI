@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/bengamble/FasterAPI/build/_deps/nghttp2-subbuild/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

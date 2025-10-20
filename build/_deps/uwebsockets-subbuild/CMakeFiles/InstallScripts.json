@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/bengamble/FasterAPI/build/_deps/uwebsockets-subbuild/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

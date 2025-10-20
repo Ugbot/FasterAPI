@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/uwebsockets-subbuild/CMakeFiles/uwebsockets-populate"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/uwebsockets-subbuild/CMakeFiles/uwebsockets-populate.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/uwebsockets-subbuild/CMakeFiles/uwebsockets-populate-complete.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/uwebsockets-subbuild/uwebsockets-populate-prefix/src/uwebsockets-populate-stamp/uwebsockets-populate-build.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/uwebsockets-subbuild/uwebsockets-populate-prefix/src/uwebsockets-populate-stamp/uwebsockets-populate-configure.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/uwebsockets-subbuild/uwebsockets-populate-prefix/src/uwebsockets-populate-stamp/uwebsockets-populate-download.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/uwebsockets-subbuild/uwebsockets-populate-prefix/src/uwebsockets-populate-stamp/uwebsockets-populate-install.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/uwebsockets-subbuild/uwebsockets-populate-prefix/src/uwebsockets-populate-stamp/uwebsockets-populate-mkdir.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/uwebsockets-subbuild/uwebsockets-populate-prefix/src/uwebsockets-populate-stamp/uwebsockets-populate-patch.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/uwebsockets-subbuild/uwebsockets-populate-prefix/src/uwebsockets-populate-stamp/uwebsockets-populate-test.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/uwebsockets-subbuild/uwebsockets-populate-prefix/src/uwebsockets-populate-stamp/uwebsockets-populate-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"uwebsockets-populate"
+		],
+		"name" : "uwebsockets-populate"
+	}
+}

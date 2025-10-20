@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/libuv-subbuild/CMakeFiles/libuv-populate"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/libuv-subbuild/CMakeFiles/libuv-populate.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/libuv-subbuild/CMakeFiles/libuv-populate-complete.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/libuv-subbuild/libuv-populate-prefix/src/libuv-populate-stamp/libuv-populate-build.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/libuv-subbuild/libuv-populate-prefix/src/libuv-populate-stamp/libuv-populate-configure.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/libuv-subbuild/libuv-populate-prefix/src/libuv-populate-stamp/libuv-populate-download.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/libuv-subbuild/libuv-populate-prefix/src/libuv-populate-stamp/libuv-populate-install.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/libuv-subbuild/libuv-populate-prefix/src/libuv-populate-stamp/libuv-populate-mkdir.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/libuv-subbuild/libuv-populate-prefix/src/libuv-populate-stamp/libuv-populate-patch.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/libuv-subbuild/libuv-populate-prefix/src/libuv-populate-stamp/libuv-populate-test.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/libuv-subbuild/libuv-populate-prefix/src/libuv-populate-stamp/libuv-populate-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"libuv-populate"
+		],
+		"name" : "libuv-populate"
+	}
+}

@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/nghttp2-subbuild/CMakeFiles/nghttp2-populate"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/nghttp2-subbuild/CMakeFiles/nghttp2-populate.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/nghttp2-subbuild/CMakeFiles/nghttp2-populate-complete.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/nghttp2-subbuild/nghttp2-populate-prefix/src/nghttp2-populate-stamp/nghttp2-populate-build.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/nghttp2-subbuild/nghttp2-populate-prefix/src/nghttp2-populate-stamp/nghttp2-populate-configure.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/nghttp2-subbuild/nghttp2-populate-prefix/src/nghttp2-populate-stamp/nghttp2-populate-download.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/nghttp2-subbuild/nghttp2-populate-prefix/src/nghttp2-populate-stamp/nghttp2-populate-install.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/nghttp2-subbuild/nghttp2-populate-prefix/src/nghttp2-populate-stamp/nghttp2-populate-mkdir.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/nghttp2-subbuild/nghttp2-populate-prefix/src/nghttp2-populate-stamp/nghttp2-populate-patch.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/nghttp2-subbuild/nghttp2-populate-prefix/src/nghttp2-populate-stamp/nghttp2-populate-test.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/nghttp2-subbuild/nghttp2-populate-prefix/src/nghttp2-populate-stamp/nghttp2-populate-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"nghttp2-populate"
+		],
+		"name" : "nghttp2-populate"
+	}
+}

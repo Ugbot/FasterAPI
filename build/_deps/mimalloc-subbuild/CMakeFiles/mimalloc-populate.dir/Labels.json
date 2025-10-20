@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/mimalloc-subbuild/CMakeFiles/mimalloc-populate"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/mimalloc-subbuild/CMakeFiles/mimalloc-populate.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/mimalloc-subbuild/CMakeFiles/mimalloc-populate-complete.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/mimalloc-subbuild/mimalloc-populate-prefix/src/mimalloc-populate-stamp/mimalloc-populate-build.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/mimalloc-subbuild/mimalloc-populate-prefix/src/mimalloc-populate-stamp/mimalloc-populate-configure.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/mimalloc-subbuild/mimalloc-populate-prefix/src/mimalloc-populate-stamp/mimalloc-populate-download.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/mimalloc-subbuild/mimalloc-populate-prefix/src/mimalloc-populate-stamp/mimalloc-populate-install.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/mimalloc-subbuild/mimalloc-populate-prefix/src/mimalloc-populate-stamp/mimalloc-populate-mkdir.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/mimalloc-subbuild/mimalloc-populate-prefix/src/mimalloc-populate-stamp/mimalloc-populate-patch.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/mimalloc-subbuild/mimalloc-populate-prefix/src/mimalloc-populate-stamp/mimalloc-populate-test.rule"
+		},
+		{
+			"file" : "/Users/bengamble/FasterAPI/build/_deps/mimalloc-subbuild/mimalloc-populate-prefix/src/mimalloc-populate-stamp/mimalloc-populate-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"mimalloc-populate"
+		],
+		"name" : "mimalloc-populate"
+	}
+}
