@@ -187,15 +187,31 @@ public:
      * Default constructor.
      */
     HttpRequest() noexcept;
-    
+
     /**
      * Constructor for uWebSockets integration.
-     * 
+     *
      * @param req uWebSockets request object
      */
 #ifdef FA_USE_UWEBSOCKETS
     HttpRequest(const uWS::HttpRequest* req) noexcept;
 #endif
+
+    /**
+     * Create HttpRequest from parsed data (for CoroIO integration).
+     *
+     * @param method HTTP method string
+     * @param path Request path
+     * @param headers Map of headers
+     * @param body Request body
+     * @return Populated HttpRequest object
+     */
+    static HttpRequest from_parsed_data(
+        const std::string& method,
+        const std::string& path,
+        const std::unordered_map<std::string, std::string>& headers,
+        const std::string& body
+    ) noexcept;
 
 private:
     Method method_;

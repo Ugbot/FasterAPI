@@ -1,5 +1,6 @@
 #include "response.h"
 #include <cstring>
+#include <algorithm>
 
 // uWebSockets integration disabled for now
 
@@ -172,4 +173,73 @@ std::string HttpResponse::get_status_text(Status status) const noexcept {
         case Status::SERVICE_UNAVAILABLE: return "Service Unavailable";
         default: return "Unknown";
     }
+}
+
+std::string HttpResponse::to_http_wire_format(bool keep_alive) const noexcept {
+    std::string response;
+    response.reserve(512 + body_.size() + binary_body_.size());
+
+    // Status line: "HTTP/1.1 200 OK\r\n"
+    response += "HTTP/1.1 ";
+    response += std::to_string(static_cast<int>(status_));
+    response += " ";
+    response += get_status_text(status_);
+    response += "\r\n";
+
+    // Content-Type header (if set or inferred from type)
+    std::string content_type = content_type_;
+    if (content_type.empty()) {
+        auto ct_it = headers_.find("content-type");
+        if (ct_it != headers_.end()) {
+            content_type = ct_it->second;
+        }
+    }
+    if (!content_type.empty()) {
+        response += "Content-Type: ";
+        response += content_type;
+        response += "\r\n";
+    }
+
+    // Content-Length header
+    size_t content_length = !binary_body_.empty() ? binary_body_.size() : body_.size();
+    response += "Content-Length: ";
+    response += std::to_string(content_length);
+    response += "\r\n";
+
+    // Connection header
+    response += "Connection: ";
+    response += keep_alive ? "keep-alive" : "close";
+    response += "\r\n";
+
+    // Additional headers (skip content-type and content-length if already set)
+    for (const auto& [name, value] : headers_) {
+        // Case-insensitive comparison for content-type and content-length
+        std::string name_lower = name;
+        std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), ::tolower);
+        if (name_lower != "content-type" && name_lower != "content-length" && name_lower != "connection") {
+            response += name;
+            response += ": ";
+            response += value;
+            response += "\r\n";
+        }
+    }
+
+    // Cookies
+    for (const auto& cookie : cookies_) {
+        response += "Set-Cookie: ";
+        response += cookie;
+        response += "\r\n";
+    }
+
+    // End of headers
+    response += "\r\n";
+
+    // Body
+    if (!binary_body_.empty()) {
+        response.append(reinterpret_cast<const char*>(binary_body_.data()), binary_body_.size());
+    } else {
+        response += body_;
+    }
+
+    return response;
 }

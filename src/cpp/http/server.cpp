@@ -2,6 +2,7 @@
 #include "request.h"
 #include "response.h"
 #include "router.h"
+#include "http1_coroio_handler.h"
 #include <thread>
 #include <chrono>
 #include <algorithm>
@@ -13,28 +14,6 @@
 #include <functional>
 
 using namespace fasterapi::http;
-
-// uWebSockets integration disabled for now
-
-// Forward declarations for protocol handlers
-class Http1Handler {
-public:
-    Http1Handler(HttpServer* server) : server_(server) {}
-    
-    int start(uint16_t port, const std::string& host) {
-        std::cout << "HTTP/1.1 server starting on " << host << ":" << port << std::endl;
-        
-        // Simulate server running
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-        
-        std::cout << "HTTP/1.1 server listening on port " << port << std::endl;
-        
-        return 0;
-    }
-    
-private:
-    HttpServer* server_;
-};
 
 class Http2Handler {
 public:
@@ -92,7 +71,7 @@ HttpServer::HttpServer(const Config& config)
     : config_(config), num_cores_(std::thread::hardware_concurrency()) {
     
     // Initialize protocol handlers
-    h1_handler_ = std::make_unique<Http1Handler>(this);
+    h1_handler_ = std::make_unique<Http1CoroioHandler>(this);
     h2_handler_ = std::make_unique<Http2Handler>(this);
     h3_handler_ = std::make_unique<Http3Handler>(this);
     compression_handler_ = std::make_unique<CompressionHandler>(config);
@@ -222,6 +201,11 @@ bool HttpServer::is_running() const noexcept {
     return running_.load();
 }
 
+const std::unordered_map<std::string, std::unordered_map<std::string, HttpServer::RouteHandler>>&
+HttpServer::get_routes() const noexcept {
+    return routes_;
+}
+
 HttpServer::Stats HttpServer::get_stats() const noexcept {
     Stats stats;
     stats.total_requests = request_count_.load();
@@ -241,13 +225,16 @@ int HttpServer::start_h1_server() noexcept {
     if (!h1_handler_) {
         return 1;
     }
-    
-    // Start HTTP/1.1 server in a separate thread
-    server_threads_.emplace_back([this]() {
-        h1_handler_->start(config_.port, config_.host);
-    });
-    
-    return 0;
+
+    // Start HTTP/1.1 multi-threaded server with EventLoopPool
+    // Linux: Each worker uses SO_REUSEPORT for kernel-level load balancing
+    // Non-Linux: Acceptor thread + lockfree queue distribution
+    return h1_handler_->start(
+        config_.port,
+        config_.host,
+        config_.num_worker_threads,
+        config_.worker_queue_size
+    );
 }
 
 int HttpServer::start_h2_server() noexcept {

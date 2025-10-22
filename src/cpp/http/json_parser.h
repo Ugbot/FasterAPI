@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <memory>
 #include <cstdint>
+#include <atomic>
 
 // Forward declarations for simdjson
 struct simdjson_parser;

@@ -18,6 +18,7 @@ namespace fasterapi {
 namespace http {
     class Router;
     class RouteParams;
+    class Http1CoroioHandler;
 }
 }
 
@@ -36,23 +37,27 @@ class HttpServer {
 public:
     // Server configuration
     struct Config {
-        uint16_t port = 8000;
+        uint16_t port = 8070;
         std::string host = "0.0.0.0";
         bool enable_h1 = true;
         bool enable_h2 = false;
         bool enable_h3 = false;
         bool enable_compression = true;
         bool enable_websocket = true;
-        
+
         // TLS configuration
         std::string cert_path;
         std::string key_path;
-        
+
         // Performance settings
         uint32_t max_connections = 10000;
         uint32_t max_request_size = 16 * 1024 * 1024;  // 16MB
         uint32_t compression_threshold = 1024;  // 1KB
         uint32_t compression_level = 3;  // zstd level
+
+        // Multi-threading configuration (HTTP/1.1 with CoroIO)
+        uint16_t num_worker_threads = 0;  // 0 = auto (hardware_concurrency - 2)
+        size_t worker_queue_size = 1024;   // Per-worker queue size (non-Linux platforms)
     };
 
     // Route handler function type
@@ -111,14 +116,21 @@ public:
 
     /**
      * Check if server is running.
-     * 
+     *
      * @return true if running, false otherwise
      */
     bool is_running() const noexcept;
 
     /**
+     * Get registered routes map (for handler lookup).
+     *
+     * @return Reference to routes map (method -> path -> handler)
+     */
+    const std::unordered_map<std::string, std::unordered_map<std::string, RouteHandler>>& get_routes() const noexcept;
+
+    /**
      * Get server statistics.
-     * 
+     *
      * @return Statistics structure
      */
     struct Stats {
@@ -166,7 +178,7 @@ private:
     uint32_t num_cores_;
     
     // Protocol handlers
-    std::unique_ptr<class Http1Handler> h1_handler_;
+    std::unique_ptr<fasterapi::http::Http1CoroioHandler> h1_handler_;
     std::unique_ptr<class Http2Handler> h2_handler_;
     std::unique_ptr<class Http3Handler> h3_handler_;
     std::unique_ptr<class CompressionHandler> compression_handler_;

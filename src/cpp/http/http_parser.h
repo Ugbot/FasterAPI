@@ -6,6 +6,7 @@
 #include <memory>
 #include <cstdint>
 #include <functional>
+#include <atomic>
 
 // Forward declarations for llhttp
 struct llhttp_t;

@@ -1,3 +1,0 @@
-/Users/bengamble/FasterAPI/build/_deps/uwebsockets-subbuild/CMakeFiles/uwebsockets-populate.dir
-/Users/bengamble/FasterAPI/build/_deps/uwebsockets-subbuild/CMakeFiles/edit_cache.dir
-/Users/bengamble/FasterAPI/build/_deps/uwebsockets-subbuild/CMakeFiles/rebuild_cache.dir

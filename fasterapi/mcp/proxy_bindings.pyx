@@ -169,16 +169,21 @@ cdef class ProxyBindings:
                 args_bytes.append(arg_bytes)  # Keep reference
                 argv[i] = arg_bytes
 
+        # Prepare nullable C strings
+        cdef const char* command_ptr = command_bytes if command else NULL
+        cdef const char* url_ptr = url_bytes if url else NULL
+        cdef const char* auth_ptr = auth_bytes if auth_token else NULL
+
         try:
             result = mcp_proxy_add_upstream(
                 self.handle,
                 name_bytes,
                 transport_bytes,
-                command_bytes if command else NULL,
+                command_ptr,
                 argc,
                 argv,
-                url_bytes if url else NULL,
-                auth_bytes if auth_token else NULL,
+                url_ptr,
+                auth_ptr,
                 max_connections,
                 connect_timeout_ms,
                 request_timeout_ms,
@@ -207,11 +212,14 @@ cdef class ProxyBindings:
     ):
         """Add routing rule"""
         cdef bytes upstream_bytes = upstream_name.encode('utf-8')
-        cdef bytes tool_bytes = tool_pattern.encode('utf-8')
-        cdef bytes resource_bytes = resource_pattern.encode('utf-8')
-        cdef bytes prompt_bytes = prompt_pattern.encode('utf-8')
+        cdef bytes tool_bytes = tool_pattern.encode('utf-8') if tool_pattern else b''
+        cdef bytes resource_bytes = resource_pattern.encode('utf-8') if resource_pattern else b''
+        cdef bytes prompt_bytes = prompt_pattern.encode('utf-8') if prompt_pattern else b''
         cdef bytes scope_bytes
         cdef const char* scope_ptr = NULL
+        cdef const char* tool_ptr = tool_bytes if tool_pattern else NULL
+        cdef const char* resource_ptr = resource_bytes if resource_pattern else NULL
+        cdef const char* prompt_ptr = prompt_bytes if prompt_pattern else NULL
 
         if required_scope:
             scope_bytes = required_scope.encode('utf-8')
@@ -220,9 +228,9 @@ cdef class ProxyBindings:
         result = mcp_proxy_add_route(
             self.handle,
             upstream_bytes,
-            tool_bytes if tool_pattern else NULL,
-            resource_bytes if resource_pattern else NULL,
-            prompt_bytes if prompt_pattern else NULL,
+            tool_ptr,
+            resource_ptr,
+            prompt_ptr,
             enable_request_transform,
             enable_response_transform,
             scope_ptr,
@@ -235,13 +243,14 @@ cdef class ProxyBindings:
     def handle_request(self, str request_json, str auth_header=""):
         """Handle MCP request through proxy"""
         cdef bytes request_bytes = request_json.encode('utf-8')
-        cdef bytes auth_bytes = auth_header.encode('utf-8')
+        cdef bytes auth_bytes = auth_header.encode('utf-8') if auth_header else b''
+        cdef const char* auth_ptr = auth_bytes if auth_header else NULL
         cdef char response_buffer[65536]  # 64KB buffer
 
         result = mcp_proxy_handle_request(
             self.handle,
             request_bytes,
-            auth_bytes if auth_header else NULL,
+            auth_ptr,
             response_buffer,
             sizeof(response_buffer)
         )

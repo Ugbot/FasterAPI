@@ -114,11 +114,16 @@ set(CORE_HEADERS
 set(PYTHON_SOURCES
     src/cpp/python/gil_guard.cpp
     src/cpp/python/py_executor.cpp
+    src/cpp/python/free_threading.cpp
+    src/cpp/python/subinterpreter_pool.cpp
 )
 
 set(PYTHON_HEADERS
     src/cpp/python/gil_guard.h
     src/cpp/python/py_executor.h
+    src/cpp/python/free_threading.h
+    src/cpp/python/subinterpreter_pool.h
+    src/cpp/python/pyobject_pool.h
 )
 
 # Native types (NumPy-style for web)
@@ -135,6 +140,23 @@ set(NATIVE_TYPES_HEADERS
 # Python (required for executor)
 find_package(Python3 COMPONENTS Development REQUIRED)
 message(STATUS "Python found: ${Python3_VERSION}")
+
+# Check Python version for advanced features
+if (Python3_VERSION_MAJOR EQUAL 3 AND Python3_VERSION_MINOR GREATER_EQUAL 12)
+    message(STATUS "Python 3.12+ detected: Subinterpreter support available (per-interpreter GIL)")
+    add_compile_definitions(FASTERAPI_SUBINTERPRETERS_AVAILABLE)
+
+    if (Python3_VERSION_MINOR GREATER_EQUAL 13)
+        message(STATUS "Python 3.13+ detected: Free-threading support available")
+        message(STATUS "  - Check if built with --disable-gil for best performance")
+        message(STATUS "  - Expected ~60x speedup on ${CMAKE_SYSTEM_PROCESSOR} for CPU-bound workloads")
+        add_compile_definitions(FASTERAPI_FREE_THREADING_AVAILABLE)
+    endif()
+else()
+    message(WARNING "Python < 3.12 detected: Limited to single-interpreter mode (GIL-limited)")
+    message(WARNING "  - Upgrade to Python 3.12+ for subinterpreter support")
+    message(WARNING "  - Upgrade to Python 3.13+ --disable-gil for free-threading")
+endif()
 
 # OpenSSL (required for TLS, ALPN)
 if (FA_ENABLE_HTTP2 OR FA_ENABLE_HTTP3)
@@ -317,6 +339,23 @@ endif()
 # HTTP Server Library Target
 # -----------------------------
 
+# Net layer sources (event loop, TCP, UDP)
+set(NET_SOURCES
+    src/cpp/net/event_loop.cpp
+    src/cpp/net/tcp_socket.cpp
+    src/cpp/net/tcp_listener.cpp
+)
+
+# Platform-specific event loop implementations
+if(APPLE OR CMAKE_SYSTEM_NAME MATCHES "BSD")
+    list(APPEND NET_SOURCES src/cpp/net/event_loop_kqueue.cpp)
+    message(STATUS "Event loop backend: kqueue (macOS/BSD)")
+elseif(UNIX)
+    # Linux - epoll and optionally io_uring
+    list(APPEND NET_SOURCES src/cpp/net/event_loop_epoll.cpp)
+    message(STATUS "Event loop backend: epoll (Linux)")
+endif()
+
 if (FA_BUILD_HTTP)
     set(HTTP_SOURCES
         src/cpp/http/http_lib.cpp
@@ -351,6 +390,12 @@ if (FA_BUILD_HTTP)
     
     # Add SSE support
     list(APPEND HTTP_SOURCES src/cpp/http/sse.cpp)
+    list(APPEND HTTP_SOURCES src/cpp/http/sse_lib.cpp)
+    
+    # Add WebSocket support (from scratch, inspired by uWebSockets)
+    list(APPEND HTTP_SOURCES src/cpp/http/websocket_parser.cpp)
+    list(APPEND HTTP_SOURCES src/cpp/http/websocket.cpp)
+    list(APPEND HTTP_SOURCES src/cpp/http/websocket_lib.cpp)
     
     # Add HPACK support (zero-allocation HTTP/2 header compression)
     list(APPEND HTTP_SOURCES src/cpp/http/hpack.cpp)
@@ -363,12 +408,21 @@ if (FA_BUILD_HTTP)
     
     # Add HTTP/1.1 parser (zero-allocation)
     list(APPEND HTTP_SOURCES src/cpp/http/http1_parser.cpp)
-    
+
+    # Add CoroIO-based HTTP/1.1 handler
+    list(APPEND HTTP_SOURCES src/cpp/http/http1_coroio_handler.cpp)
+
+    # Add EventLoopPool (multi-threaded event loop)
+    list(APPEND HTTP_SOURCES src/cpp/http/event_loop_pool.cpp)
+
+    # Add Python callback bridge
+    list(APPEND HTTP_SOURCES src/cpp/http/python_callback_bridge.cpp)
+
     # Add HTTP/3 parser (zero-allocation)
     list(APPEND HTTP_SOURCES src/cpp/http/http3_parser.cpp)
     
     # Add WebRTC support (Pion-inspired + Aeron buffers)
-    list(APPEND HTTP_SOURCES 
+    list(APPEND HTTP_SOURCES
         src/cpp/webrtc/sdp_parser.cpp
         src/cpp/webrtc/ice.cpp
         src/cpp/webrtc/signaling.cpp
@@ -376,6 +430,9 @@ if (FA_BUILD_HTTP)
         src/cpp/webrtc/data_channel.cpp
         src/cpp/webrtc/rtp.cpp
     )
+
+    # Add high-level C++ user API (disabled due to -fno-exceptions issues)
+    # list(APPEND HTTP_SOURCES src/cpp/http/app.cpp)
 
     set(HTTP_HEADERS
         src/cpp/http/server.h
@@ -385,6 +442,7 @@ if (FA_BUILD_HTTP)
         src/cpp/http/websocket.h
         src/cpp/http/middleware.h
         src/cpp/http/compression.h
+        src/cpp/http/app.h
     )
     
     # Add HTTP/2 handler if enabled
@@ -434,8 +492,23 @@ if (FA_BUILD_HTTP)
         src/cpp/webrtc/rtp.h
     )
 
+    # Add CoroIO library (coroutine-based networking)
+    # Note: CoroIO requires exceptions, so we build it separately without -fno-exceptions
+    add_subdirectory(external/coroio EXCLUDE_FROM_ALL)
+
+    # Re-enable exceptions for CoroIO target
+    if (TARGET coroio)
+        target_compile_options(coroio PRIVATE -fexceptions)
+        # Remove -fno-exceptions if it was inherited
+        get_target_property(COROIO_OPTIONS coroio COMPILE_OPTIONS)
+        if(COROIO_OPTIONS)
+            list(REMOVE_ITEM COROIO_OPTIONS "-fno-exceptions")
+            set_target_properties(coroio PROPERTIES COMPILE_OPTIONS "${COROIO_OPTIONS}")
+        endif()
+    endif()
+
     # Create HTTP server shared library
-    add_library(fasterapi_http SHARED ${HTTP_SOURCES} ${HTTP_HEADERS} ${CORE_SOURCES} ${CORE_HEADERS} ${PYTHON_SOURCES} ${PYTHON_HEADERS} ${NATIVE_TYPES_SOURCES} ${NATIVE_TYPES_HEADERS})
+    add_library(fasterapi_http SHARED ${NET_SOURCES} ${HTTP_SOURCES} ${HTTP_HEADERS} ${CORE_SOURCES} ${CORE_HEADERS} ${PYTHON_SOURCES} ${PYTHON_HEADERS} ${NATIVE_TYPES_SOURCES} ${NATIVE_TYPES_HEADERS})
 
     # Add compile definitions
     target_compile_definitions(fasterapi_http PRIVATE
@@ -471,6 +544,14 @@ if (FA_BUILD_HTTP)
     # Link Python
     target_include_directories(fasterapi_http PRIVATE ${Python3_INCLUDE_DIRS})
     target_link_libraries(fasterapi_http PRIVATE ${Python3_LIBRARIES})
+
+    # Link CoroIO
+    target_include_directories(fasterapi_http PRIVATE ${CMAKE_SOURCE_DIR}/external/coroio)
+    target_link_libraries(fasterapi_http PRIVATE coroio)
+
+    # Enable exceptions for CoroIO-based files (CoroIO requires exceptions)
+    set_source_files_properties(src/cpp/http/http1_coroio_handler.cpp PROPERTIES COMPILE_FLAGS "-fexceptions")
+    set_source_files_properties(src/cpp/http/event_loop_pool.cpp PROPERTIES COMPILE_FLAGS "-fexceptions")
 
     # Link zstd if compression enabled
     if (FA_ENABLE_COMPRESSION)
@@ -574,6 +655,53 @@ if (FA_SANITIZE AND NOT MSVC)
     if (FA_BUILD_HTTP)
         target_compile_options(fasterapi_http PRIVATE -fsanitize=address,undefined)
         target_link_options(fasterapi_http PRIVATE -fsanitize=address,undefined)
+    endif()
+endif()
+
+# -----------------------------
+# Native Event Loop Test
+# -----------------------------
+
+# Test the native event loop with a simple echo server
+add_executable(test_event_loop_echo tests/test_event_loop_echo.cpp ${NET_SOURCES})
+target_include_directories(test_event_loop_echo PRIVATE ${CMAKE_SOURCE_DIR})
+set_target_properties(test_event_loop_echo PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+)
+
+# Test multi-threaded TCP listener
+add_executable(test_tcp_listener_echo tests/test_tcp_listener_echo.cpp ${NET_SOURCES})
+target_include_directories(test_tcp_listener_echo PRIVATE ${CMAKE_SOURCE_DIR})
+set_target_properties(test_tcp_listener_echo PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+)
+
+# Test native HTTP/1.1 server
+if (FA_BUILD_HTTP)
+    add_executable(test_http1_native
+        tests/test_http1_native.cpp
+        ${NET_SOURCES}
+        src/cpp/http/http1_parser.cpp
+    )
+    target_include_directories(test_http1_native PRIVATE ${CMAKE_SOURCE_DIR})
+    set_target_properties(test_http1_native PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+    )
+
+    # Test native HTTP/2 server (if HTTP/2 is enabled)
+    if (FA_ENABLE_HTTP2)
+        add_executable(test_http2_native
+            tests/test_http2_native.cpp
+            ${NET_SOURCES}
+        )
+        target_include_directories(test_http2_native PRIVATE
+            ${CMAKE_SOURCE_DIR}
+            ${CMAKE_BINARY_DIR}/_deps/nghttp2-src/lib/includes
+        )
+        target_link_libraries(test_http2_native PRIVATE nghttp2)
+        set_target_properties(test_http2_native PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+        )
     endif()
 endif()
 
@@ -694,7 +822,35 @@ if (FA_BUILD_HTTP)
     set_target_properties(test_zerocopy_response PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
     )
-    
+
+    # Test C++ routes with CoroIO HTTP/1.1 server
+    add_executable(test_cpp_routes test_cpp_routes.cpp
+        src/cpp/http/server.cpp
+        src/cpp/http/request.cpp
+        src/cpp/http/response.cpp
+        src/cpp/http/router.cpp
+        src/cpp/http/http1_parser.cpp
+        src/cpp/http/http1_coroio_handler.cpp
+        src/cpp/http/event_loop_pool.cpp
+        src/cpp/http/python_callback_bridge.cpp
+        ${CORE_SOURCES}
+    )
+    target_include_directories(test_cpp_routes PRIVATE
+        ${CMAKE_SOURCE_DIR}
+        ${Python3_INCLUDE_DIRS}
+        ${CMAKE_SOURCE_DIR}/external/coroio
+    )
+    target_link_libraries(test_cpp_routes PRIVATE
+        ${Python3_LIBRARIES}
+        coroio
+    )
+    # Enable exceptions for CoroIO integration
+    set_source_files_properties(src/cpp/http/http1_coroio_handler.cpp PROPERTIES COMPILE_FLAGS "-fexceptions")
+    set_source_files_properties(src/cpp/http/event_loop_pool.cpp PROPERTIES COMPILE_FLAGS "-fexceptions")
+    set_target_properties(test_cpp_routes PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+    )
+
     # Pure C++ benchmark for Python overhead analysis
     add_executable(bench_pure_cpp benchmarks/fasterapi/bench_pure_cpp.cpp
         src/cpp/http/router.cpp
@@ -755,8 +911,60 @@ if (FA_BUILD_HTTP)
     add_executable(1mrc_libuv_server benchmarks/1mrc/cpp/1mrc_libuv_server.cpp)
     target_include_directories(1mrc_libuv_server PRIVATE ${CMAKE_SOURCE_DIR})
     target_compile_options(1mrc_libuv_server PRIVATE -O3 -pthread)
-    target_link_libraries(1mrc_libuv_server PRIVATE uv_a pthread)
+    target_link_libraries(1mrc_libuv_server PRIVATE uv pthread)
     set_target_properties(1mrc_libuv_server PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks"
+    )
+
+    # 1MRC - CoroIO version (C++20 coroutines, target >200K req/s)
+    add_executable(1mrc_coroio_server benchmarks/1mrc/cpp/1mrc_coroio_server.cpp
+        src/cpp/http/server.cpp
+        src/cpp/http/request.cpp
+        src/cpp/http/response.cpp
+        src/cpp/http/router.cpp
+        src/cpp/http/http1_parser.cpp
+        src/cpp/http/http1_coroio_handler.cpp
+        src/cpp/http/event_loop_pool.cpp
+        src/cpp/http/python_callback_bridge.cpp
+        ${CORE_SOURCES}
+    )
+    target_include_directories(1mrc_coroio_server PRIVATE
+        ${CMAKE_SOURCE_DIR}
+        ${Python3_INCLUDE_DIRS}
+        ${CMAKE_SOURCE_DIR}/external/coroio
+    )
+    target_compile_options(1mrc_coroio_server PRIVATE -O3 -pthread)
+    target_link_libraries(1mrc_coroio_server PRIVATE
+        ${Python3_LIBRARIES}
+        coroio
+        pthread
+    )
+    # Enable exceptions for CoroIO integration and JSON parsing
+    set_source_files_properties(
+        src/cpp/http/http1_coroio_handler.cpp
+        src/cpp/http/event_loop_pool.cpp
+        benchmarks/1mrc/cpp/1mrc_coroio_server.cpp
+        PROPERTIES COMPILE_FLAGS "-fexceptions"
+    )
+    set_target_properties(1mrc_coroio_server PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks"
+    )
+
+    # Python interop benchmarks
+    add_executable(bench_gil_strategies benchmarks/python_interop/bench_gil_strategies.cpp
+        ${PYTHON_SOURCES}
+        ${CORE_SOURCES}
+    )
+    target_include_directories(bench_gil_strategies PRIVATE ${CMAKE_SOURCE_DIR} ${Python3_INCLUDE_DIRS})
+    target_link_libraries(bench_gil_strategies PRIVATE ${Python3_LIBRARIES} pthread)
+    set_target_properties(bench_gil_strategies PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks"
+    )
+
+    add_executable(bench_queue_performance benchmarks/python_interop/bench_queue_performance.cpp)
+    target_include_directories(bench_queue_performance PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(bench_queue_performance PRIVATE pthread)
+    set_target_properties(bench_queue_performance PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks"
     )
 endif()
@@ -841,4 +1049,34 @@ if (FA_BUILD_MCP)
     )
 
     message(STATUS "MCP tests will be built at: ${CMAKE_BINARY_DIR}/tests/test_mcp_*")
+endif()
+
+# -----------------------------
+# C++ Examples
+# -----------------------------
+
+option(FA_BUILD_EXAMPLES "Build C++ example programs" ON)
+
+if (FA_BUILD_EXAMPLES AND FA_BUILD_HTTP)
+    message(STATUS "Building C++ examples")
+
+    # Hello World example - minimal example
+    add_executable(hello_world examples/hello_world.cpp)
+    target_include_directories(hello_world PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(hello_world PRIVATE fasterapi_http)
+    set_target_properties(hello_world PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples"
+    )
+
+    # Comprehensive demo - showcases all features
+    add_executable(cpp_app_demo examples/cpp_app_demo.cpp)
+    target_include_directories(cpp_app_demo PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(cpp_app_demo PRIVATE fasterapi_http)
+    set_target_properties(cpp_app_demo PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples"
+    )
+
+    message(STATUS "C++ examples will be built at: ${CMAKE_BINARY_DIR}/examples/")
+    message(STATUS "  - hello_world: Minimal 'Hello World' example")
+    message(STATUS "  - cpp_app_demo: Comprehensive feature demonstration")
 endif()

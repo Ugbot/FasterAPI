@@ -21,6 +21,48 @@ HttpRequest::HttpRequest() noexcept
 
 // uWebSockets constructor disabled for now
 
+HttpRequest HttpRequest::from_parsed_data(
+    const std::string& method,
+    const std::string& path,
+    const std::unordered_map<std::string, std::string>& headers,
+    const std::string& body
+) noexcept {
+    HttpRequest req;
+
+    // Parse method string to enum
+    if (method == "GET") req.method_ = Method::GET;
+    else if (method == "POST") req.method_ = Method::POST;
+    else if (method == "PUT") req.method_ = Method::PUT;
+    else if (method == "DELETE") req.method_ = Method::DELETE;
+    else if (method == "PATCH") req.method_ = Method::PATCH;
+    else if (method == "HEAD") req.method_ = Method::HEAD;
+    else if (method == "OPTIONS") req.method_ = Method::OPTIONS;
+    else req.method_ = Method::GET;  // Default
+
+    // Set path and parse query string if present
+    size_t query_pos = path.find('?');
+    if (query_pos != std::string::npos) {
+        req.path_ = path.substr(0, query_pos);
+        req.query_ = path.substr(query_pos + 1);
+        req.parse_query_params();
+    } else {
+        req.path_ = path;
+        req.query_ = "";
+    }
+
+    // Set version
+    req.version_ = "HTTP/1.1";
+    req.protocol_ = "HTTP/1.1";
+
+    // Copy headers
+    req.headers_ = headers;
+
+    // Set body
+    req.body_ = body;
+
+    return req;
+}
+
 HttpRequest::Method HttpRequest::get_method() const noexcept {
     return method_;
 }

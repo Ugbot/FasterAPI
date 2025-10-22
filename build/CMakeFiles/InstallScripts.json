@@ -14,7 +14,13 @@
 		"/Users/bengamble/FasterAPI/build/_deps/nghttp2-build/doc/cmake_install.cmake",
 		"/Users/bengamble/FasterAPI/build/_deps/nghttp2-build/contrib/cmake_install.cmake",
 		"/Users/bengamble/FasterAPI/build/_deps/nghttp2-build/script/cmake_install.cmake",
-		"/Users/bengamble/FasterAPI/build/_deps/nghttp2-build/bpf/cmake_install.cmake"
+		"/Users/bengamble/FasterAPI/build/_deps/nghttp2-build/bpf/cmake_install.cmake",
+		"/Users/bengamble/FasterAPI/build/external/coroio/cmake_install.cmake",
+		"/Users/bengamble/FasterAPI/build/external/coroio/coroio/cmake_install.cmake",
+		"/Users/bengamble/FasterAPI/build/external/coroio/coroio/dns/cmake_install.cmake",
+		"/Users/bengamble/FasterAPI/build/external/coroio/coroio/actors/cmake_install.cmake",
+		"/Users/bengamble/FasterAPI/build/external/coroio/examples/cmake_install.cmake",
+		"/Users/bengamble/FasterAPI/build/external/coroio/tests/cmake_install.cmake"
 	],
 	"Parallel" : false
 }

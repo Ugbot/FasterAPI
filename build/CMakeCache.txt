@@ -31,10 +31,7 @@ CMAKE_AR:FILEPATH=/usr/bin/ar
 
 //Choose the type of build, options are: None Debug Release RelWithDebInfo
 // MinSizeRel ...
-CMAKE_BUILD_TYPE:STRING=Release
-
-//Enable/Disable color output during build.
-CMAKE_COLOR_MAKEFILE:BOOL=ON
+CMAKE_BUILD_TYPE:STRING=RelWithDebInfo
 
 //CXX compiler
 CMAKE_CXX_COMPILER:FILEPATH=/usr/bin/c++
@@ -89,6 +86,9 @@ CMAKE_EXE_LINKER_FLAGS_RELEASE:STRING=
 
 //Flags used by the linker during RELWITHDEBINFO builds.
 CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO:STRING=
+
+//Enable/Disable output of build database during the build.
+CMAKE_EXPORT_BUILD_DATABASE:BOOL=
 
 //Enable/Disable output of compile commands during generation.
 CMAKE_EXPORT_COMPILE_COMMANDS:BOOL=
@@ -153,8 +153,8 @@ CMAKE_INSTALL_SYSCONFDIR:PATH=etc
 //Path to a program.
 CMAKE_LINKER:FILEPATH=/usr/bin/ld
 
-//Path to a program.
-CMAKE_MAKE_PROGRAM:FILEPATH=/usr/bin/make
+//Program used to build from build.ninja files.
+CMAKE_MAKE_PROGRAM:FILEPATH=/opt/homebrew/bin/ninja
 
 //Flags used by the linker during the creation of modules during
 // all build types.
@@ -353,8 +353,14 @@ ENABLE_THREADS:BOOL=ON
 //Turn on compile time warnings
 ENABLE_WERROR:BOOL=OFF
 
+//Build C++ example programs
+FA_BUILD_EXAMPLES:BOOL=ON
+
 //Build HTTP server
 FA_BUILD_HTTP:BOOL=ON
+
+//Build MCP (Model Context Protocol) support
+FA_BUILD_MCP:BOOL=OFF
 
 //Build PostgreSQL integration
 FA_BUILD_PG:BOOL=ON
@@ -381,7 +387,7 @@ FA_USE_ASIO:BOOL=OFF
 FA_USE_LIBUV:BOOL=ON
 
 //Use uWebSockets for HTTP/1.1 and WebSocket
-FA_USE_UWEBSOCKETS:BOOL=ON
+FA_USE_UWEBSOCKETS:BOOL=OFF
 
 //Directory under which to collect all populated content
 FETCHCONTENT_BASE_DIR:PATH=/Users/bengamble/FasterAPI/build/_deps
@@ -410,10 +416,6 @@ FETCHCONTENT_SOURCE_DIR_NGHTTP2:PATH=
 FETCHCONTENT_SOURCE_DIR_SIMDJSON:PATH=
 
 //When not empty, overrides where to find pre-populated content
-// for uwebsockets
-FETCHCONTENT_SOURCE_DIR_UWEBSOCKETS:PATH=
-
-//When not empty, overrides where to find pre-populated content
 // for zstd
 FETCHCONTENT_SOURCE_DIR_ZSTD:PATH=
 
@@ -431,9 +433,6 @@ FETCHCONTENT_UPDATES_DISCONNECTED_NGHTTP2:BOOL=OFF
 
 //Enables UPDATE_DISCONNECTED behavior just for population of simdjson
 FETCHCONTENT_UPDATES_DISCONNECTED_SIMDJSON:BOOL=OFF
-
-//Enables UPDATE_DISCONNECTED behavior just for population of uwebsockets
-FETCHCONTENT_UPDATES_DISCONNECTED_UWEBSOCKETS:BOOL=OFF
 
 //Enables UPDATE_DISCONNECTED behavior just for population of zstd
 FETCHCONTENT_UPDATES_DISCONNECTED_ZSTD:BOOL=OFF
@@ -801,6 +800,15 @@ libuv_IS_TOP_LEVEL:STATIC=OFF
 libuv_SOURCE_DIR:STATIC=/Users/bengamble/FasterAPI/build/cpm-cache/libuv/0fdf53e314c00b21e3a18653959403e1fdb56ee9
 
 //Value Computed by CMake
+netlib_BINARY_DIR:STATIC=/Users/bengamble/FasterAPI/build/external/coroio
+
+//Value Computed by CMake
+netlib_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+netlib_SOURCE_DIR:STATIC=/Users/bengamble/FasterAPI/external/coroio
+
+//Value Computed by CMake
 nghttp2_BINARY_DIR:STATIC=/Users/bengamble/FasterAPI/build/_deps/nghttp2-build
 
 //Value Computed by CMake
@@ -808,6 +816,12 @@ nghttp2_IS_TOP_LEVEL:STATIC=OFF
 
 //Value Computed by CMake
 nghttp2_SOURCE_DIR:STATIC=/Users/bengamble/FasterAPI/build/cpm-cache/nghttp2/5ceb668e7b22e4a113073fa27bc3e293b452cb50
+
+//Path to a library.
+pkgcfg_lib_OPENSSL_crypto:FILEPATH=/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.dylib
+
+//Path to a library.
+pkgcfg_lib_OPENSSL_ssl:FILEPATH=/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.dylib
 
 //Path to a library.
 pkgcfg_lib_PC_JANSSON_jansson:FILEPATH=/opt/homebrew/Cellar/jansson/2.14.1/lib/libjansson.dylib
@@ -861,8 +875,6 @@ CMAKE_CACHE_MAJOR_VERSION:INTERNAL=4
 CMAKE_CACHE_MINOR_VERSION:INTERNAL=1
 //Patch version of cmake used to create the current loaded cache
 CMAKE_CACHE_PATCH_VERSION:INTERNAL=1
-//ADVANCED property for variable: CMAKE_COLOR_MAKEFILE
-CMAKE_COLOR_MAKEFILE-ADVANCED:INTERNAL=1
 //Path to CMake executable.
 CMAKE_COMMAND:INTERNAL=/opt/homebrew/bin/cmake
 //Path to cpack program executable.
@@ -899,8 +911,6 @@ CMAKE_C_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
 CMAKE_DLLTOOL-ADVANCED:INTERNAL=1
 //Path to cache edit program executable.
 CMAKE_EDIT_COMMAND:INTERNAL=/opt/homebrew/bin/ccmake
-//Whether to issue deprecation errors for macros and functions.
-CMAKE_ERROR_DEPRECATED:INTERNAL=FALSE
 //Executable file format
 CMAKE_EXECUTABLE_FORMAT:INTERNAL=MACHO
 //ADVANCED property for variable: CMAKE_EXE_LINKER_FLAGS
@@ -913,12 +923,14 @@ CMAKE_EXE_LINKER_FLAGS_MINSIZEREL-ADVANCED:INTERNAL=1
 CMAKE_EXE_LINKER_FLAGS_RELEASE-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO
 CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: CMAKE_EXPORT_BUILD_DATABASE
+CMAKE_EXPORT_BUILD_DATABASE-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_EXPORT_COMPILE_COMMANDS
 CMAKE_EXPORT_COMPILE_COMMANDS-ADVANCED:INTERNAL=1
 //Name of external makefile project generator.
 CMAKE_EXTRA_GENERATOR:INTERNAL=
 //Name of generator.
-CMAKE_GENERATOR:INTERNAL=Unix Makefiles
+CMAKE_GENERATOR:INTERNAL=Ninja
 //Generator instance identifier.
 CMAKE_GENERATOR_INSTANCE:INTERNAL=
 //Name of generator platform.
@@ -983,7 +995,7 @@ CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_NM
 CMAKE_NM-ADVANCED:INTERNAL=1
 //number of local generators
-CMAKE_NUMBER_OF_MAKEFILES:INTERNAL=14
+CMAKE_NUMBER_OF_MAKEFILES:INTERNAL=20
 //ADVANCED property for variable: CMAKE_OBJCOPY
 CMAKE_OBJCOPY-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_OBJDUMP
@@ -1022,20 +1034,37 @@ CMAKE_STATIC_LINKER_FLAGS_RELEASE-ADVANCED:INTERNAL=1
 CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_STRIP
 CMAKE_STRIP-ADVANCED:INTERNAL=1
-//Suppress errors that are meant for the author of the CMakeLists.txt
-// files.
-CMAKE_SUPPRESS_DEVELOPER_ERRORS:INTERNAL=TRUE
-//Suppress Warnings that are meant for the author of the CMakeLists.txt
-// files.
-CMAKE_SUPPRESS_DEVELOPER_WARNINGS:INTERNAL=TRUE
 //ADVANCED property for variable: CMAKE_TAPI
 CMAKE_TAPI-ADVANCED:INTERNAL=1
 //uname command
 CMAKE_UNAME:INTERNAL=/usr/bin/uname
 //ADVANCED property for variable: CMAKE_VERBOSE_MAKEFILE
 CMAKE_VERBOSE_MAKEFILE-ADVANCED:INTERNAL=1
-//Whether to issue warnings for deprecated functionality.
-CMAKE_WARN_DEPRECATED:INTERNAL=FALSE
+CMOCKA_CFLAGS:INTERNAL=
+CMOCKA_CFLAGS_I:INTERNAL=
+CMOCKA_CFLAGS_OTHER:INTERNAL=
+CMOCKA_FOUND:INTERNAL=
+CMOCKA_INCLUDEDIR:INTERNAL=
+CMOCKA_LIBDIR:INTERNAL=
+CMOCKA_LIBS:INTERNAL=
+CMOCKA_LIBS_L:INTERNAL=
+CMOCKA_LIBS_OTHER:INTERNAL=
+CMOCKA_LIBS_PATHS:INTERNAL=
+CMOCKA_MODULE_NAME:INTERNAL=
+CMOCKA_PREFIX:INTERNAL=
+CMOCKA_STATIC_CFLAGS:INTERNAL=
+CMOCKA_STATIC_CFLAGS_I:INTERNAL=
+CMOCKA_STATIC_CFLAGS_OTHER:INTERNAL=
+CMOCKA_STATIC_LIBDIR:INTERNAL=
+CMOCKA_STATIC_LIBS:INTERNAL=
+CMOCKA_STATIC_LIBS_L:INTERNAL=
+CMOCKA_STATIC_LIBS_OTHER:INTERNAL=
+CMOCKA_STATIC_LIBS_PATHS:INTERNAL=
+CMOCKA_VERSION:INTERNAL=
+CMOCKA_cmocka_INCLUDEDIR:INTERNAL=
+CMOCKA_cmocka_LIBDIR:INTERNAL=
+CMOCKA_cmocka_PREFIX:INTERNAL=
+CMOCKA_cmocka_VERSION:INTERNAL=
 //ADVANCED property for variable: COVERAGE_COMMAND
 COVERAGE_COMMAND-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: COVERAGE_EXTRA_FLAGS
@@ -1046,7 +1075,7 @@ CPM_DRY_RUN:INTERNAL=OFF
 CPM_FILE:INTERNAL=/Users/bengamble/FasterAPI/build/cmake/CPM_0.38.7.cmake
 CPM_INDENT:INTERNAL=CPM:
 CPM_MODULE_PATH:INTERNAL=/Users/bengamble/FasterAPI/build/CPM_modules
-CPM_PACKAGES:INTERNAL=mimalloc;libuv;uwebsockets;simdjson;zstd;nghttp2
+CPM_PACKAGES:INTERNAL=mimalloc;libuv;simdjson;zstd;nghttp2
 CPM_PACKAGE_LOCK_FILE:INTERNAL=/Users/bengamble/FasterAPI/build/cpm-package-lock.cmake
 CPM_PACKAGE_libuv_BINARY_DIR:INTERNAL=/Users/bengamble/FasterAPI/build/_deps/libuv-build
 CPM_PACKAGE_libuv_SOURCE_DIR:INTERNAL=/Users/bengamble/FasterAPI/build/cpm-cache/libuv/0fdf53e314c00b21e3a18653959403e1fdb56ee9
@@ -1060,9 +1089,6 @@ CPM_PACKAGE_nghttp2_VERSION:INTERNAL=1.63.0
 CPM_PACKAGE_simdjson_BINARY_DIR:INTERNAL=/Users/bengamble/FasterAPI/build/_deps/simdjson-build
 CPM_PACKAGE_simdjson_SOURCE_DIR:INTERNAL=/Users/bengamble/FasterAPI/build/cpm-cache/simdjson/e2872dae246ae21201588fe57bc477e26fdade81
 CPM_PACKAGE_simdjson_VERSION:INTERNAL=3.10.1
-CPM_PACKAGE_uwebsockets_BINARY_DIR:INTERNAL=/Users/bengamble/FasterAPI/build/_deps/uwebsockets-build
-CPM_PACKAGE_uwebsockets_SOURCE_DIR:INTERNAL=/Users/bengamble/FasterAPI/build/cpm-cache/uwebsockets/2d18d741850ab50ce1ba644223c67d92f4b33d01
-CPM_PACKAGE_uwebsockets_VERSION:INTERNAL=20.51.0
 CPM_PACKAGE_zstd_BINARY_DIR:INTERNAL=/Users/bengamble/FasterAPI/build/_deps/zstd-build
 CPM_PACKAGE_zstd_SOURCE_DIR:INTERNAL=/Users/bengamble/FasterAPI/build/cpm-cache/zstd/5375622b5fd73dea578f509561685c3376dce674
 CPM_PACKAGE_zstd_VERSION:INTERNAL=1.5.6
@@ -1085,6 +1111,8 @@ FIND_PACKAGE_MESSAGE_DETAILS_LibXml2:INTERNAL=[/Library/Developer/CommandLineToo
 FIND_PACKAGE_MESSAGE_DETAILS_Libevent:INTERNAL=[/opt/homebrew/Cellar/libevent/2.1.12_1/lib/libevent_core.dylib][/opt/homebrew/Cellar/libevent/2.1.12_1/lib/libevent_extra.dylib][/opt/homebrew/Cellar/libevent/2.1.12_1/lib/libevent_openssl.dylib][/opt/homebrew/Cellar/libevent/2.1.12_1/include][found components: core extra openssl ][v2.1.12-stable(2.0.8)]
 //Details about finding OpenSSL
 FIND_PACKAGE_MESSAGE_DETAILS_OpenSSL:INTERNAL=[/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.dylib][/opt/homebrew/Cellar/openssl@3/3.5.2/include][ ][v3.5.2(1.1.1)]
+//Details about finding PkgConfig
+FIND_PACKAGE_MESSAGE_DETAILS_PkgConfig:INTERNAL=[/opt/homebrew/bin/pkg-config][v2.4.3()]
 //Details about finding Python3
 FIND_PACKAGE_MESSAGE_DETAILS_Python3:INTERNAL=[/opt/homebrew/Frameworks/Python.framework/Versions/3.13/bin/python3.13][found components: Interpreter ][v3.13.7()]
 //Details about finding Threads
@@ -1194,12 +1222,47 @@ MAKECOMMAND-ADVANCED:INTERNAL=1
 MEMORYCHECK_COMMAND-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: MEMORYCHECK_SUPPRESSIONS_FILE
 MEMORYCHECK_SUPPRESSIONS_FILE-ADVANCED:INTERNAL=1
+OPENSSL_CFLAGS:INTERNAL=-I/opt/homebrew/Cellar/openssl@3/3.5.2/include
+OPENSSL_CFLAGS_I:INTERNAL=
+OPENSSL_CFLAGS_OTHER:INTERNAL=
 //ADVANCED property for variable: OPENSSL_CRYPTO_LIBRARY
 OPENSSL_CRYPTO_LIBRARY-ADVANCED:INTERNAL=1
+OPENSSL_FOUND:INTERNAL=1
+OPENSSL_INCLUDEDIR:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.5.2/include
 //ADVANCED property for variable: OPENSSL_INCLUDE_DIR
 OPENSSL_INCLUDE_DIR-ADVANCED:INTERNAL=1
+OPENSSL_INCLUDE_DIRS:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.5.2/include
+OPENSSL_LDFLAGS:INTERNAL=-L/opt/homebrew/Cellar/openssl@3/3.5.2/lib;-lssl;-lcrypto
+OPENSSL_LDFLAGS_OTHER:INTERNAL=
+OPENSSL_LIBDIR:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.5.2/lib
+OPENSSL_LIBRARIES:INTERNAL=ssl;crypto
+OPENSSL_LIBRARY_DIRS:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.5.2/lib
+OPENSSL_LIBS:INTERNAL=
+OPENSSL_LIBS_L:INTERNAL=
+OPENSSL_LIBS_OTHER:INTERNAL=
+OPENSSL_LIBS_PATHS:INTERNAL=
+OPENSSL_MODULE_NAME:INTERNAL=openssl
+OPENSSL_PREFIX:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.5.2
 //ADVANCED property for variable: OPENSSL_SSL_LIBRARY
 OPENSSL_SSL_LIBRARY-ADVANCED:INTERNAL=1
+OPENSSL_STATIC_CFLAGS:INTERNAL=-I/opt/homebrew/Cellar/openssl@3/3.5.2/include
+OPENSSL_STATIC_CFLAGS_I:INTERNAL=
+OPENSSL_STATIC_CFLAGS_OTHER:INTERNAL=
+OPENSSL_STATIC_INCLUDE_DIRS:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.5.2/include
+OPENSSL_STATIC_LDFLAGS:INTERNAL=-L/opt/homebrew/Cellar/openssl@3/3.5.2/lib;-lssl;-lcrypto
+OPENSSL_STATIC_LDFLAGS_OTHER:INTERNAL=
+OPENSSL_STATIC_LIBDIR:INTERNAL=
+OPENSSL_STATIC_LIBRARIES:INTERNAL=ssl;crypto
+OPENSSL_STATIC_LIBRARY_DIRS:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.5.2/lib
+OPENSSL_STATIC_LIBS:INTERNAL=
+OPENSSL_STATIC_LIBS_L:INTERNAL=
+OPENSSL_STATIC_LIBS_OTHER:INTERNAL=
+OPENSSL_STATIC_LIBS_PATHS:INTERNAL=
+OPENSSL_VERSION:INTERNAL=3.5.2
+OPENSSL_openssl_INCLUDEDIR:INTERNAL=
+OPENSSL_openssl_LIBDIR:INTERNAL=
+OPENSSL_openssl_PREFIX:INTERNAL=
+OPENSSL_openssl_VERSION:INTERNAL=
 PC_JANSSON_CFLAGS:INTERNAL=-I/opt/homebrew/Cellar/jansson/2.14.1/include
 PC_JANSSON_CFLAGS_I:INTERNAL=
 PC_JANSSON_CFLAGS_OTHER:INTERNAL=
@@ -1474,6 +1537,31 @@ SIZEOF_SSIZE_T:INTERNAL=8
 SYSTEMD_INCLUDE_DIRS-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: SYSTEMD_LIBRARIES
 SYSTEMD_LIBRARIES-ADVANCED:INTERNAL=1
+URING_CFLAGS:INTERNAL=
+URING_CFLAGS_I:INTERNAL=
+URING_CFLAGS_OTHER:INTERNAL=
+URING_FOUND:INTERNAL=
+URING_INCLUDEDIR:INTERNAL=
+URING_LIBDIR:INTERNAL=
+URING_LIBS:INTERNAL=
+URING_LIBS_L:INTERNAL=
+URING_LIBS_OTHER:INTERNAL=
+URING_LIBS_PATHS:INTERNAL=
+URING_MODULE_NAME:INTERNAL=
+URING_PREFIX:INTERNAL=
+URING_STATIC_CFLAGS:INTERNAL=
+URING_STATIC_CFLAGS_I:INTERNAL=
+URING_STATIC_CFLAGS_OTHER:INTERNAL=
+URING_STATIC_LIBDIR:INTERNAL=
+URING_STATIC_LIBS:INTERNAL=
+URING_STATIC_LIBS_L:INTERNAL=
+URING_STATIC_LIBS_OTHER:INTERNAL=
+URING_STATIC_LIBS_PATHS:INTERNAL=
+URING_VERSION:INTERNAL=
+URING_liburing_INCLUDEDIR:INTERNAL=
+URING_liburing_LIBDIR:INTERNAL=
+URING_liburing_PREFIX:INTERNAL=
+URING_liburing_VERSION:INTERNAL=
 //Test UV_F_STRICT_ALIASING
 UV_F_STRICT_ALIASING:INTERNAL=1
 //Test UV_LINT_EXTRA
@@ -1566,11 +1654,14 @@ _Python3_INTERPRETER_SIGNATURE:INTERNAL=7a1f714cc7198cb3c0d06752fabdd0bf
 _Python3_LIBRARY_RELEASE:INTERNAL=/opt/homebrew/opt/python@3.13/Frameworks/Python.framework/Versions/3.13/lib/libpython3.13.dylib
 //NumPy reason failure
 _Python3_NumPy_REASON_FAILURE:INTERNAL=
+__pkg_config_arguments_OPENSSL:INTERNAL=openssl
 __pkg_config_arguments_PC_JANSSON:INTERNAL=QUIET;jansson
 __pkg_config_arguments_PC_JEMALLOC:INTERNAL=QUIET;jemalloc
 __pkg_config_arguments_PC_LIBEVENT:INTERNAL=QUIET;libevent
 __pkg_config_arguments_PC_LIBXML:INTERNAL=QUIET;libxml-2.0
 __pkg_config_arguments__OPENSSL:INTERNAL=QUIET;openssl
+__pkg_config_checked_CMOCKA:INTERNAL=1
+__pkg_config_checked_OPENSSL:INTERNAL=1
 __pkg_config_checked_PC_JANSSON:INTERNAL=1
 __pkg_config_checked_PC_JEMALLOC:INTERNAL=1
 __pkg_config_checked_PC_LIBEVENT:INTERNAL=1
@@ -1579,6 +1670,7 @@ __pkg_config_checked_PC_LIBNGTCP2:INTERNAL=1
 __pkg_config_checked_PC_LIBNGTCP2_CRYPTO_QUICTLS:INTERNAL=1
 __pkg_config_checked_PC_LIBXML:INTERNAL=1
 __pkg_config_checked_PC_SYSTEMD:INTERNAL=1
+__pkg_config_checked_URING:INTERNAL=1
 __pkg_config_checked__OPENSSL:INTERNAL=1
 //Test mi_has_libatomic
 mi_has_libatomic:INTERNAL=
@@ -1586,6 +1678,10 @@ mi_has_libatomic:INTERNAL=
 mi_has_libpthread:INTERNAL=1
 //Test mi_has_librt
 mi_has_librt:INTERNAL=
+//ADVANCED property for variable: pkgcfg_lib_OPENSSL_crypto
+pkgcfg_lib_OPENSSL_crypto-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: pkgcfg_lib_OPENSSL_ssl
+pkgcfg_lib_OPENSSL_ssl-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: pkgcfg_lib_PC_JANSSON_jansson
 pkgcfg_lib_PC_JANSSON_jansson-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: pkgcfg_lib_PC_JEMALLOC_jemalloc
@@ -1598,5 +1694,5 @@ pkgcfg_lib_PC_LIBXML_xml2-ADVANCED:INTERNAL=1
 pkgcfg_lib__OPENSSL_crypto-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: pkgcfg_lib__OPENSSL_ssl
 pkgcfg_lib__OPENSSL_ssl-ADVANCED:INTERNAL=1
-prefix_result:INTERNAL=/opt/homebrew/Cellar/jemalloc/5.3.0/lib
+prefix_result:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.5.2/lib
 

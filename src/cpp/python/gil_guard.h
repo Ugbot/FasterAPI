@@ -9,6 +9,9 @@
 namespace fasterapi {
 namespace python {
 
+// Forward declaration for free-threading support
+class FreeThreading;
+
 /**
  * RAII guard for acquiring the Python GIL.
  * 
@@ -104,10 +107,22 @@ int initialize_python_threading() noexcept;
 
 /**
  * Shutdown Python threading support.
- * 
+ *
  * @return 0 on success
  */
 int shutdown_python_threading() noexcept;
+
+/**
+ * NOTE: For Python 3.13+ free-threading support, use ConditionalGILGuard
+ * and ConditionalGILReleaseGuard from free_threading.h instead.
+ *
+ * These guards automatically become no-ops when Python is built with
+ * --disable-gil, avoiding unnecessary overhead.
+ *
+ * Migration example:
+ *   Old: GILGuard gil;
+ *   New: ConditionalGILGuard gil;  // No-op if free-threading
+ */
 
 } // namespace python
 } // namespace fasterapi

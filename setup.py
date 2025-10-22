@@ -48,20 +48,21 @@ class CMakeBuildExt(build_ext):
         print(f"Configuring CMake in {build_dir}")
         cmake_args = [
             f"-DCMAKE_BUILD_TYPE=Release",
-            f"-DFA_BUILD_MCP=ON",  # Enable MCP
+            f"-DFA_BUILD_MCP=OFF",  # Disable MCP (has exception issues)
             f"-DFA_BUILD_PG=ON",   # Enable PostgreSQL
             f"-DFA_BUILD_HTTP=ON", # Enable HTTP
+            f"-DFA_BUILD_BENCHMARKS=OFF",  # Disable benchmarks for faster build
         ]
 
         subprocess.check_call(
-            ["cmake", str(source_dir), "-Wno-dev"] + cmake_args,
+            ["cmake", "-G", "Ninja", str(source_dir), "-Wno-dev"] + cmake_args,
             cwd=build_dir
         )
 
-        # Run CMake build
-        print("Building C++ library")
+        # Run Ninja build
+        print("Building C++ library with Ninja")
         subprocess.check_call(
-            ["cmake", "--build", ".", "--config", "Release", "-j"],
+            ["ninja", "fasterapi_http", "fasterapi_pg"],
             cwd=build_dir
         )
 
@@ -82,23 +83,50 @@ class CMakeBuildExt(build_ext):
                     print(f"Copying {lib_file.name} to {native_dir}")
                     shutil.copy2(lib_file, native_dir / lib_file.name)
 
+        # Copy HTTP library
+        for pattern in ["libfasterapi_http.*", "fasterapi_http.*"]:
+            for lib_file in build_dir.rglob(pattern):
+                if lib_file.is_file() and not lib_file.suffix in ['.a', '.lib']:
+                    print(f"Copying {lib_file.name} to {native_dir}")
+                    shutil.copy2(lib_file, native_dir / lib_file.name)
+
+        # Copy CoroIO library
+        for pattern in ["libcoroio.*", "coroio.*"]:
+            for lib_file in build_dir.rglob(pattern):
+                if lib_file.is_file() and not lib_file.suffix in ['.a', '.lib']:
+                    print(f"Copying {lib_file.name} to {native_dir}")
+                    shutil.copy2(lib_file, native_dir / lib_file.name)
+
 
 # Cython extensions
 extensions = []
 
 if HAS_CYTHON:
-    # MCP Proxy bindings
+    # HTTP Server bindings (Cython - high performance)
     extensions.append(
         Extension(
-            "fasterapi.mcp.proxy_bindings",
-            sources=["fasterapi/mcp/proxy_bindings.pyx"],
-            include_dirs=["src/cpp"],
-            library_dirs=["fasterapi/_native"],
-            libraries=["fasterapi_mcp"],
+            "fasterapi.http.server_cy",
+            sources=["fasterapi/http/server_cy.pyx"],
+            include_dirs=[".", "src/cpp", "external/coroio"],
+            library_dirs=["fasterapi/_native", "build/lib", "build/external/coroio/coroio"],
+            libraries=["fasterapi_http", "coroio"],
             language="c++",
-            extra_compile_args=["-std=c++20"],
+            extra_compile_args=["-std=c++20", "-fexceptions"],  # CoroIO needs exceptions
         )
     )
+
+    # MCP Proxy bindings - DISABLED temporarily due to NULL pointer issues
+    # extensions.append(
+    #     Extension(
+    #         "fasterapi.mcp.proxy_bindings",
+    #         sources=["fasterapi/mcp/proxy_bindings.pyx"],
+    #         include_dirs=["src/cpp"],
+    #         library_dirs=["fasterapi/_native"],
+    #         libraries=["fasterapi_mcp"],
+    #         language="c++",
+    #         extra_compile_args=["-std=c++20"],
+    #     )
+    # )
 
     # Cythonize extensions
     extensions = cythonize(

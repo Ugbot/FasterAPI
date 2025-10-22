@@ -18,6 +18,7 @@
 #include "request.h"
 #include "response.h"
 #include "compression.h"
+#include "python_callback_bridge.h"
 #include <cstring>
 #include <memory>
 #include <unordered_map>
@@ -266,8 +267,11 @@ int http_lib_init() noexcept {
     if (g_initialized.load()) {
         return 0;  // Already initialized
     }
-    
-    // Initialize any global resources
+
+    // Initialize Python callback bridge
+    PythonCallbackBridge::initialize();
+
+    // Initialize any other global resources
     g_initialized.store(true);
     return 0;
 }
@@ -284,9 +288,42 @@ int http_lib_shutdown() noexcept {
         g_server->stop();
         g_server.reset();
     }
-    
+
+    // Cleanup Python callback bridge
+    PythonCallbackBridge::cleanup();
+
     g_initialized.store(false);
     return 0;
+}
+
+/**
+ * Register Python handler callback.
+ *
+ * This is called from Python (via ctypes) to associate a Python callable
+ * with a handler ID. The PythonCallbackBridge stores this mapping.
+ *
+ * @param method HTTP method
+ * @param path Route path
+ * @param handler_id Handler ID (matches ID passed to http_add_route)
+ * @param py_callable Python callable object (PyObject*)
+ */
+void http_register_python_handler(
+    const char* method,
+    const char* path,
+    int handler_id,
+    void* py_callable
+) noexcept {
+    if (!method || !path || !py_callable) {
+        return;
+    }
+
+    // Register with PythonCallbackBridge (lockfree queue)
+    PythonCallbackBridge::register_handler(
+        std::string(method),
+        std::string(path),
+        handler_id,
+        py_callable
+    );
 }
 
 }  // extern "C"

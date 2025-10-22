@@ -36,6 +36,7 @@ events:
       - "/Users/bengamble/.local/bin/"
       - "/Users/bengamble/.sdkman/candidates/java/current/bin/"
       - "/Users/bengamble/.cargo/bin/"
+      - "/Users/bengamble/.cursor/extensions/ms-python.debugpy-2025.14.1-darwin-arm64/bundled/scripts/noConfigScripts/"
     searched_directories:
       - "/Users/bengamble/.fly/bin/uname"
       - "/Users/bengamble/Downloads/google-cloud-sdk/bin/uname"
@@ -64,6 +65,7 @@ events:
         - "/Users/bengamble/Downloads/google-cloud-sdk/bin"
         - "/Users/bengamble/.sdkman/candidates/java/current/bin"
         - "/Users/bengamble/.cargo/bin"
+        - "/Users/bengamble/.cursor/extensions/ms-python.debugpy-2025.14.1-darwin-arm64/bundled/scripts/noConfigScripts"
   -
     kind: "message-v1"
     backtrace:
@@ -107,6 +109,7 @@ events:
       - "/Users/bengamble/.local/bin/"
       - "/Users/bengamble/.sdkman/candidates/java/current/bin/"
       - "/Users/bengamble/.cargo/bin/"
+      - "/Users/bengamble/.cursor/extensions/ms-python.debugpy-2025.14.1-darwin-arm64/bundled/scripts/noConfigScripts/"
     searched_directories:
       - "/Users/bengamble/.fly/bin/install_name_tool"
       - "/Users/bengamble/Downloads/google-cloud-sdk/bin/install_name_tool"
@@ -135,5 +138,6 @@ events:
         - "/Users/bengamble/Downloads/google-cloud-sdk/bin"
         - "/Users/bengamble/.sdkman/candidates/java/current/bin"
         - "/Users/bengamble/.cargo/bin"
+        - "/Users/bengamble/.cursor/extensions/ms-python.debugpy-2025.14.1-darwin-arm64/bundled/scripts/noConfigScripts"
       CMAKE_INSTALL_PREFIX: "/usr/local"
 ...

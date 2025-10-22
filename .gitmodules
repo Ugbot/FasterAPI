@@ -1,3 +1,9 @@
 [submodule "benchmarks/1mrc/official"]
 	path = benchmarks/1mrc/official
 	url = https://github.com/Kavishankarks/1mrc.git
+[submodule "external/coroio"]
+	path = external/coroio
+	url = https://github.com/resetius/coroio
+[submodule "external/drogon"]
+	path = external/drogon
+	url = https://github.com/drogonframework/drogon

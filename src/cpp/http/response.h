@@ -237,14 +237,22 @@ public:
 
     /**
      * Get compression ratio.
-     * 
+     *
      * @return Compression ratio (0.0 = no compression, 1.0 = 100% compression)
      */
     double get_compression_ratio() const noexcept;
 
     /**
+     * Serialize response to HTTP wire format.
+     *
+     * @param keep_alive Include Connection: keep-alive header
+     * @return Complete HTTP response as string (status line + headers + body)
+     */
+    std::string to_http_wire_format(bool keep_alive = true) const noexcept;
+
+    /**
      * Constructor for uWebSockets integration.
-     * 
+     *
      * @param res uWebSockets response object
      */
 #ifdef FA_USE_UWEBSOCKETS

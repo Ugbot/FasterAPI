@@ -37,7 +37,7 @@ set(CTEST_P4_UPDATE_CUSTOM "")
 set(CTEST_P4_UPDATE_OPTIONS "")
 
 # CTest Configure Step
-set(CTEST_CMAKE_GENERATOR "Unix Makefiles")
+set(CTEST_CMAKE_GENERATOR "Ninja")
 set(CTEST_LABELS_FOR_SUBPROJECTS "")
 
 # CTest Build Step

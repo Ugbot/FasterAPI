@@ -1,19 +1,17 @@
 """
 Server-Sent Events (SSE) Support
 
-Provides SSE connections for real-time server-to-client streaming.
+High-performance SSE implementation backed by C++.
 """
 
-import ctypes
-from ctypes import c_void_p, c_char_p, c_uint64, c_int
 from typing import Optional, Callable, Any
 import json
-import time
+from .bindings import get_lib
 
 
 class SSEConnection:
     """
-    Server-Sent Events connection.
+    Server-Sent Events connection backed by C++.
     
     Sends events from server to client over HTTP.
     Simpler than WebSockets for one-way communication.
@@ -23,20 +21,31 @@ class SSEConnection:
     - Event IDs for reconnection
     - Named events
     - JSON data support
+    - High performance (C++ core)
     
     Spec: https://html.spec.whatwg.org/multipage/server-sent-events.html
+    
+    Example:
+        @app.sse("/events")
+        def event_stream(sse: SSEConnection):
+            for i in range(100):
+                sse.send(
+                    {"count": i, "time": time.time()},
+                    event="count",
+                    id=str(i)
+                )
+                time.sleep(1)
     """
     
-    def __init__(self, handle: Optional[int] = None):
+    def __init__(self, native_handle: Optional[int] = None):
         """
         Create SSE connection.
         
         Args:
-            handle: C++ connection handle (opaque pointer)
+            native_handle: C++ SSEConnection pointer (or None for testing)
         """
-        self._handle = handle
-        self._events_sent = 0
-        self._last_event_id: Optional[str] = None
+        self._handle = native_handle
+        self._lib = get_lib() if native_handle else None
         self._closed = False
     
     def send(
@@ -59,9 +68,15 @@ class SSEConnection:
             sse.send("Hello World")
             sse.send({"message": "hi"}, event="chat", id="123")
             sse.send([1, 2, 3], event="update")
+            
+        Raises:
+            RuntimeError: If connection is closed or send fails
         """
         if self._closed:
             raise RuntimeError("Connection is closed")
+        
+        if not self._handle or not self._lib:
+            raise RuntimeError("SSE not connected")
         
         # JSON-encode data if needed
         if isinstance(data, (dict, list)):
@@ -69,16 +84,23 @@ class SSEConnection:
         else:
             data_str = str(data)
         
-        # Format SSE message
-        message = self._format_message(data_str, event, id, retry)
+        # Encode strings to bytes
+        data_bytes = data_str.encode('utf-8')
+        event_bytes = event.encode('utf-8') if event else None
+        id_bytes = id.encode('utf-8') if id else None
+        retry_val = retry if retry is not None else -1
         
-        # Send (in real implementation, would call C++ function)
-        # For now, just track
-        self._events_sent += 1
-        if id:
-            self._last_event_id = id
+        # Call C++ backend
+        result = self._lib.sse_send(
+            self._handle,
+            data_bytes,
+            event_bytes,
+            id_bytes,
+            retry_val
+        )
         
-        return message  # Return for testing/inspection
+        if result != 0:
+            raise RuntimeError(f"Failed to send SSE event: error {result}")
     
     def send_comment(self, comment: str) -> None:
         """
@@ -92,75 +114,67 @@ class SSEConnection:
         if self._closed:
             raise RuntimeError("Connection is closed")
         
-        return f": {comment}\n\n"
+        if not self._handle or not self._lib:
+            raise RuntimeError("SSE not connected")
+        
+        comment_bytes = comment.encode('utf-8')
+        result = self._lib.sse_send_comment(self._handle, comment_bytes)
+        
+        if result != 0:
+            raise RuntimeError(f"Failed to send comment: error {result}")
     
     def ping(self) -> None:
         """Send keep-alive ping."""
-        return self.send_comment("ping")
+        if self._closed:
+            raise RuntimeError("Connection is closed")
+        
+        if not self._handle or not self._lib:
+            raise RuntimeError("SSE not connected")
+        
+        result = self._lib.sse_ping(self._handle)
+        
+        if result != 0:
+            raise RuntimeError(f"Failed to send ping: error {result}")
     
     def close(self) -> None:
         """Close the connection."""
-        if not self._closed:
-            self._closed = True
-            # In real implementation, would call C++ close
+        if self._closed:
+            return
+        
+        if self._handle and self._lib:
+            self._lib.sse_close(self._handle)
+        
+        self._closed = True
     
     def is_open(self) -> bool:
         """Check if connection is open."""
-        return not self._closed
-    
-    def events_sent(self) -> int:
-        """Get number of events sent."""
-        return self._events_sent
+        if self._closed:
+            return False
+        
+        if self._handle and self._lib:
+            return self._lib.sse_is_open(self._handle)
+        
+        return False
     
     @property
-    def last_event_id(self) -> Optional[str]:
-        """Get last event ID."""
-        return self._last_event_id
+    def events_sent(self) -> int:
+        """Get number of events sent."""
+        if self._handle and self._lib:
+            return self._lib.sse_events_sent(self._handle)
+        return 0
     
-    def set_last_event_id(self, id: str) -> None:
-        """Set last event ID (for reconnection)."""
-        self._last_event_id = id
+    def __del__(self):
+        """Cleanup on destruction."""
+        if not self._closed:
+            self.close()
+        
+        if self._handle and self._lib:
+            self._lib.sse_destroy(self._handle)
     
-    def _format_message(
-        self,
-        data: str,
-        event: Optional[str],
-        id: Optional[str],
-        retry: Optional[int]
-    ) -> str:
-        """
-        Format message according to SSE spec.
-        
-        SSE format:
-            event: <event_type>
-            id: <event_id>
-            retry: <milliseconds>
-            data: <line1>
-            data: <line2>
-            <blank line>
-        """
-        lines = []
-        
-        # Event type
-        if event:
-            lines.append(f"event: {event}")
-        
-        # Event ID
-        if id:
-            lines.append(f"id: {id}")
-        
-        # Retry
-        if retry is not None and retry >= 0:
-            lines.append(f"retry: {retry}")
-        
-        # Data (split by newlines)
-        for line in data.split('\n'):
-            lines.append(f"data: {line}")
-        
-        # Add blank line to signal end of event
-        lines.append('')
-        
-        return '\n'.join(lines) + '\n'
+    def __repr__(self) -> str:
+        """String representation."""
+        state = "open" if self.is_open() else "closed"
+        return f"SSEConnection(state={state}, events_sent={self.events_sent})"
 
 
 class SSEResponse:
@@ -195,9 +209,6 @@ class SSEResponse:
                 
                 return SSEResponse.create(handle_sse)
         """
-        # Create connection
-        conn = SSEConnection()
-        
         # Set SSE headers
         response_headers = {
             "Content-Type": "text/event-stream",
@@ -209,17 +220,14 @@ class SSEResponse:
         if headers:
             response_headers.update(headers)
         
-        # Call handler
-        handler(conn)
-        
         return {
-            "connection": conn,
+            "handler": handler,
             "headers": response_headers,
             "type": "sse"
         }
 
 
-# Decorators for easier SSE usage
+# Decorator for easier SSE usage
 def sse_endpoint(func: Callable) -> Callable:
     """
     Decorator for SSE endpoints.
@@ -248,4 +256,3 @@ __all__ = [
     'SSEResponse',
     'sse_endpoint',
 ]
-

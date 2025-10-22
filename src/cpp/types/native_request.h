@@ -10,17 +10,26 @@ namespace types {
 
 /**
  * Native HTTP Request (NumPy-style).
- * 
+ *
  * Python sees: Request object
  * C++ sees: Direct struct with string_views
- * 
+ *
  * Benefits:
  * - Zero-copy header/body access
  * - No Python object creation
- * - No GIL for reads
+ * - No GIL for reads (GIL-free in Python 3.13+ free-threading!)
  * - Cache-friendly layout
- * 
- * Speedup: 10-20x faster than Python Request wrapper
+ * - Thread-safe reads (immutable after parse)
+ *
+ * Performance:
+ * - 10-20x faster than Python Request wrapper
+ * - Works perfectly with SubinterpreterPool (no GIL contention)
+ * - Ideal for Python 3.13+ free-threading (zero GIL overhead)
+ *
+ * Thread safety:
+ * - READ operations: No GIL needed (all fields immutable)
+ * - WRITE operations: Not supported (request is read-only)
+ * - Safe to share across subinterpreters (read-only)
  */
 struct NativeRequest {
     PyObject_HEAD
@@ -100,17 +109,27 @@ struct NativeRequest {
 
 /**
  * Native HTTP Response (NumPy-style).
- * 
+ *
  * Python sees: Response object
  * C++ sees: Direct struct
- * 
+ *
  * Benefits:
  * - Zero-copy response building
  * - Direct serialization
  * - No Python object overhead
  * - SIMD JSON serialization
- * 
- * Speedup: 10-20x faster than Python Response
+ * - GIL-free writes (Python 3.13+ free-threading)
+ *
+ * Performance:
+ * - 10-20x faster than Python Response
+ * - Thread-safe (each handler gets own response)
+ * - Perfect for SubinterpreterPool (no shared state)
+ *
+ * Thread safety:
+ * - Each request handler creates its own NativeResponse
+ * - No shared state between threads/interpreters
+ * - Safe to use from any subinterpreter
+ * - GIL only needed for PyObject creation (final conversion)
  */
 struct NativeResponse {
     PyObject_HEAD

@@ -7,6 +7,7 @@ High-performance HTTP server with multi-protocol support.
 import ctypes
 from typing import Optional, Callable, Dict, Any, Union
 from .bindings import get_lib, _error_from_code
+import sys
 
 
 class Server:
@@ -100,7 +101,7 @@ class Server:
     ) -> None:
         """
         Add a route handler.
-        
+
         Args:
             method: HTTP method (GET, POST, etc.)
             path: Route path pattern
@@ -108,17 +109,18 @@ class Server:
         """
         if self._handle is None:
             self._create_server()
-        
+
         method = method.upper()
         if method not in self._routes:
             self._routes[method] = {}
-        
-        self._routes[method][path] = handler
-        
-        # Register with C++ library
+
+        # Store handler
         handler_id = self._next_handler_id
         self._next_handler_id += 1
-        
+        key = f"{method}:{path}"
+        self._routes[method][path] = (handler_id, handler)
+
+        # Register route with C++ server
         error = ctypes.c_int()
         result = self._lib.http_add_route(
             self._handle,
@@ -127,9 +129,31 @@ class Server:
             ctypes.c_uint32(handler_id),
             ctypes.byref(error)
         )
-        
+
         if result != 0:
             raise RuntimeError(f"Failed to add route: {_error_from_code(result)}")
+
+        # Register Python handler callback with PythonCallbackBridge
+        # We need to pass the actual PyObject* pointer to C++
+        # Keep reference to prevent GC
+        if not hasattr(self, '_handler_refs'):
+            self._handler_refs = []
+        self._handler_refs.append(handler)
+
+        # Get PyObject* pointer using ctypes.pythonapi
+        # id(handler) gives us the memory address of the Python object
+        handler_ptr = ctypes.c_void_p(id(handler))
+
+        # Increment refcount to keep object alive (C++ will also increment)
+        ctypes.pythonapi.Py_IncRef(ctypes.py_object(handler))
+
+        # Register with C++ callback bridge
+        self._lib.http_register_python_handler(
+            method.encode('utf-8'),
+            path.encode('utf-8'),
+            handler_id,
+            handler_ptr
+        )
     
     def add_websocket(self, path: str, handler: Callable) -> None:
         """

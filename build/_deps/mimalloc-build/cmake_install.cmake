@@ -12,7 +12,7 @@ if(NOT DEFINED CMAKE_INSTALL_CONFIG_NAME)
     string(REGEX REPLACE "^[^A-Za-z0-9_]+" ""
            CMAKE_INSTALL_CONFIG_NAME "${BUILD_TYPE}")
   else()
-    set(CMAKE_INSTALL_CONFIG_NAME "Release")
+    set(CMAKE_INSTALL_CONFIG_NAME "RelWithDebInfo")
   endif()
   message(STATUS "Install configuration: \"${CMAKE_INSTALL_CONFIG_NAME}\"")
 endif()
@@ -77,8 +77,8 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
     unset(_cmake_export_file_changed)
   endif()
   file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib/cmake/mimalloc-2.1" TYPE FILE FILES "/Users/bengamble/FasterAPI/build/_deps/mimalloc-build/CMakeFiles/Export/386e97c4662a5910df52cfc051dd5510/mimalloc.cmake")
-  if(CMAKE_INSTALL_CONFIG_NAME MATCHES "^([Rr][Ee][Ll][Ee][Aa][Ss][Ee])$")
-    file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib/cmake/mimalloc-2.1" TYPE FILE FILES "/Users/bengamble/FasterAPI/build/_deps/mimalloc-build/CMakeFiles/Export/386e97c4662a5910df52cfc051dd5510/mimalloc-release.cmake")
+  if(CMAKE_INSTALL_CONFIG_NAME MATCHES "^([Rr][Ee][Ll][Ww][Ii][Tt][Hh][Dd][Ee][Bb][Ii][Nn][Ff][Oo])$")
+    file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib/cmake/mimalloc-2.1" TYPE FILE FILES "/Users/bengamble/FasterAPI/build/_deps/mimalloc-build/CMakeFiles/Export/386e97c4662a5910df52cfc051dd5510/mimalloc-relwithdebinfo.cmake")
   endif()
 endif()
 
@@ -91,7 +91,7 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
 endif()
 
 if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
-  include("/Users/bengamble/FasterAPI/build/_deps/mimalloc-build/CMakeFiles/mimalloc-static.dir/install-cxx-module-bmi-Release.cmake" OPTIONAL)
+  include("/Users/bengamble/FasterAPI/build/_deps/mimalloc-build/CMakeFiles/mimalloc-static.dir/install-cxx-module-bmi-RelWithDebInfo.cmake" OPTIONAL)
 endif()
 
 if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
@@ -112,8 +112,8 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
     unset(_cmake_export_file_changed)
   endif()
   file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib/cmake/mimalloc-2.1" TYPE FILE FILES "/Users/bengamble/FasterAPI/build/_deps/mimalloc-build/CMakeFiles/Export/386e97c4662a5910df52cfc051dd5510/mimalloc.cmake")
-  if(CMAKE_INSTALL_CONFIG_NAME MATCHES "^([Rr][Ee][Ll][Ee][Aa][Ss][Ee])$")
-    file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib/cmake/mimalloc-2.1" TYPE FILE FILES "/Users/bengamble/FasterAPI/build/_deps/mimalloc-build/CMakeFiles/Export/386e97c4662a5910df52cfc051dd5510/mimalloc-release.cmake")
+  if(CMAKE_INSTALL_CONFIG_NAME MATCHES "^([Rr][Ee][Ll][Ww][Ii][Tt][Hh][Dd][Ee][Bb][Ii][Nn][Ff][Oo])$")
+    file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/lib/cmake/mimalloc-2.1" TYPE FILE FILES "/Users/bengamble/FasterAPI/build/_deps/mimalloc-build/CMakeFiles/Export/386e97c4662a5910df52cfc051dd5510/mimalloc-relwithdebinfo.cmake")
   endif()
 endif()
 

@@ -1,1 +1,0 @@
-/usr/bin/c++ -O3 -mcpu=native -flto -fno-exceptions -fno-rtti -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/test_router.dir/tests/test_router.cpp.o CMakeFiles/test_router.dir/src/cpp/http/router.cpp.o -o tests/test_router

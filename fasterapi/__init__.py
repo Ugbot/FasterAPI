@@ -17,6 +17,7 @@ Features:
 from typing import Any, Callable, Dict, List, Optional, Union
 from .http import Server as HttpServer
 from .http import Request, Response, WebSocket
+from .http.sse import SSEConnection, SSEResponse
 from .pg import PgPool, Pg, TxIsolation
 from .pg.compat import Depends
 from .core import Future, when_all, when_any, Reactor
@@ -179,9 +180,44 @@ class App:
             
         Returns:
             Decorator function
+            
+        Example:
+            @app.websocket("/ws")
+            async def websocket_endpoint(ws: WebSocket):
+                await ws.send_text("Connected!")
+                while ws.is_open():
+                    message = await ws.receive()
+                    await ws.send_text(f"Echo: {message}")
         """
         def decorator(func: Callable) -> Callable:
             self._add_websocket(path, func, **kwargs)
+            return func
+        return decorator
+    
+    def sse(self, path: str, **kwargs) -> Callable:
+        """
+        Add a Server-Sent Events (SSE) endpoint.
+        
+        Args:
+            path: SSE path
+            **kwargs: Additional SSE options
+            
+        Returns:
+            Decorator function
+            
+        Example:
+            @app.sse("/events")
+            def event_stream(sse: SSEConnection):
+                for i in range(100):
+                    sse.send(
+                        {"count": i, "time": time.time()},
+                        event="count",
+                        id=str(i)
+                    )
+                    time.sleep(1)
+        """
+        def decorator(func: Callable) -> Callable:
+            self._add_sse(path, func, **kwargs)
             return func
         return decorator
     
@@ -231,6 +267,31 @@ class App:
                 ws.close(1011, "Internal error")
         
         self.server.add_websocket(path, websocket_wrapper)
+    
+    def _add_sse(self, path: str, handler: Callable, **kwargs) -> None:
+        """Add an SSE endpoint to the server."""
+        def sse_wrapper(req: Request, res: Response) -> None:
+            try:
+                # Set SSE headers
+                res.set_header("Content-Type", "text/event-stream")
+                res.set_header("Cache-Control", "no-cache")
+                res.set_header("Connection", "keep-alive")
+                res.set_header("X-Accel-Buffering", "no")
+                
+                # Create SSE connection
+                # TODO: Get actual C++ handle from server
+                from .http.sse import SSEConnection
+                sse = SSEConnection(native_handle=None)  # Will be set by server
+                
+                # Call handler
+                handler(sse)
+                
+            except Exception as e:
+                print(f"SSE error: {e}")
+                res.status(500).json({"error": str(e)}).send()
+        
+        # Register as GET route
+        self._add_route("GET", path, sse_wrapper, **kwargs)
     
     def add_middleware(self, func: Callable) -> Callable:
         """
@@ -319,6 +380,8 @@ __all__ = [
     'Request',
     'Response',
     'WebSocket',
+    'SSEConnection',
+    'SSEResponse',
     # Async utilities
     'Future',
     'when_all',

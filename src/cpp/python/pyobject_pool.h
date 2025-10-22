@@ -42,25 +42,24 @@ public:
         : pool_size_(size),
           next_slot_(0),
           pool_misses_(0) {
-        
-        // Pre-allocate pool slots
-        pool_.reserve(size);
+
+        // Allocate array of pool slots
+        pool_ = new PoolSlot[size];
         for (size_t i = 0; i < size; ++i) {
-            PoolSlot slot;
-            slot.obj = nullptr;  // Will be allocated on first use
-            slot.in_use.store(false, std::memory_order_relaxed);
-            pool_.push_back(slot);
+            pool_[i].obj = nullptr;  // Will be allocated on first use
+            pool_[i].in_use.store(false, std::memory_order_relaxed);
         }
     }
     
     ~PyDictPool() {
         // GIL must be held to clean up PyObjects
         // In practice, this is called at shutdown when GIL is already held
-        for (auto& slot : pool_) {
-            if (slot.obj) {
-                Py_XDECREF(slot.obj);
+        for (size_t i = 0; i < pool_size_; ++i) {
+            if (pool_[i].obj) {
+                Py_XDECREF(pool_[i].obj);
             }
         }
+        delete[] pool_;
     }
     
     /**
@@ -109,12 +108,12 @@ public:
      */
     void release(PyObject* obj) noexcept {
         if (!obj) return;
-        
+
         // Check if from pool
-        for (auto& slot : pool_) {
-            if (slot.obj == obj) {
+        for (size_t i = 0; i < pool_size_; ++i) {
+            if (pool_[i].obj == obj) {
                 // Return to pool (release semantics)
-                slot.in_use.store(false, std::memory_order_release);
+                pool_[i].in_use.store(false, std::memory_order_release);
                 return;
             }
         }
@@ -137,10 +136,10 @@ public:
         Stats stats{};
         stats.pool_size = pool_size_;
         stats.pool_misses = pool_misses_.load(std::memory_order_relaxed);
-        
+
         size_t in_use_count = 0;
-        for (const auto& slot : pool_) {
-            if (slot.in_use.load(std::memory_order_relaxed)) {
+        for (size_t i = 0; i < pool_size_; ++i) {
+            if (pool_[i].in_use.load(std::memory_order_relaxed)) {
                 in_use_count++;
             }
         }
@@ -155,13 +154,15 @@ private:
     struct PoolSlot {
         PyObject* obj;
         std::atomic<bool> in_use;
-        
+
         // Aeron padding: Prevent false sharing between slots
         char padding[CACHE_LINE_SIZE - sizeof(PyObject*) - sizeof(std::atomic<bool>)];
+
+        PoolSlot() : obj(nullptr), in_use(false) {}
     };
-    
+
     const size_t pool_size_;
-    std::vector<PoolSlot> pool_;
+    PoolSlot* pool_;  // Use array instead of vector to avoid move issues
     
     // Aeron-style aligned atomics
     alignas(CACHE_LINE_SIZE) std::atomic<size_t> next_slot_;
@@ -178,22 +179,21 @@ public:
           pool_size_(pool_size),
           next_slot_(0),
           pool_misses_(0) {
-        
-        pool_.reserve(pool_size);
+
+        pool_ = new PoolSlot[pool_size];
         for (size_t i = 0; i < pool_size; ++i) {
-            PoolSlot slot;
-            slot.obj = nullptr;  // Lazy allocation
-            slot.in_use.store(false, std::memory_order_relaxed);
-            pool_.push_back(slot);
+            pool_[i].obj = nullptr;  // Lazy allocation
+            pool_[i].in_use.store(false, std::memory_order_relaxed);
         }
     }
-    
+
     ~PyTuplePool() {
-        for (auto& slot : pool_) {
-            if (slot.obj) {
-                Py_XDECREF(slot.obj);
+        for (size_t i = 0; i < pool_size_; ++i) {
+            if (pool_[i].obj) {
+                Py_XDECREF(pool_[i].obj);
             }
         }
+        delete[] pool_;
     }
     
     PyObject* acquire() noexcept {
@@ -229,10 +229,10 @@ public:
     
     void release(PyObject* obj) noexcept {
         if (!obj) return;
-        
-        for (auto& slot : pool_) {
-            if (slot.obj == obj) {
-                slot.in_use.store(false, std::memory_order_release);
+
+        for (size_t i = 0; i < pool_size_; ++i) {
+            if (pool_[i].obj == obj) {
+                pool_[i].in_use.store(false, std::memory_order_release);
                 return;
             }
         }
@@ -249,11 +249,13 @@ private:
         PyObject* obj;
         std::atomic<bool> in_use;
         char padding[CACHE_LINE_SIZE - sizeof(PyObject*) - sizeof(std::atomic<bool>)];
+
+        PoolSlot() : obj(nullptr), in_use(false) {}
     };
-    
+
     const Py_ssize_t tuple_size_;
     const size_t pool_size_;
-    std::vector<PoolSlot> pool_;
+    PoolSlot* pool_;  // Use array instead of vector
     
     alignas(CACHE_LINE_SIZE) std::atomic<size_t> next_slot_;
     alignas(CACHE_LINE_SIZE) std::atomic<size_t> pool_misses_;
