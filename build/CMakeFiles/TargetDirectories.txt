@@ -2,6 +2,8 @@
 /Users/bengamble/FasterAPI/build/CMakeFiles/fasterapi_http.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/test_event_loop_echo.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/test_tcp_listener_echo.dir
+/Users/bengamble/FasterAPI/build/CMakeFiles/test_http1_native.dir
+/Users/bengamble/FasterAPI/build/CMakeFiles/test_http2_native.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/test_router.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/bench_router.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/test_executor.dir
