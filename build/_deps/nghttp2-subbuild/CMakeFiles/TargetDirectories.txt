@@ -1,3 +1,0 @@
-/Users/bengamble/FasterAPI/build/_deps/nghttp2-subbuild/CMakeFiles/nghttp2-populate.dir
-/Users/bengamble/FasterAPI/build/_deps/nghttp2-subbuild/CMakeFiles/edit_cache.dir
-/Users/bengamble/FasterAPI/build/_deps/nghttp2-subbuild/CMakeFiles/rebuild_cache.dir

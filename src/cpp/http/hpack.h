@@ -225,7 +225,12 @@ public:
     
 private:
     HPACKDynamicTable table_;
-    
+
+    // Temporary buffers for literal headers without indexing
+    // These are needed to store string data that isn't in the dynamic table
+    std::string temp_name_buffer_;
+    std::string temp_value_buffer_;
+
     /**
      * Decode string from HPACK format.
      * 

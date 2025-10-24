@@ -205,7 +205,26 @@ public:
      * Check if running
      */
     virtual bool is_running() const noexcept = 0;
-    
+
+    /**
+     * Wake up the event loop from another thread
+     *
+     * Thread-safe. Wakes the event loop if it's blocked in poll().
+     * Use this to signal that work is ready from another thread.
+     */
+    virtual void wake() noexcept = 0;
+
+    /**
+     * Set wake callback - called when wake() is triggered
+     *
+     * The callback is invoked from the event loop thread when
+     * wake() is called from another thread.
+     *
+     * @param callback Function to call on wake event
+     */
+    using wake_callback = std::function<void()>;
+    virtual void set_wake_callback(wake_callback callback) noexcept = 0;
+
     /**
      * Get statistics
      */
@@ -218,8 +237,9 @@ public:
         uint64_t polls{0};
         uint64_t events{0};
         uint64_t errors{0};
+        uint64_t wakes{0};
     };
-    
+
     virtual stats get_stats() const noexcept = 0;
 
 protected:
@@ -241,21 +261,24 @@ class kqueue_io : public async_io {
 public:
     explicit kqueue_io(const async_io_config& config);
     ~kqueue_io() override;
-    
+
     io_backend backend() const noexcept override { return io_backend::kqueue; }
     const char* backend_name() const noexcept override { return "kqueue"; }
-    
+
     int accept_async(int listen_fd, io_callback callback, void* user_data) noexcept override;
     int read_async(int fd, void* buffer, size_t size, io_callback callback, void* user_data) noexcept override;
     int write_async(int fd, const void* buffer, size_t size, io_callback callback, void* user_data) noexcept override;
     int connect_async(int fd, const struct sockaddr* addr, socklen_t addrlen, io_callback callback, void* user_data) noexcept override;
     int close_async(int fd) noexcept override;
-    
+
     int poll(uint32_t timeout_us) noexcept override;
     void run() noexcept override;
     void stop() noexcept override;
     bool is_running() const noexcept override;
-    
+
+    void wake() noexcept override;
+    void set_wake_callback(wake_callback callback) noexcept override;
+
     stats get_stats() const noexcept override;
 
 private:
@@ -274,21 +297,24 @@ class epoll_io : public async_io {
 public:
     explicit epoll_io(const async_io_config& config);
     ~epoll_io() override;
-    
+
     io_backend backend() const noexcept override { return io_backend::epoll; }
     const char* backend_name() const noexcept override { return "epoll"; }
-    
+
     int accept_async(int listen_fd, io_callback callback, void* user_data) noexcept override;
     int read_async(int fd, void* buffer, size_t size, io_callback callback, void* user_data) noexcept override;
     int write_async(int fd, const void* buffer, size_t size, io_callback callback, void* user_data) noexcept override;
     int connect_async(int fd, const struct sockaddr* addr, socklen_t addrlen, io_callback callback, void* user_data) noexcept override;
     int close_async(int fd) noexcept override;
-    
+
     int poll(uint32_t timeout_us) noexcept override;
     void run() noexcept override;
     void stop() noexcept override;
     bool is_running() const noexcept override;
-    
+
+    void wake() noexcept override;
+    void set_wake_callback(wake_callback callback) noexcept override;
+
     stats get_stats() const noexcept override;
 
 private:
@@ -306,21 +332,24 @@ class io_uring_io : public async_io {
 public:
     explicit io_uring_io(const async_io_config& config);
     ~io_uring_io() override;
-    
+
     io_backend backend() const noexcept override { return io_backend::io_uring; }
     const char* backend_name() const noexcept override { return "io_uring"; }
-    
+
     int accept_async(int listen_fd, io_callback callback, void* user_data) noexcept override;
     int read_async(int fd, void* buffer, size_t size, io_callback callback, void* user_data) noexcept override;
     int write_async(int fd, const void* buffer, size_t size, io_callback callback, void* user_data) noexcept override;
     int connect_async(int fd, const struct sockaddr* addr, socklen_t addrlen, io_callback callback, void* user_data) noexcept override;
     int close_async(int fd) noexcept override;
-    
+
     int poll(uint32_t timeout_us) noexcept override;
     void run() noexcept override;
     void stop() noexcept override;
     bool is_running() const noexcept override;
-    
+
+    void wake() noexcept override;
+    void set_wake_callback(wake_callback callback) noexcept override;
+
     stats get_stats() const noexcept override;
 
 private:
@@ -339,21 +368,24 @@ class iocp_io : public async_io {
 public:
     explicit iocp_io(const async_io_config& config);
     ~iocp_io() override;
-    
+
     io_backend backend() const noexcept override { return io_backend::iocp; }
     const char* backend_name() const noexcept override { return "IOCP"; }
-    
+
     int accept_async(int listen_fd, io_callback callback, void* user_data) noexcept override;
     int read_async(int fd, void* buffer, size_t size, io_callback callback, void* user_data) noexcept override;
     int write_async(int fd, const void* buffer, size_t size, io_callback callback, void* user_data) noexcept override;
     int connect_async(int fd, const struct sockaddr* addr, socklen_t addrlen, io_callback callback, void* user_data) noexcept override;
     int close_async(int fd) noexcept override;
-    
+
     int poll(uint32_t timeout_us) noexcept override;
     void run() noexcept override;
     void stop() noexcept override;
     bool is_running() const noexcept override;
-    
+
+    void wake() noexcept override;
+    void set_wake_callback(wake_callback callback) noexcept override;
+
     stats get_stats() const noexcept override;
 
 private:

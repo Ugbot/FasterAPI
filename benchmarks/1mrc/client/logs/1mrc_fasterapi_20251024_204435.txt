@@ -1,0 +1,17 @@
+============================================================
+FasterAPI - 1 Million Request Challenge (1MRC)
+============================================================
+Timestamp: 20251024_204435
+Total requests: 10,000
+Concurrent workers: 100
+
+Results:
+  Total time: 0.530s
+  Requests per second: 18,878.33
+  Errors: 0
+
+Server Statistics:
+  Total Requests: 10,000
+  Unique Users: 10,000
+  Sum: 4,995,000.00
+  Average: 499.50

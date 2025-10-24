@@ -5,6 +5,8 @@
 #include <unordered_map>
 #include <functional>
 #include "../core/lockfree_queue.h"
+#include "../core/result.h"
+#include "../core/future.h"
 
 /**
  * Bridge between C++ HTTP server and Python route handlers.
@@ -27,6 +29,19 @@ public:
         std::string content_type = "text/plain";
         std::string body;
         std::unordered_map<std::string, std::string> headers;
+    };
+
+    /**
+     * Serialized request data (no Python objects - safe for inter-interpreter passing).
+     * Used to pass request data to sub-interpreters without GIL conflicts.
+     */
+    struct SerializedRequest {
+        std::string method;
+        std::string path;
+        std::unordered_map<std::string, std::string> headers;
+        std::string body;
+        int handler_id;
+        PyObject* callable;  // Handler callable (must be used in same interpreter it was created)
     };
 
     /**
@@ -71,7 +86,10 @@ public:
     static void poll_registrations();
 
     /**
-     * Invoke Python handler for a request.
+     * Invoke Python handler for a request (SYNCHRONOUS - DEPRECATED).
+     *
+     * This blocks the calling thread while Python executes.
+     * Use invoke_handler_async() for non-blocking execution.
      *
      * @param method HTTP method
      * @param path Request path
@@ -85,6 +103,25 @@ public:
         const std::unordered_map<std::string, std::string>& headers,
         const std::string& body
     );
+
+    /**
+     * Invoke Python handler asynchronously using sub-interpreters.
+     *
+     * This submits the handler to SubinterpreterExecutor and returns immediately.
+     * The handler executes in a sub-interpreter with its own GIL (true parallelism).
+     *
+     * @param method HTTP method
+     * @param path Request path
+     * @param headers Request headers
+     * @param body Request body
+     * @return Future with handler result
+     */
+    static fasterapi::core::future<fasterapi::core::result<HandlerResult>> invoke_handler_async(
+        const std::string& method,
+        const std::string& path,
+        const std::unordered_map<std::string, std::string>& headers,
+        const std::string& body
+    ) noexcept;
 
     /**
      * Cleanup all registered handlers.

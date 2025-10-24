@@ -414,10 +414,25 @@ async_io::stats iocp_io::get_stats() const noexcept {
     return s;
 }
 
+// TODO: Implement wake() and set_wake_callback() for IOCP
+// wake() should use PostQueuedCompletionStatus() with a special completion key
+// This is needed for async coroutine resumption from worker threads
+void iocp_io::wake() noexcept {
+    // NOT IMPLEMENTED - Windows IOCP wake mechanism needed
+    // Use: PostQueuedCompletionStatus(iocp_handle, 0, WAKE_KEY, nullptr);
+}
+
+void iocp_io::set_wake_callback(wake_callback callback) noexcept {
+    // NOT IMPLEMENTED - store callback and invoke when WAKE_KEY detected in poll()
+}
+
 } // namespace core
 } // namespace fasterapi
 
 #endif // _WIN32
+
+
+
 
 
 

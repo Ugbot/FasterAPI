@@ -10,6 +10,7 @@
 
 #include <sys/epoll.h>
 #include <sys/socket.h>
+#include <sys/eventfd.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
@@ -52,15 +53,20 @@ struct pending_op {
  */
 struct epoll_io::impl {
     int epoll_fd{-1};
+    int wake_fd{-1};
     async_io_config config;
-    
+
     std::atomic<bool> running{false};
     std::atomic<bool> stop_requested{false};
-    
+
+    // Wake mechanism
+    async_io::wake_callback wake_cb;
+    std::atomic<bool> wake_pending{false};
+
     // Pending operations indexed by FD
     std::mutex ops_mutex;
     std::unordered_map<int, std::unique_ptr<pending_op>> pending_ops;
-    
+
     // Statistics
     std::atomic<uint64_t> stat_accepts{0};
     std::atomic<uint64_t> stat_reads{0};
@@ -70,15 +76,29 @@ struct epoll_io::impl {
     std::atomic<uint64_t> stat_polls{0};
     std::atomic<uint64_t> stat_events{0};
     std::atomic<uint64_t> stat_errors{0};
-    
+    std::atomic<uint64_t> stat_wakes{0};
+
     impl(const async_io_config& cfg) : config(cfg) {
         epoll_fd = epoll_create1(EPOLL_CLOEXEC);
         if (epoll_fd < 0) {
             // Handle error
         }
+
+        // Create eventfd for wake mechanism
+        wake_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+        if (wake_fd >= 0) {
+            // Register wake_fd with epoll
+            struct epoll_event ev;
+            ev.events = EPOLLIN | EPOLLET;  // Edge-triggered
+            ev.data.fd = wake_fd;
+            epoll_ctl(epoll_fd, EPOLL_CTL_ADD, wake_fd, &ev);
+        }
     }
     
     ~impl() {
+        if (wake_fd >= 0) {
+            close(wake_fd);
+        }
         if (epoll_fd >= 0) {
             close(epoll_fd);
         }
@@ -257,7 +277,23 @@ int epoll_io::poll(uint32_t timeout_us) noexcept {
     for (int i = 0; i < n; ++i) {
         const struct epoll_event& ev = events[i];
         int fd = ev.data.fd;
-        
+
+        // Check for wake event (eventfd)
+        if (fd == impl_->wake_fd) {
+            impl_->stat_wakes.fetch_add(1, std::memory_order_relaxed);
+            impl_->wake_pending.store(false, std::memory_order_release);
+
+            // Read from eventfd to clear it
+            uint64_t val;
+            read(impl_->wake_fd, &val, sizeof(val));
+
+            // Invoke wake callback
+            if (impl_->wake_cb) {
+                impl_->wake_cb();
+            }
+            continue;
+        }
+
         // Find and remove pending operation
         pending_op* op = impl_->find_and_remove_op(fd);
         if (!op) continue;
@@ -352,13 +388,33 @@ async_io::stats epoll_io::get_stats() const noexcept {
     s.polls = impl_->stat_polls.load(std::memory_order_relaxed);
     s.events = impl_->stat_events.load(std::memory_order_relaxed);
     s.errors = impl_->stat_errors.load(std::memory_order_relaxed);
+    s.wakes = impl_->stat_wakes.load(std::memory_order_relaxed);
     return s;
+}
+
+void epoll_io::wake() noexcept {
+    // Thread-safe wake using eventfd
+    // Only trigger if not already pending (avoid redundant wakes)
+    bool expected = false;
+    if (impl_->wake_pending.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+        if (impl_->wake_fd >= 0) {
+            uint64_t val = 1;
+            write(impl_->wake_fd, &val, sizeof(val));
+        }
+    }
+}
+
+void epoll_io::set_wake_callback(wake_callback callback) noexcept {
+    impl_->wake_cb = std::move(callback);
 }
 
 } // namespace core
 } // namespace fasterapi
 
 #endif // __linux__
+
+
+
 
 
 

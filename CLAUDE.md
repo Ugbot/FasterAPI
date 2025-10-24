@@ -1,0 +1,5 @@
+- we prefer to import hte alogrithms and the pure code rather than build and linking the libraries
+- this is a high performance system. we cant take shortcuts to make it work sooner
+- testing needs to be more complete than hellow world as webservers can do a lot. make sure all tests involve more than one route, different HTTP verbs and randomised inputdata.
+- allocations are expensive, we want preallocated buffers and pools where ever it makes sense.
+- keep allocations to a min, use buffer pools and ring buffers, aim for code that vectorises well

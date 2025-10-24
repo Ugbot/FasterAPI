@@ -26,8 +26,8 @@ echo ""
 
 # Start server in background
 echo "🚀 Starting FasterAPI server..."
-cd "$(dirname "$0")/.."
-PYTHONPATH=. python3 benchmarks/techempower_benchmarks.py &
+cd "$(dirname "$0")/../.."
+PYTHONPATH=. python3 benchmarks/techempower/techempower_benchmarks.py &
 SERVER_PID=$!
 sleep 2
 

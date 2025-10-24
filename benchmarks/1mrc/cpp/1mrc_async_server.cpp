@@ -5,7 +5,7 @@
  * Expected performance: 500K-2M req/s (50-200x faster than thread-per-connection!)
  */
 
-#include "../src/cpp/core/async_io.h"
+#include "src/cpp/core/async_io.h"
 #include <iostream>
 #include <string>
 #include <atomic>

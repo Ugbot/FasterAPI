@@ -7,3 +7,6 @@
 [submodule "external/drogon"]
 	path = external/drogon
 	url = https://github.com/drogonframework/drogon
+[submodule "external/nghttp2"]
+	path = external/nghttp2
+	url = https://github.com/nghttp2/nghttp2.git

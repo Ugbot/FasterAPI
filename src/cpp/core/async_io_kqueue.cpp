@@ -53,10 +53,14 @@ struct pending_op {
 struct kqueue_io::impl {
     int kq_fd{-1};
     async_io_config config;
-    
+
     std::atomic<bool> running{false};
     std::atomic<bool> stop_requested{false};
-    
+
+    // Wake mechanism
+    async_io::wake_callback wake_cb;
+    std::atomic<bool> wake_pending{false};
+
     // Statistics (atomic, no locks!)
     std::atomic<uint64_t> stat_accepts{0};
     std::atomic<uint64_t> stat_reads{0};
@@ -66,12 +70,19 @@ struct kqueue_io::impl {
     std::atomic<uint64_t> stat_polls{0};
     std::atomic<uint64_t> stat_events{0};
     std::atomic<uint64_t> stat_errors{0};
-    
+    std::atomic<uint64_t> stat_wakes{0};
+
     impl(const async_io_config& cfg) : config(cfg) {
         kq_fd = kqueue();
         if (kq_fd < 0) {
             // Handle error
         }
+
+        // Register wake event (EVFILT_USER for cross-thread signaling)
+        // ident=0 is our wake event
+        struct kevent kev;
+        EV_SET(&kev, 0, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, nullptr);
+        kevent(kq_fd, &kev, 1, nullptr, 0, nullptr);
     }
     
     ~impl() {
@@ -252,13 +263,23 @@ int kqueue_io::poll(uint32_t timeout_us) noexcept {
     // Process events (NO MUTEX!)
     for (int i = 0; i < n; ++i) {
         const struct kevent& kev = events[i];
-        
+
+        // Check for wake event (EVFILT_USER with ident=0)
+        if (kev.filter == EVFILT_USER && kev.ident == 0) {
+            impl_->stat_wakes.fetch_add(1, std::memory_order_relaxed);
+            impl_->wake_pending.store(false, std::memory_order_release);
+            if (impl_->wake_cb) {
+                impl_->wake_cb();
+            }
+            continue;
+        }
+
         // Get operation pointer directly from event (NO HASH MAP LOOKUP!)
         pending_op* op = static_cast<pending_op*>(kev.udata);
         if (!op) continue;
-        
+
         std::unique_ptr<pending_op> op_guard(op);  // Auto-delete
-        
+
         // Execute operation
         io_event event;
         event.operation = op->operation;
@@ -266,7 +287,7 @@ int kqueue_io::poll(uint32_t timeout_us) noexcept {
         event.user_data = op->user_data;
         event.flags = kev.flags;
         event.result = 0;
-        
+
         // Perform actual I/O (non-blocking!)
         switch (op->operation) {
             case io_op::accept: {
@@ -276,19 +297,19 @@ int kqueue_io::poll(uint32_t timeout_us) noexcept {
                 event.result = client_fd;
                 break;
             }
-            
+
             case io_op::read: {
                 ssize_t bytes = read(op->fd, op->buffer, op->size);
                 event.result = bytes;
                 break;
             }
-            
+
             case io_op::write: {
                 ssize_t bytes = write(op->fd, op->buffer, op->size);
                 event.result = bytes;
                 break;
             }
-            
+
             case io_op::connect: {
                 // Check for connection error
                 int error = 0;
@@ -297,11 +318,11 @@ int kqueue_io::poll(uint32_t timeout_us) noexcept {
                 event.result = error == 0 ? 0 : -1;
                 break;
             }
-            
+
             default:
                 break;
         }
-        
+
         // Invoke callback
         if (op->callback) {
             op->callback(event);
@@ -333,6 +354,22 @@ bool kqueue_io::is_running() const noexcept {
     return impl_->running.load(std::memory_order_acquire);
 }
 
+void kqueue_io::wake() noexcept {
+    // Thread-safe wake using EVFILT_USER
+    // Only trigger if not already pending (avoid redundant wakes)
+    bool expected = false;
+    if (impl_->wake_pending.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+        struct kevent kev;
+        // NOTE_TRIGGER triggers the EVFILT_USER event
+        EV_SET(&kev, 0, EVFILT_USER, 0, NOTE_TRIGGER, 0, nullptr);
+        kevent(impl_->kq_fd, &kev, 1, nullptr, 0, nullptr);
+    }
+}
+
+void kqueue_io::set_wake_callback(wake_callback callback) noexcept {
+    impl_->wake_cb = std::move(callback);
+}
+
 async_io::stats kqueue_io::get_stats() const noexcept {
     stats s;
     s.accepts = impl_->stat_accepts.load(std::memory_order_relaxed);
@@ -343,6 +380,7 @@ async_io::stats kqueue_io::get_stats() const noexcept {
     s.polls = impl_->stat_polls.load(std::memory_order_relaxed);
     s.events = impl_->stat_events.load(std::memory_order_relaxed);
     s.errors = impl_->stat_errors.load(std::memory_order_relaxed);
+    s.wakes = impl_->stat_wakes.load(std::memory_order_relaxed);
     return s;
 }
 

@@ -85,15 +85,41 @@ public:
     
 private:
     /**
-     * Huffman decode state machine.
+     * Huffman decode state machine entry.
+     *
+     * Based on nghttp2_huff_decode structure.
+     * Each entry represents a state transition in the Huffman FSA.
      */
-    struct DecodeState {
-        uint8_t state;
-        uint8_t flags;
+    struct DecodeEntry {
+        uint16_t state_and_flags;  // Packed: state (bits 0-8) + flags (bits 14-15)
+        uint8_t symbol;             // Symbol to emit if HUFF_SYM flag is set
+
+        // Modern C++ accessors with constexpr for compile-time evaluation
+        constexpr uint16_t state() const noexcept {
+            return state_and_flags & 0x1FF;  // Lower 9 bits = next state
+        }
+
+        constexpr bool emits_symbol() const noexcept {
+            return (state_and_flags & 0x8000) != 0;  // Bit 15 = NGHTTP2_HUFF_SYM
+        }
+
+        constexpr bool is_accepted() const noexcept {
+            return (state_and_flags & 0x4000) != 0;  // Bit 14 = NGHTTP2_HUFF_ACCEPTED
+        }
+
+        constexpr bool is_failure() const noexcept {
+            return state() == 256;  // State 256 = terminal failure state
+        }
     };
-    
-    // Decode table (from nghttp2)
-    static const DecodeState decode_table_[256][16];
+
+    // Decode table dimensions:
+    // - 257 states (0-255 internal nodes + 1 terminal failure state 256)
+    // - 16 entries per state (one for each 4-bit nibble value 0x0-0xF)
+    static constexpr size_t DECODE_TABLE_STATES = 257;
+    static constexpr size_t DECODE_TABLE_NIBBLES = 16;
+
+    // Decode table from nghttp2 (see nghttp2_hd_huffman_data.c)
+    static const DecodeEntry decode_table_[DECODE_TABLE_STATES][DECODE_TABLE_NIBBLES];
 };
 
 } // namespace http

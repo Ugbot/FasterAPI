@@ -342,6 +342,17 @@ async_io::stats io_uring_io::get_stats() const noexcept {
     return s;
 }
 
+// TODO: Implement wake() and set_wake_callback() for io_uring
+// wake() should use eventfd similar to epoll implementation
+// This is needed for async coroutine resumption from worker threads
+void io_uring_io::wake() noexcept {
+    // NOT IMPLEMENTED - will fall back to epoll or kqueue
+}
+
+void io_uring_io::set_wake_callback(wake_callback callback) noexcept {
+    // NOT IMPLEMENTED - will fall back to epoll or kqueue
+}
+
 #else  // !HAVE_LIBURING
 
 // Stub implementations when liburing is not available
@@ -357,6 +368,8 @@ void io_uring_io::run() noexcept {}
 void io_uring_io::stop() noexcept {}
 bool io_uring_io::is_running() const noexcept { return false; }
 async_io::stats io_uring_io::get_stats() const noexcept { return {}; }
+void io_uring_io::wake() noexcept {}
+void io_uring_io::set_wake_callback(wake_callback) noexcept {}
 
 #endif // HAVE_LIBURING
 
@@ -364,6 +377,9 @@ async_io::stats io_uring_io::get_stats() const noexcept { return {}; }
 } // namespace fasterapi
 
 #endif // __linux__
+
+
+
 
 
 

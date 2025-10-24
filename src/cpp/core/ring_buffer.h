@@ -4,38 +4,34 @@
 #include <atomic>
 #include <cstring>
 #include <array>
+#include "lockfree_queue.h"  // For CACHE_LINE_SIZE constant
 
 namespace fasterapi {
 namespace core {
 
 /**
  * Lock-free Single-Producer Single-Consumer (SPSC) Ring Buffer.
- * 
+ *
  * Based on Aeron's buffer design:
  * - Zero-copy message passing
  * - Lock-free (single producer, single consumer)
  * - Cache-line padding to avoid false sharing
  * - Memory barriers for correctness
- * 
+ *
  * Aeron approach:
  * - Separate read/write positions
  * - Atomic operations with memory ordering
  * - Padding to prevent false sharing
  * - Power-of-2 sizes for fast modulo
- * 
+ *
  * Perfect for:
  * - Reactor → Worker communication
  * - WebRTC data channels
  * - Media frame buffers
  * - Event streaming
- * 
+ *
  * Performance: <50ns write, <30ns read
  */
-
-/**
- * Cache line size for padding.
- */
-static constexpr size_t CACHE_LINE_SIZE = 64;
 
 /**
  * SPSC Ring Buffer.

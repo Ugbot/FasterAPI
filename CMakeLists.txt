@@ -15,7 +15,7 @@ option(FA_BUILD_HTTP         "Build HTTP server" ON)
 option(FA_BUILD_MCP          "Build MCP (Model Context Protocol) support" ON)
 option(FA_USE_LIBUV          "Use libuv for event loop (required on Windows)" ON)
 option(FA_USE_ASIO           "Build with standalone Asio (for Beast/H2 path)" OFF)
-option(FA_ENABLE_HTTP2       "Enable HTTP/2 support via nghttp2" ON)
+option(FA_ENABLE_HTTP2       "Enable HTTP/2 support (pure C++ implementation)" ON)
 option(FA_ENABLE_HTTP3       "Enable HTTP/3 support via MsQuic" OFF)
 option(FA_ENABLE_COMPRESSION "Enable zstd compression" ON)
 option(FA_ENABLE_MIMALLOC    "Link mimalloc as default allocator" ON)
@@ -30,8 +30,8 @@ else()
     set(NATIVE_FLAG "-march=native")
 endif()
 
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 ${NATIVE_FLAG} -flto -fno-exceptions -fno-rtti")
-set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g -fno-exceptions -fno-rtti")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 ${NATIVE_FLAG} -flto")
+set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g")
 
 # Default to Release build
 if(NOT CMAKE_BUILD_TYPE)
@@ -116,6 +116,7 @@ set(PYTHON_SOURCES
     src/cpp/python/py_executor.cpp
     src/cpp/python/free_threading.cpp
     src/cpp/python/subinterpreter_pool.cpp
+    src/cpp/python/subinterpreter_executor.cpp
 )
 
 set(PYTHON_HEADERS
@@ -217,21 +218,6 @@ if (FA_BUILD_HTTP)
             OPTIONS
                 "ZSTD_BUILD_PROGRAMS OFF"
                 "ZSTD_BUILD_TESTS OFF"
-        )
-    endif()
-
-    # nghttp2 (HTTP/2)
-    if (FA_ENABLE_HTTP2)
-        CPMAddPackage(
-            NAME nghttp2
-            GITHUB_REPOSITORY nghttp2/nghttp2
-            GIT_TAG v1.63.0
-            OPTIONS
-                "ENABLE_EXAMPLES OFF"
-                "ENABLE_HPACK_TOOLS OFF"
-                "ENABLE_LIB_ONLY ON"
-                "WITH_APP OFF"
-                "ENABLE_ASIO_LIB OFF"
         )
     endif()
 
@@ -339,11 +325,13 @@ endif()
 # HTTP Server Library Target
 # -----------------------------
 
-# Net layer sources (event loop, TCP, UDP)
+# Net layer sources (event loop, TCP, UDP, TLS)
 set(NET_SOURCES
     src/cpp/net/event_loop.cpp
     src/cpp/net/tcp_socket.cpp
     src/cpp/net/tcp_listener.cpp
+    src/cpp/net/tls_context.cpp
+    src/cpp/net/tls_socket.cpp
 )
 
 # Platform-specific event loop implementations
@@ -358,8 +346,8 @@ endif()
 
 if (FA_BUILD_HTTP)
     set(HTTP_SOURCES
-        src/cpp/http/http_lib.cpp
-        src/cpp/http/server.cpp
+        # Note: http_lib.cpp and server.cpp removed - old CoroIO backend
+        # Replaced by http2_server.cpp with native event loop
         src/cpp/http/request.cpp
         src/cpp/http/response.cpp
         src/cpp/http/router.cpp
@@ -402,21 +390,35 @@ if (FA_BUILD_HTTP)
     
     # Add Huffman coding (for HPACK compression)
     list(APPEND HTTP_SOURCES src/cpp/http/huffman.cpp)
-    
+    list(APPEND HTTP_SOURCES src/cpp/http/huffman_table_data.cpp)
+
     # Add HTTP/2 Server Push
     list(APPEND HTTP_SOURCES src/cpp/http/h2_server_push.cpp)
-    
+
+    # Add HTTP Server C API (for Python ctypes bindings)
+    list(APPEND HTTP_SOURCES src/cpp/http/http_server_c_api.cpp)
+
     # Add HTTP/1.1 parser (zero-allocation)
     list(APPEND HTTP_SOURCES src/cpp/http/http1_parser.cpp)
 
-    # Add CoroIO-based HTTP/1.1 handler
-    list(APPEND HTTP_SOURCES src/cpp/http/http1_coroio_handler.cpp)
+    # Add HTTP/1.1 connection handler
+    list(APPEND HTTP_SOURCES src/cpp/http/http1_connection.cpp)
 
-    # Add EventLoopPool (multi-threaded event loop)
-    list(APPEND HTTP_SOURCES src/cpp/http/event_loop_pool.cpp)
+    # Add unified HTTP server (TLS/ALPN multi-protocol)
+    list(APPEND HTTP_SOURCES src/cpp/http/unified_server.cpp)
+
+    # Note: Removed CoroIO-based handlers - using native event loop instead
 
     # Add Python callback bridge
     list(APPEND HTTP_SOURCES src/cpp/http/python_callback_bridge.cpp)
+
+    # Add HTTP/2 native server (with Python integration)
+    if (FA_ENABLE_HTTP2)
+        list(APPEND HTTP_SOURCES src/cpp/http/http2_server.cpp)
+        list(APPEND HTTP_SOURCES src/cpp/http/http2_frame.cpp)
+        list(APPEND HTTP_SOURCES src/cpp/http/http2_stream.cpp)
+        list(APPEND HTTP_SOURCES src/cpp/http/http2_connection.cpp)
+    endif()
 
     # Add HTTP/3 parser (zero-allocation)
     list(APPEND HTTP_SOURCES src/cpp/http/http3_parser.cpp)
@@ -492,20 +494,8 @@ if (FA_BUILD_HTTP)
         src/cpp/webrtc/rtp.h
     )
 
-    # Add CoroIO library (coroutine-based networking)
-    # Note: CoroIO requires exceptions, so we build it separately without -fno-exceptions
-    add_subdirectory(external/coroio EXCLUDE_FROM_ALL)
-
-    # Re-enable exceptions for CoroIO target
-    if (TARGET coroio)
-        target_compile_options(coroio PRIVATE -fexceptions)
-        # Remove -fno-exceptions if it was inherited
-        get_target_property(COROIO_OPTIONS coroio COMPILE_OPTIONS)
-        if(COROIO_OPTIONS)
-            list(REMOVE_ITEM COROIO_OPTIONS "-fno-exceptions")
-            set_target_properties(coroio PROPERTIES COMPILE_OPTIONS "${COROIO_OPTIONS}")
-        endif()
-    endif()
+    # Note: CoroIO removed - using native event loop (kqueue/epoll) instead
+    # Native event loop achieves 160K+ req/s vs CoroIO's 600 req/s
 
     # Create HTTP server shared library
     add_library(fasterapi_http SHARED ${NET_SOURCES} ${HTTP_SOURCES} ${HTTP_HEADERS} ${CORE_SOURCES} ${CORE_HEADERS} ${PYTHON_SOURCES} ${PYTHON_HEADERS} ${NATIVE_TYPES_SOURCES} ${NATIVE_TYPES_HEADERS})
@@ -545,14 +535,6 @@ if (FA_BUILD_HTTP)
     target_include_directories(fasterapi_http PRIVATE ${Python3_INCLUDE_DIRS})
     target_link_libraries(fasterapi_http PRIVATE ${Python3_LIBRARIES})
 
-    # Link CoroIO
-    target_include_directories(fasterapi_http PRIVATE ${CMAKE_SOURCE_DIR}/external/coroio)
-    target_link_libraries(fasterapi_http PRIVATE coroio)
-
-    # Enable exceptions for CoroIO-based files (CoroIO requires exceptions)
-    set_source_files_properties(src/cpp/http/http1_coroio_handler.cpp PROPERTIES COMPILE_FLAGS "-fexceptions")
-    set_source_files_properties(src/cpp/http/event_loop_pool.cpp PROPERTIES COMPILE_FLAGS "-fexceptions")
-
     # Link zstd if compression enabled
     if (FA_ENABLE_COMPRESSION)
         if (TARGET libzstd_static)
@@ -563,17 +545,19 @@ if (FA_BUILD_HTTP)
         target_compile_definitions(fasterapi_http PRIVATE FA_COMPRESSION_ENABLED)
     endif()
 
-    # Link nghttp2 if HTTP/2 enabled
-    if (FA_ENABLE_HTTP2 AND TARGET nghttp2)
-        target_link_libraries(fasterapi_http PRIVATE nghttp2)
-        target_link_libraries(fasterapi_http PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    # Set HTTP/2 flag if enabled (pure C++ implementation, no external deps)
+    if (FA_ENABLE_HTTP2)
         target_compile_definitions(fasterapi_http PRIVATE FA_HTTP2_ENABLED)
+    endif()
+
+    # Link OpenSSL (required for WebSockets, h2_handler, HTTP/3)
+    if (OPENSSL_FOUND)
+        target_link_libraries(fasterapi_http PRIVATE OpenSSL::SSL OpenSSL::Crypto)
     endif()
 
     # Link MsQuic if HTTP/3 enabled
     if (FA_ENABLE_HTTP3 AND TARGET msquic)
         target_link_libraries(fasterapi_http PRIVATE msquic)
-        target_link_libraries(fasterapi_http PRIVATE OpenSSL::SSL OpenSSL::Crypto)
         target_compile_definitions(fasterapi_http PRIVATE FA_HTTP3_ENABLED)
     endif()
 
@@ -665,6 +649,7 @@ endif()
 # Test the native event loop with a simple echo server
 add_executable(test_event_loop_echo tests/test_event_loop_echo.cpp ${NET_SOURCES})
 target_include_directories(test_event_loop_echo PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(test_event_loop_echo PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 set_target_properties(test_event_loop_echo PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
 )
@@ -672,6 +657,7 @@ set_target_properties(test_event_loop_echo PROPERTIES
 # Test multi-threaded TCP listener
 add_executable(test_tcp_listener_echo tests/test_tcp_listener_echo.cpp ${NET_SOURCES})
 target_include_directories(test_tcp_listener_echo PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(test_tcp_listener_echo PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 set_target_properties(test_tcp_listener_echo PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
 )
@@ -684,6 +670,7 @@ if (FA_BUILD_HTTP)
         src/cpp/http/http1_parser.cpp
     )
     target_include_directories(test_http1_native PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(test_http1_native PRIVATE OpenSSL::SSL OpenSSL::Crypto)
     set_target_properties(test_http1_native PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
     )
@@ -696,13 +683,23 @@ if (FA_BUILD_HTTP)
         )
         target_include_directories(test_http2_native PRIVATE
             ${CMAKE_SOURCE_DIR}
-            ${CMAKE_BINARY_DIR}/_deps/nghttp2-src/lib/includes
+            ${Python3_INCLUDE_DIRS}
         )
-        target_link_libraries(test_http2_native PRIVATE nghttp2)
+        target_link_libraries(test_http2_native PRIVATE OpenSSL::SSL OpenSSL::Crypto ${Python3_LIBRARIES})
         set_target_properties(test_http2_native PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
         )
     endif()
+
+    # Test unified server (TLS/ALPN multi-protocol)
+    add_executable(test_unified_server
+        tests/test_unified_server.cpp
+    )
+    target_include_directories(test_unified_server PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(test_unified_server PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+    set_target_properties(test_unified_server PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+    )
 endif()
 
 # -----------------------------
@@ -781,10 +778,11 @@ if (FA_BUILD_HTTP)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
     )
     
-    add_executable(test_h2_server_push tests/test_h2_server_push.cpp 
+    add_executable(test_h2_server_push tests/test_h2_server_push.cpp
         src/cpp/http/h2_server_push.cpp
         src/cpp/http/hpack.cpp
         src/cpp/http/huffman.cpp
+        src/cpp/http/huffman_table_data.cpp
     )
     target_include_directories(test_h2_server_push PRIVATE ${CMAKE_SOURCE_DIR})
     set_target_properties(test_h2_server_push PROPERTIES
@@ -823,33 +821,17 @@ if (FA_BUILD_HTTP)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
     )
 
-    # Test C++ routes with CoroIO HTTP/1.1 server
-    add_executable(test_cpp_routes test_cpp_routes.cpp
-        src/cpp/http/server.cpp
-        src/cpp/http/request.cpp
-        src/cpp/http/response.cpp
-        src/cpp/http/router.cpp
-        src/cpp/http/http1_parser.cpp
-        src/cpp/http/http1_coroio_handler.cpp
-        src/cpp/http/event_loop_pool.cpp
-        src/cpp/http/python_callback_bridge.cpp
-        ${CORE_SOURCES}
+    # Test C++20 coroutine infrastructure
+    add_executable(test_coro_task tests/test_coro_task.cpp)
+    target_include_directories(test_coro_task PRIVATE ${CMAKE_SOURCE_DIR})
+    set_target_properties(test_coro_task PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED YES
     )
-    target_include_directories(test_cpp_routes PRIVATE
-        ${CMAKE_SOURCE_DIR}
-        ${Python3_INCLUDE_DIRS}
-        ${CMAKE_SOURCE_DIR}/external/coroio
-    )
-    target_link_libraries(test_cpp_routes PRIVATE
-        ${Python3_LIBRARIES}
-        coroio
-    )
-    # Enable exceptions for CoroIO integration
-    set_source_files_properties(src/cpp/http/http1_coroio_handler.cpp PROPERTIES COMPILE_FLAGS "-fexceptions")
-    set_source_files_properties(src/cpp/http/event_loop_pool.cpp PROPERTIES COMPILE_FLAGS "-fexceptions")
-    set_target_properties(test_cpp_routes PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
-    )
+
+    # Note: test_cpp_routes removed - used old CoroIO backend
+    # Use native HTTP/2 server with Cython bindings instead
 
     # Pure C++ benchmark for Python overhead analysis
     add_executable(bench_pure_cpp benchmarks/fasterapi/bench_pure_cpp.cpp
@@ -916,37 +898,19 @@ if (FA_BUILD_HTTP)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks"
     )
 
-    # 1MRC - CoroIO version (C++20 coroutines, target >200K req/s)
-    add_executable(1mrc_coroio_server benchmarks/1mrc/cpp/1mrc_coroio_server.cpp
-        src/cpp/http/server.cpp
-        src/cpp/http/request.cpp
-        src/cpp/http/response.cpp
-        src/cpp/http/router.cpp
+    # Note: 1mrc_coroio_server removed - used old CoroIO backend
+    # Native event loop (test_http1_native, test_http2_native) is 250x faster
+
+    # 1MRC - Native lockfree version (production architecture)
+    add_executable(1mrc_native_lockfree
+        benchmarks/1mrc/cpp/1mrc_native_lockfree.cpp
+        ${NET_SOURCES}
         src/cpp/http/http1_parser.cpp
-        src/cpp/http/http1_coroio_handler.cpp
-        src/cpp/http/event_loop_pool.cpp
-        src/cpp/http/python_callback_bridge.cpp
-        ${CORE_SOURCES}
     )
-    target_include_directories(1mrc_coroio_server PRIVATE
-        ${CMAKE_SOURCE_DIR}
-        ${Python3_INCLUDE_DIRS}
-        ${CMAKE_SOURCE_DIR}/external/coroio
-    )
-    target_compile_options(1mrc_coroio_server PRIVATE -O3 -pthread)
-    target_link_libraries(1mrc_coroio_server PRIVATE
-        ${Python3_LIBRARIES}
-        coroio
-        pthread
-    )
-    # Enable exceptions for CoroIO integration and JSON parsing
-    set_source_files_properties(
-        src/cpp/http/http1_coroio_handler.cpp
-        src/cpp/http/event_loop_pool.cpp
-        benchmarks/1mrc/cpp/1mrc_coroio_server.cpp
-        PROPERTIES COMPILE_FLAGS "-fexceptions"
-    )
-    set_target_properties(1mrc_coroio_server PROPERTIES
+    target_include_directories(1mrc_native_lockfree PRIVATE ${CMAKE_SOURCE_DIR})
+    target_compile_options(1mrc_native_lockfree PRIVATE -O3 -pthread)
+    target_link_libraries(1mrc_native_lockfree PRIVATE OpenSSL::SSL OpenSSL::Crypto pthread)
+    set_target_properties(1mrc_native_lockfree PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks"
     )
 
@@ -1079,4 +1043,85 @@ if (FA_BUILD_EXAMPLES AND FA_BUILD_HTTP)
     message(STATUS "C++ examples will be built at: ${CMAKE_BINARY_DIR}/examples/")
     message(STATUS "  - hello_world: Minimal 'Hello World' example")
     message(STATUS "  - cpp_app_demo: Comprehensive feature demonstration")
+endif()
+
+# -----------------------------
+# Cython Python Bindings
+# -----------------------------
+
+option(FA_BUILD_CYTHON "Build Cython Python bindings" ON)
+
+if (FA_BUILD_CYTHON AND FA_BUILD_HTTP)
+    message(STATUS "Building Cython Python bindings")
+
+    # Find Cython
+    find_program(CYTHON_EXECUTABLE cython)
+    if (NOT CYTHON_EXECUTABLE)
+        message(WARNING "Cython not found - Python bindings will not be built")
+        message(WARNING "Install with: pip install cython")
+        set(FA_BUILD_CYTHON OFF)
+    else()
+        message(STATUS "Cython found: ${CYTHON_EXECUTABLE}")
+    endif()
+endif()
+
+if (FA_BUILD_CYTHON AND FA_BUILD_HTTP AND CYTHON_EXECUTABLE)
+    # Function to add Cython extension module
+    function(add_cython_extension name pyx_file)
+        # Get absolute path for .pyx file
+        get_filename_component(pyx_file_abs "${pyx_file}" ABSOLUTE)
+
+        # Output C++ file
+        set(c_file "${CMAKE_CURRENT_BINARY_DIR}/_cython/${name}.cpp")
+
+        # Create output directory
+        file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/_cython")
+
+        # Cythonize command
+        add_custom_command(
+            OUTPUT ${c_file}
+            COMMAND ${CYTHON_EXECUTABLE}
+            ARGS --cplus -3 ${pyx_file_abs} -o ${c_file}
+                -I ${CMAKE_SOURCE_DIR}
+            DEPENDS ${pyx_file}
+            COMMENT "Cythonizing ${name}"
+            VERBATIM
+        )
+
+        # Create Python extension module
+        Python3_add_library(${name} MODULE ${c_file})
+
+        # Include directories
+        target_include_directories(${name} PRIVATE
+            ${CMAKE_SOURCE_DIR}
+            ${CMAKE_SOURCE_DIR}/src/cpp
+            ${Python3_INCLUDE_DIRS}
+        )
+
+        # Link libraries
+        target_link_libraries(${name} PRIVATE
+            fasterapi_http
+        )
+
+        # Set output properties
+        set_target_properties(${name} PROPERTIES
+            PREFIX ""
+            OUTPUT_NAME ${name}
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/fasterapi/_native"
+            SUFFIX ".${Python3_SOABI}${CMAKE_SHARED_LIBRARY_SUFFIX}"
+        )
+
+        # Add to install target
+        install(TARGETS ${name}
+            LIBRARY DESTINATION fasterapi/_native
+        )
+    endfunction()
+
+    # Add HTTP/2 Cython extension
+    if (FA_ENABLE_HTTP2)
+        add_cython_extension(http2 "${CMAKE_SOURCE_DIR}/fasterapi/_cython/http2.pyx")
+        message(STATUS "HTTP/2 Cython extension will be built at: ${CMAKE_SOURCE_DIR}/fasterapi/_native/http2.*.so")
+    endif()
+
+    message(STATUS "Cython extensions will be built to: ${CMAKE_SOURCE_DIR}/fasterapi/_native/")
 endif()

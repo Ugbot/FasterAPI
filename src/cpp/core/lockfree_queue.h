@@ -28,7 +28,7 @@ namespace fasterapi {
 namespace core {
 
 // Cache line size (typical for modern CPUs)
-static constexpr size_t CACHE_LINE_SIZE = 64;
+inline constexpr size_t CACHE_LINE_SIZE = 64;
 
 /**
  * Aeron-style SPSC Queue.

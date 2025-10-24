@@ -12,7 +12,7 @@ if(NOT DEFINED CMAKE_INSTALL_CONFIG_NAME)
     string(REGEX REPLACE "^[^A-Za-z0-9_]+" ""
            CMAKE_INSTALL_CONFIG_NAME "${BUILD_TYPE}")
   else()
-    set(CMAKE_INSTALL_CONFIG_NAME "RelWithDebInfo")
+    set(CMAKE_INSTALL_CONFIG_NAME "Release")
   endif()
   message(STATUS "Install configuration: \"${CMAKE_INSTALL_CONFIG_NAME}\"")
 endif()
@@ -52,9 +52,30 @@ if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   include("/Users/bengamble/FasterAPI/build/_deps/simdjson-build/cmake_install.cmake")
 endif()
 
-if(NOT CMAKE_INSTALL_LOCAL_ONLY)
-  # Include the install script for the subdirectory.
-  include("/Users/bengamble/FasterAPI/build/_deps/nghttp2-build/cmake_install.cmake")
+if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/fasterapi/_native" TYPE SHARED_LIBRARY FILES "/Users/bengamble/FasterAPI/fasterapi/_native/libfasterapi_mcp.dylib")
+  if(EXISTS "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/fasterapi/_native/libfasterapi_mcp.dylib" AND
+     NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/fasterapi/_native/libfasterapi_mcp.dylib")
+    if(CMAKE_INSTALL_DO_STRIP)
+      execute_process(COMMAND "/usr/bin/strip" -x "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/fasterapi/_native/libfasterapi_mcp.dylib")
+    endif()
+  endif()
+endif()
+
+if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
+endif()
+
+if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/fasterapi/_native" TYPE MODULE FILES "/Users/bengamble/FasterAPI/fasterapi/_native/http2.cpython-313-darwin.dylib")
+  if(EXISTS "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/fasterapi/_native/http2.cpython-313-darwin.dylib" AND
+     NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/fasterapi/_native/http2.cpython-313-darwin.dylib")
+    execute_process(COMMAND /usr/bin/install_name_tool
+      -delete_rpath "/Users/bengamble/FasterAPI/build/lib"
+      "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/fasterapi/_native/http2.cpython-313-darwin.dylib")
+    if(CMAKE_INSTALL_DO_STRIP)
+      execute_process(COMMAND "/usr/bin/strip" -x "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/fasterapi/_native/http2.cpython-313-darwin.dylib")
+    endif()
+  endif()
 endif()
 
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT

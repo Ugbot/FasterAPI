@@ -275,9 +275,57 @@ int HPACKDecoder::decode(
             
         } else if (first_byte & 0x40) {
             // Literal Header Field with Incremental Indexing (Section 6.2.1)
-            // TODO: Implement literal parsing
-            return 1;  // Not implemented yet
-            
+            uint64_t index;
+            size_t consumed;
+
+            if (decode_integer(input + pos, input_len - pos, 6, index, consumed) != 0) {
+                return 1;
+            }
+
+            pos += consumed;
+
+            std::string name, value;
+
+            if (index == 0) {
+                // New name - decode name string
+                size_t name_consumed;
+                if (decode_string(input + pos, input_len - pos, name, name_consumed) != 0) {
+                    return 1;
+                }
+                pos += name_consumed;
+            } else {
+                // Indexed name from table
+                HPACKHeader name_header;
+                if (index <= STATIC_TABLE_SIZE) {
+                    if (HPACKStaticTable::get(index, name_header) != 0) {
+                        return 1;
+                    }
+                } else {
+                    size_t dyn_index = index - STATIC_TABLE_SIZE - 1;
+                    if (table_.get(dyn_index, name_header) != 0) {
+                        return 1;
+                    }
+                }
+                name = std::string(name_header.name);
+            }
+
+            // Decode value string
+            size_t value_consumed;
+            if (decode_string(input + pos, input_len - pos, value, value_consumed) != 0) {
+                return 1;
+            }
+            pos += value_consumed;
+
+            // Add to dynamic table
+            table_.add(name, value);
+
+            // Add to output (create string_view from table storage)
+            HPACKHeader header;
+            if (table_.get(0, header) != 0) {
+                return 1;
+            }
+            output.push_back(header);
+
         } else if ((first_byte & 0xE0) == 0x20) {
             // Dynamic Table Size Update (Section 6.3)
             uint64_t new_size;
@@ -291,9 +339,58 @@ int HPACKDecoder::decode(
             table_.set_max_size(new_size);
             
         } else {
-            // Literal Header Field without Indexing or Never Indexed
-            // TODO: Implement literal parsing
-            return 1;  // Not implemented yet
+            // Literal Header Field without Indexing (0000xxxx) or Never Indexed (0001xxxx)
+            bool never_indexed = (first_byte & 0x10) != 0;
+            uint64_t index;
+            size_t consumed;
+
+            if (decode_integer(input + pos, input_len - pos, 4, index, consumed) != 0) {
+                return 1;
+            }
+
+            pos += consumed;
+
+            std::string name, value;
+
+            if (index == 0) {
+                // New name - decode name string
+                size_t name_consumed;
+                if (decode_string(input + pos, input_len - pos, name, name_consumed) != 0) {
+                    return 1;
+                }
+                pos += name_consumed;
+            } else {
+                // Indexed name from table
+                HPACKHeader name_header;
+                if (index <= STATIC_TABLE_SIZE) {
+                    if (HPACKStaticTable::get(index, name_header) != 0) {
+                        return 1;
+                    }
+                } else {
+                    size_t dyn_index = index - STATIC_TABLE_SIZE - 1;
+                    if (table_.get(dyn_index, name_header) != 0) {
+                        return 1;
+                    }
+                }
+                name = std::string(name_header.name);
+            }
+
+            // Decode value string
+            size_t value_consumed;
+            if (decode_string(input + pos, input_len - pos, value, value_consumed) != 0) {
+                return 1;
+            }
+            pos += value_consumed;
+
+            // Store in temporary buffer (these headers are NOT added to dynamic table)
+            temp_name_buffer_ = name;
+            temp_value_buffer_ = value;
+
+            HPACKHeader header;
+            header.name = temp_name_buffer_;
+            header.value = temp_value_buffer_;
+            header.sensitive = never_indexed;
+            output.push_back(header);
         }
     }
     
