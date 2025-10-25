@@ -5,6 +5,8 @@
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
+#include <iostream>
+#include <cstdlib>
 
 namespace fasterapi {
 namespace core {
@@ -118,11 +120,15 @@ public:
             auto& promise = handle_.promise();
 
             if (promise.has_exception_) {
-                std::rethrow_exception(promise.exception());
+                // With -fno-exceptions, we cannot rethrow. Abort instead.
+                std::cerr << "FATAL: Coroutine task has exception but exceptions are disabled" << std::endl;
+                std::abort();
             }
 
             if (!promise.has_value_) {
-                throw std::runtime_error("task has no value");
+                // With -fno-exceptions, we cannot throw. Abort instead.
+                std::cerr << "FATAL: Coroutine task has no value" << std::endl;
+                std::abort();
             }
 
             return std::move(promise.value());
@@ -244,7 +250,9 @@ public:
         void await_resume() {
             auto& promise = handle_.promise();
             if (promise.has_exception_) {
-                std::rethrow_exception(promise.exception_);
+                // With -fno-exceptions, we cannot rethrow. Abort instead.
+                std::cerr << "FATAL: Coroutine task (void) has exception but exceptions are disabled" << std::endl;
+                std::abort();
             }
         }
     };

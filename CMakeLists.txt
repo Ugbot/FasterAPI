@@ -30,8 +30,8 @@ else()
     set(NATIVE_FLAG "-march=native")
 endif()
 
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 ${NATIVE_FLAG} -flto")
-set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 ${NATIVE_FLAG} -flto -fno-exceptions -fno-rtti")
+set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g -fno-exceptions -fno-rtti")
 
 # Default to Release build
 if(NOT CMAKE_BUILD_TYPE)
@@ -403,6 +403,7 @@ if (FA_BUILD_HTTP)
 
     # Add HTTP/1.1 connection handler
     list(APPEND HTTP_SOURCES src/cpp/http/http1_connection.cpp)
+    # Note: http1_coroio_handler.cpp removed - CoroIO dependency removed
 
     # Add unified HTTP server (TLS/ALPN multi-protocol)
     list(APPEND HTTP_SOURCES src/cpp/http/unified_server.cpp)
@@ -433,8 +434,9 @@ if (FA_BUILD_HTTP)
         src/cpp/webrtc/rtp.cpp
     )
 
-    # Add high-level C++ user API (disabled due to -fno-exceptions issues)
-    # list(APPEND HTTP_SOURCES src/cpp/http/app.cpp)
+    # Add high-level C++ user API (exception-free since 2025-01-25)
+    list(APPEND HTTP_SOURCES src/cpp/http/app.cpp)
+    list(APPEND HTTP_SOURCES src/cpp/http/server.cpp)
 
     set(HTTP_HEADERS
         src/cpp/http/server.h

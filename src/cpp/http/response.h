@@ -251,6 +251,27 @@ public:
     std::string to_http_wire_format(bool keep_alive = true) const noexcept;
 
     /**
+     * Get status code (for bridge to UnifiedServer).
+     *
+     * @return HTTP status code
+     */
+    Status get_status_code() const noexcept { return status_; }
+
+    /**
+     * Get headers map (for bridge to UnifiedServer).
+     *
+     * @return Reference to headers map
+     */
+    const std::unordered_map<std::string, std::string>& get_headers() const noexcept { return headers_; }
+
+    /**
+     * Get response body (for bridge to UnifiedServer).
+     *
+     * @return Reference to response body
+     */
+    const std::string& get_body() const noexcept { return body_; }
+
+    /**
      * Constructor for uWebSockets integration.
      *
      * @param res uWebSockets response object

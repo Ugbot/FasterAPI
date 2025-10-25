@@ -18,7 +18,7 @@ namespace fasterapi {
 namespace http {
     class Router;
     class RouteParams;
-    class Http1CoroioHandler;
+    class UnifiedServer;
 }
 }
 
@@ -60,8 +60,8 @@ public:
         size_t worker_queue_size = 1024;   // Per-worker queue size (non-Linux platforms)
     };
 
-    // Route handler function type
-    using RouteHandler = std::function<void(HttpRequest*, HttpResponse*)>;
+    // Route handler function type (matches fasterapi::http::Router signature)
+    using RouteHandler = std::function<void(HttpRequest*, HttpResponse*, const fasterapi::http::RouteParams&)>;
     
     // WebSocket handler function type
     using WebSocketHandler = std::function<void(WebSocketHandler*)>;
@@ -170,46 +170,28 @@ private:
     std::unordered_map<std::string, std::unordered_map<std::string, RouteHandler>> routes_;
     std::unordered_map<std::string, WebSocketHandler> websocket_handlers_;
     
-    // High-performance router (new implementation)
+    // High-performance router
     std::unique_ptr<fasterapi::http::Router> router_;
-    
-    // Server threads (one per core)
-    std::vector<std::thread> server_threads_;
-    uint32_t num_cores_;
-    
-    // Protocol handlers
-    std::unique_ptr<fasterapi::http::Http1CoroioHandler> h1_handler_;
-    std::unique_ptr<class Http2Handler> h2_handler_;
-    std::unique_ptr<class Http3Handler> h3_handler_;
-    std::unique_ptr<class CompressionHandler> compression_handler_;
+
+    // Unified HTTP/1.1 + HTTP/2 server (replaces protocol-specific handlers)
+    std::unique_ptr<fasterapi::http::UnifiedServer> unified_server_;
 
     /**
-     * Initialize protocol handlers.
-     * 
-     * @return Error code (0 = success)
+     * Bridge handler from UnifiedServer callback to our Router-based handlers.
+     *
+     * @param method HTTP method
+     * @param path Request path
+     * @param headers Request headers
+     * @param body Request body
+     * @param send_response Callback to send response
      */
-    int init_handlers() noexcept;
-
-    /**
-     * Start HTTP/1.1 server.
-     * 
-     * @return Error code (0 = success)
-     */
-    int start_h1_server() noexcept;
-
-    /**
-     * Start HTTP/2 server.
-     * 
-     * @return Error code (0 = success)
-     */
-    int start_h2_server() noexcept;
-
-    /**
-     * Start HTTP/3 server.
-     * 
-     * @return Error code (0 = success)
-     */
-    int start_h3_server() noexcept;
+    void handle_unified_request(
+        const std::string& method,
+        const std::string& path,
+        const std::unordered_map<std::string, std::string>& headers,
+        const std::string& body,
+        std::function<void(uint16_t, const std::unordered_map<std::string, std::string>&, const std::string&)> send_response
+    ) noexcept;
 
     /**
      * Handle incoming request.

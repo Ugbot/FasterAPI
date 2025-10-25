@@ -2,7 +2,7 @@
 #include "request.h"
 #include "response.h"
 #include "router.h"
-#include "http1_coroio_handler.h"
+#include "unified_server.h"
 #include <thread>
 #include <chrono>
 #include <algorithm>
@@ -15,69 +15,16 @@
 
 using namespace fasterapi::http;
 
-class Http2Handler {
-public:
-    Http2Handler(HttpServer* server) : server_(server) {}
-    
-    int start(uint16_t port, const std::string& host) {
-        // HTTP/2 implementation would go here
-        // For now, just return success
-        return 0;
-    }
-    
-private:
-    HttpServer* server_;
-};
+HttpServer::HttpServer(const Config& config) : config_(config) {
+    // Initialize high-performance router (exception-free allocation)
+    router_.reset(new (std::nothrow) Router());
 
-class Http3Handler {
-public:
-    Http3Handler(HttpServer* server) : server_(server) {}
-    
-    int start(uint16_t port, const std::string& host) {
-        // HTTP/3 implementation would go here
-        // For now, just return success
-        return 0;
+    if (!router_) {
+        std::cerr << "FATAL: Failed to allocate Router" << std::endl;
+        // Server will be non-functional without router
     }
-    
-private:
-    HttpServer* server_;
-};
 
-class CompressionHandler {
-public:
-    CompressionHandler(const HttpServer::Config& config) : config_(config) {}
-    
-    bool should_compress(const std::string& content_type, uint64_t size) {
-        if (!config_.enable_compression) return false;
-        if (size < config_.compression_threshold) return false;
-        
-        // Check if content type is compressible
-        return content_type.find("text/") == 0 || 
-               content_type == "application/json" ||
-               content_type == "application/javascript";
-    }
-    
-    std::string compress(const std::string& data) {
-        // Simple compression placeholder
-        // Real implementation would use zstd
-        return data;
-    }
-    
-private:
-    HttpServer::Config config_;
-};
-
-HttpServer::HttpServer(const Config& config) 
-    : config_(config), num_cores_(std::thread::hardware_concurrency()) {
-    
-    // Initialize protocol handlers
-    h1_handler_ = std::make_unique<Http1CoroioHandler>(this);
-    h2_handler_ = std::make_unique<Http2Handler>(this);
-    h3_handler_ = std::make_unique<Http3Handler>(this);
-    compression_handler_ = std::make_unique<CompressionHandler>(config);
-    
-    // Initialize high-performance router
-    router_ = std::make_unique<Router>();
+    // UnifiedServer is created in start() after routes are registered
 }
 
 HttpServer::~HttpServer() {
@@ -99,18 +46,14 @@ HttpServer::HttpServer(HttpServer&& other) noexcept
       compression_bytes_saved_(other.compression_bytes_saved_.load()),
       routes_(std::move(other.routes_)),
       websocket_handlers_(std::move(other.websocket_handlers_)),
-      server_threads_(std::move(other.server_threads_)),
-      num_cores_(other.num_cores_),
-      h1_handler_(std::move(other.h1_handler_)),
-      h2_handler_(std::move(other.h2_handler_)),
-      h3_handler_(std::move(other.h3_handler_)),
-      compression_handler_(std::move(other.compression_handler_)) {
+      router_(std::move(other.router_)),
+      unified_server_(std::move(other.unified_server_)) {
 }
 
 HttpServer& HttpServer::operator=(HttpServer&& other) noexcept {
     if (this != &other) {
         stop();
-        
+
         config_ = other.config_;
         running_ = other.running_.load();
         request_count_ = other.request_count_.load();
@@ -125,12 +68,8 @@ HttpServer& HttpServer::operator=(HttpServer&& other) noexcept {
         compression_bytes_saved_ = other.compression_bytes_saved_.load();
         routes_ = std::move(other.routes_);
         websocket_handlers_ = std::move(other.websocket_handlers_);
-        server_threads_ = std::move(other.server_threads_);
-        num_cores_ = other.num_cores_;
-        h1_handler_ = std::move(other.h1_handler_);
-        h2_handler_ = std::move(other.h2_handler_);
-        h3_handler_ = std::move(other.h3_handler_);
-        compression_handler_ = std::move(other.compression_handler_);
+        router_ = std::move(other.router_);
+        unified_server_ = std::move(other.unified_server_);
     }
     return *this;
 }
@@ -139,8 +78,20 @@ int HttpServer::add_route(const std::string& method, const std::string& path, Ro
     if (running_.load()) {
         return 1;  // Cannot add routes while running
     }
-    
-    routes_[method][path] = std::move(handler);
+
+    if (!router_) {
+        return -1;  // Router failed to allocate
+    }
+
+    // Add to router for efficient matching
+    int result = router_->add_route(method, path, handler);
+    if (result != 0) {
+        return result;
+    }
+
+    // Also store in routes map for introspection
+    routes_[method][path] = handler;
+
     return 0;
 }
 
@@ -157,47 +108,76 @@ int HttpServer::start() noexcept {
     if (running_.load()) {
         return 1;  // Already running
     }
-    
-    // Start HTTP/1.1 server
-    if (config_.enable_h1) {
-        int result = start_h1_server();
-        if (result != 0) return result;
+
+    if (!router_) {
+        std::cerr << "ERROR: Cannot start server - router not initialized" << std::endl;
+        return -1;
     }
-    
-    // Start HTTP/2 server
-    if (config_.enable_h2) {
-        int result = start_h2_server();
-        if (result != 0) return result;
+
+    // Map HttpServer::Config to UnifiedServerConfig
+    UnifiedServerConfig unified_config;
+    unified_config.host = config_.host;
+    unified_config.http1_port = config_.port;
+    unified_config.enable_http1_cleartext = config_.enable_h1;
+
+    // Enable TLS if HTTP/2 requested and certs provided
+    unified_config.enable_tls = config_.enable_h2 && !config_.cert_path.empty() && !config_.key_path.empty();
+    if (unified_config.enable_tls) {
+        unified_config.cert_file = config_.cert_path;
+        unified_config.key_file = config_.key_path;
+        unified_config.tls_port = config_.port + 1;  // Use separate port for HTTPS
     }
-    
-    // Start HTTP/3 server
-    if (config_.enable_h3) {
-        int result = start_h3_server();
-        if (result != 0) return result;
+
+    // Worker configuration
+    unified_config.num_workers = config_.num_worker_threads;
+
+    // Create UnifiedServer with exception-free allocation
+    unified_server_.reset(new (std::nothrow) UnifiedServer(unified_config));
+    if (!unified_server_) {
+        std::cerr << "FATAL: Failed to allocate UnifiedServer (out of memory)" << std::endl;
+        return -1;
     }
-    
-    running_.store(true);
-    return 0;
+
+    // Register bridge handler that connects UnifiedServer to our Router
+    auto bridge_handler = [this](
+        const std::string& method,
+        const std::string& path,
+        const std::unordered_map<std::string, std::string>& headers,
+        const std::string& body,
+        std::function<void(uint16_t, const std::unordered_map<std::string, std::string>&, const std::string&)> send_response
+    ) {
+        this->handle_unified_request(method, path, headers, body, send_response);
+    };
+
+    unified_server_->set_request_handler(bridge_handler);
+
+    // Start the unified server (blocking call - should be in separate thread)
+    // TODO: Consider making this non-blocking or running in thread pool
+    int result = unified_server_->start();
+    if (result == 0) {
+        running_.store(true);
+    }
+
+    return result;
 }
 
 int HttpServer::stop() noexcept {
     if (!running_.load()) {
         return 0;  // Already stopped
     }
-    
-    // Stop all server threads
-    for (auto& thread : server_threads_) {
-        if (thread.joinable()) {
-            thread.join();
-        }
+
+    if (unified_server_) {
+        unified_server_->stop();
     }
-    server_threads_.clear();
-    
+
     running_.store(false);
     return 0;
 }
 
 bool HttpServer::is_running() const noexcept {
+    if (unified_server_) {
+        return unified_server_->is_running();
+    }
     return running_.load();
 }
 
@@ -221,80 +201,65 @@ HttpServer::Stats HttpServer::get_stats() const noexcept {
     return stats;
 }
 
-int HttpServer::start_h1_server() noexcept {
-    if (!h1_handler_) {
-        return 1;
-    }
+void HttpServer::handle_unified_request(
+    const std::string& method,
+    const std::string& path,
+    const std::unordered_map<std::string, std::string>& headers,
+    const std::string& body,
+    std::function<void(uint16_t, const std::unordered_map<std::string, std::string>&, const std::string&)> send_response
+) noexcept {
+    std::cerr << "[HttpServer] handle_unified_request: " << method << " " << path << std::endl;
 
-    // Start HTTP/1.1 multi-threaded server with EventLoopPool
-    // Linux: Each worker uses SO_REUSEPORT for kernel-level load balancing
-    // Non-Linux: Acceptor thread + lockfree queue distribution
-    return h1_handler_->start(
-        config_.port,
-        config_.host,
-        config_.num_worker_threads,
-        config_.worker_queue_size
-    );
-}
-
-int HttpServer::start_h2_server() noexcept {
-    if (!h2_handler_) {
-        return 1;
-    }
-    
-    // Start HTTP/2 server in a separate thread
-    server_threads_.emplace_back([this]() {
-        h2_handler_->start(config_.port + 1, config_.host);  // Use different port
-    });
-    
-    return 0;
-}
-
-int HttpServer::start_h3_server() noexcept {
-    if (!h3_handler_) {
-        return 1;
-    }
-    
-    // Start HTTP/3 server in a separate thread
-    server_threads_.emplace_back([this]() {
-        h3_handler_->start(config_.port + 2, config_.host);  // Use different port
-    });
-    
-    return 0;
-}
-
-void HttpServer::handle_request(HttpRequest* request, HttpResponse* response) noexcept {
+    // Increment request counter
     request_count_.fetch_add(1);
-    
-    // Determine protocol and increment counter
-    const std::string& protocol = request->get_protocol();
-    if (protocol == "HTTP/1.1") {
-        h1_requests_.fetch_add(1);
-    } else if (protocol == "HTTP/2.0") {
-        h2_requests_.fetch_add(1);
-    } else if (protocol == "HTTP/3.0") {
-        h3_requests_.fetch_add(1);
-    }
-    
-    // Find matching route handler
-    const std::string& method = request->get_method() == HttpRequest::Method::GET ? "GET" : "POST";
-    const std::string& path = request->get_path();
-    
-    auto method_routes = routes_.find(method);
-    if (method_routes != routes_.end()) {
-        auto route_handler = method_routes->second.find(path);
-        if (route_handler != method_routes->second.end()) {
-            route_handler->second(request, response);
-            return;
+
+    // Determine protocol from headers (if available)
+    auto protocol_it = headers.find(":protocol");
+    if (protocol_it != headers.end()) {
+        const std::string& protocol = protocol_it->second;
+        if (protocol == "HTTP/1.1") {
+            h1_requests_.fetch_add(1);
+        } else if (protocol == "HTTP/2.0" || protocol == "h2") {
+            h2_requests_.fetch_add(1);
         }
     }
-    
-    // No route found, return 404
-    response->status(HttpResponse::Status::NOT_FOUND)
-           .content_type("application/json")
-           .json("{\"error\":\"Not Found\"}")
-           .send();
+
+    // Create HttpRequest from parsed data
+    HttpRequest request = HttpRequest::from_parsed_data(method, path, headers, body);
+    std::cerr << "[HttpServer] Created HttpRequest" << std::endl;
+
+    // Create HttpResponse
+    HttpResponse response;
+    std::cerr << "[HttpServer] Created HttpResponse" << std::endl;
+
+    // Match route and get handler
+    fasterapi::http::RouteParams params;
+    fasterapi::http::RouteHandler handler = router_->match(method, path, params);
+
+    if (handler) {
+        std::cerr << "[HttpServer] Found handler, calling it..." << std::endl;
+        // Call user's route handler with path parameters
+        handler(&request, &response, params);
+        std::cerr << "[HttpServer] Handler returned" << std::endl;
+    } else {
+        std::cerr << "[HttpServer] No handler found, returning 404" << std::endl;
+        // No route found - return 404
+        response.status(HttpResponse::Status::NOT_FOUND)
+               .content_type("application/json")
+               .json("{\"error\":\"Not Found\"}")
+               .send();
+    }
+
+    // Extract response data and send via UnifiedServer callback
+    uint16_t status_code = static_cast<uint16_t>(response.get_status_code());
+    const auto& response_headers = response.get_headers();
+    const auto& response_body = response.get_body();
+
+    std::cerr << "[HttpServer] Sending response: " << status_code << " body_size=" << response_body.size() << std::endl;
+    send_response(status_code, response_headers, response_body);
+    std::cerr << "[HttpServer] Response sent" << std::endl;
 }
+
 
 uint64_t HttpServer::get_time_ns() const noexcept {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(

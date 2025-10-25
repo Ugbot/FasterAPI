@@ -117,10 +117,8 @@ public:
     Response& file(const std::string& path);
 
     // Convenience JSON builders
-    template<typename T>
-    Response& json(const std::map<std::string, T>& data);
-
     Response& json(const std::vector<std::pair<std::string, std::string>>& pairs);
+    Response& json(std::initializer_list<std::pair<const char*, const char*>> pairs);
 
     // CORS
     Response& cors(const std::string& origin = "*");
@@ -272,6 +270,9 @@ private:
  * @endcode
  */
 class App {
+    // RouteBuilder needs access to private members
+    friend class RouteBuilder;
+
 public:
     /**
      * Application configuration.
@@ -309,7 +310,12 @@ public:
     /**
      * Create a new FasterAPI application.
      */
-    explicit App(const Config& config = Config{});
+    explicit App(const Config& config);
+
+    /**
+     * Create a new FasterAPI application with default configuration.
+     */
+    App();
 
     ~App();
 
