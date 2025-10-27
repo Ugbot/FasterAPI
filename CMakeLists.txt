@@ -21,6 +21,7 @@ option(FA_ENABLE_COMPRESSION "Enable zstd compression" ON)
 option(FA_ENABLE_MIMALLOC    "Link mimalloc as default allocator" ON)
 option(FA_USE_UWEBSOCKETS    "Use uWebSockets for HTTP/1.1 and WebSocket" OFF)
 option(FA_SANITIZE           "Enable Address/UB sanitizers (non-MSVC)" OFF)
+option(ENABLE_EXCEPTIONS     "Enable C++ exceptions (default: OFF for performance)" OFF)
 
 # Optimization flags for maximum performance
 # Use -mcpu=native on Apple, -march=native on other platforms
@@ -30,8 +31,15 @@ else()
     set(NATIVE_FLAG "-march=native")
 endif()
 
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 ${NATIVE_FLAG} -flto -fno-exceptions -fno-rtti")
-set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g -fno-exceptions -fno-rtti")
+# Conditional exception flags
+if(NOT ENABLE_EXCEPTIONS)
+    set(EXCEPTION_FLAGS "-fno-exceptions -fno-rtti")
+else()
+    set(EXCEPTION_FLAGS "")
+endif()
+
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 ${NATIVE_FLAG} -flto ${EXCEPTION_FLAGS}")
+set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g ${EXCEPTION_FLAGS}")
 
 # Default to Release build
 if(NOT CMAKE_BUILD_TYPE)
@@ -73,6 +81,7 @@ set(CORE_SOURCES
     src/cpp/core/reactor.cpp
     src/cpp/core/ring_buffer.cpp
     src/cpp/core/async_io.cpp
+    src/cpp/core/logger.cpp
 )
 
 # Platform-specific async I/O implementations
@@ -331,6 +340,7 @@ set(NET_SOURCES
     src/cpp/net/tcp_socket.cpp
     src/cpp/net/tcp_listener.cpp
     src/cpp/net/tls_context.cpp
+    src/cpp/net/tls_cert_generator.cpp
     src/cpp/net/tls_socket.cpp
 )
 
@@ -351,6 +361,12 @@ if (FA_BUILD_HTTP)
         src/cpp/http/request.cpp
         src/cpp/http/response.cpp
         src/cpp/http/router.cpp
+        src/cpp/http/parameter_extractor.cpp
+        src/cpp/http/schema_validator.cpp
+        src/cpp/http/route_metadata.cpp
+        src/cpp/http/validation_error_formatter.cpp
+        src/cpp/http/openapi_generator.cpp
+        src/cpp/http/static_docs.cpp
         src/cpp/http/sse.cpp
     )
     
@@ -502,9 +518,13 @@ if (FA_BUILD_HTTP)
     # Create HTTP server shared library
     add_library(fasterapi_http SHARED ${NET_SOURCES} ${HTTP_SOURCES} ${HTTP_HEADERS} ${CORE_SOURCES} ${CORE_HEADERS} ${PYTHON_SOURCES} ${PYTHON_HEADERS} ${NATIVE_TYPES_SOURCES} ${NATIVE_TYPES_HEADERS})
 
+    # Add source directory to include path
+    target_include_directories(fasterapi_http PRIVATE ${CMAKE_SOURCE_DIR}/src/cpp)
+
     # Add compile definitions
     target_compile_definitions(fasterapi_http PRIVATE
         FA_BUILD_HTTP=1
+        FASTERAPI_ENABLE_LOGGING
     )
     
     if (FA_USE_UWEBSOCKETS)
@@ -577,19 +597,20 @@ if (FA_BUILD_HTTP)
     )
 
     # Strip symbols in release build
-    if(CMAKE_BUILD_TYPE STREQUAL "Release")
-        if(APPLE)
-            add_custom_command(TARGET fasterapi_http POST_BUILD
-                COMMAND strip -x $<TARGET_FILE:fasterapi_http>
-                COMMENT "Stripping symbols from HTTP library"
-            )
-        elseif(UNIX)
-            add_custom_command(TARGET fasterapi_http POST_BUILD
-                COMMAND strip $<TARGET_FILE:fasterapi_http>
-                COMMENT "Stripping symbols from HTTP library"
-            )
-        endif()
-    endif()
+    # TEMP: Disabled for debugging
+    #if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    #    if(APPLE)
+    #        add_custom_command(TARGET fasterapi_http POST_BUILD
+    #            COMMAND strip -x $<TARGET_FILE:fasterapi_http>
+    #            COMMENT "Stripping symbols from HTTP library"
+    #        )
+    #    elseif(UNIX)
+    #        add_custom_command(TARGET fasterapi_http POST_BUILD
+    #            COMMAND strip $<TARGET_FILE:fasterapi_http>
+    #            COMMENT "Stripping symbols from HTTP library"
+    #        )
+    #    endif()
+    #endif()
 
     message(STATUS "HTTP server library target: fasterapi_http")
     message(STATUS "Output: ${CMAKE_BINARY_DIR}/lib/libfasterapi_http.${LIB_EXTENSION}")
@@ -1031,6 +1052,14 @@ if (FA_BUILD_EXAMPLES AND FA_BUILD_HTTP)
     target_include_directories(hello_world PRIVATE ${CMAKE_SOURCE_DIR})
     target_link_libraries(hello_world PRIVATE fasterapi_http)
     set_target_properties(hello_world PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples"
+    )
+
+    # Simple test without docs
+    add_executable(simple_test examples/simple_test.cpp)
+    target_include_directories(simple_test PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(simple_test PRIVATE fasterapi_http)
+    set_target_properties(simple_test PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples"
     )
 

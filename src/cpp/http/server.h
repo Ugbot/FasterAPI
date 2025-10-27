@@ -129,6 +129,22 @@ public:
     const std::unordered_map<std::string, std::unordered_map<std::string, RouteHandler>>& get_routes() const noexcept;
 
     /**
+     * Set App instance for direct HTTP/1.1 handling (simplified path).
+     *
+     * @param app Pointer to App instance
+     */
+    void set_app_instance(void* app) noexcept;
+
+    /**
+     * Get router for route matching (used by App::handle_http1).
+     *
+     * @return Pointer to router, or nullptr if not initialized
+     */
+    fasterapi::http::Router* get_router() noexcept {
+        return router_.get();
+    }
+
+    /**
      * Get server statistics.
      *
      * @return Statistics structure

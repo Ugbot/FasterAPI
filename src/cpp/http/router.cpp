@@ -96,25 +96,36 @@ int Router::add_route(
         std::cerr << "Router: path must start with '/': " << path << std::endl;
         return 1;
     }
-    
+
     if (!handler) {
         std::cerr << "Router: handler cannot be null for path: " << path << std::endl;
         return 1;
     }
-    
+
     // Get or create tree for method
     auto& tree = trees_[method];
     if (!tree) {
         tree = std::make_unique<RouterNode>(NodeType::STATIC);
         tree->path = "/";
     }
-    
+
+    // Special case: root path "/" - set handler directly on root node
+    if (path == "/") {
+        if (tree->handler) {
+            std::cerr << "Router: duplicate route: " << path << std::endl;
+            return 1;
+        }
+        tree->handler = std::move(handler);
+        route_count_++;
+        return 0;
+    }
+
     // Insert route
     int result = insert_route(tree.get(), path, std::move(handler), 0);
     if (result == 0) {
         route_count_++;
     }
-    
+
     return result;
 }
 
@@ -125,13 +136,18 @@ RouteHandler Router::match(
 ) const noexcept {
     // Clear params
     params.clear();
-    
+
     // Find tree for method
     auto it = trees_.find(method);
     if (it == trees_.end()) {
         return nullptr;
     }
-    
+
+    // Special case: root path "/" - check root node's handler
+    if (path == "/" && it->second->handler) {
+        return it->second->handler;
+    }
+
     // Match in tree
     return match_route(it->second.get(), path, params, 0);
 }
@@ -182,15 +198,24 @@ int Router::insert_route(
     RouteHandler handler,
     size_t pos
 ) noexcept {
+    std::cerr << "[insert_route] path='" << path << "' pos=" << pos
+              << " node->path='" << node->path << "' has_handler=" << (node->handler ? "yes" : "no") << std::endl;
+    std::cerr.flush();
+
     // Increment priority
     node->increment_priority();
-    
+
     // If we've consumed the entire path
     if (pos >= path.length()) {
+        std::cerr << "[insert_route] At end of path. Checking for duplicate..." << std::endl;
+        std::cerr.flush();
         if (node->handler) {
             std::cerr << "Router: duplicate route: " << path << std::endl;
+            std::cerr.flush();
             return 1;
         }
+        std::cerr << "[insert_route] Setting handler for path: " << path << std::endl;
+        std::cerr.flush();
         node->handler = std::move(handler);
         return 0;
     }

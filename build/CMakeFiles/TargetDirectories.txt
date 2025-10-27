@@ -34,6 +34,7 @@
 /Users/bengamble/FasterAPI/build/CMakeFiles/test_mcp_protocol.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/test_mcp_transport.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/hello_world.dir
+/Users/bengamble/FasterAPI/build/CMakeFiles/simple_test.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/cpp_app_demo.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/http2.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/edit_cache.dir

@@ -122,6 +122,13 @@ public:
     void set_request_handler(HttpRequestHandler handler);
 
     /**
+     * Set App instance for direct HTTP/1.1 handling (simplified path).
+     *
+     * @param app Pointer to App instance
+     */
+    void set_app_instance(void* app);
+
+    /**
      * Start the server (blocks until stop())
      *
      * Starts listening on configured ports and processes requests.
@@ -194,7 +201,7 @@ private:
     std::shared_ptr<net::TlsContext> tls_context_;
     std::unique_ptr<net::TcpListener> tls_listener_;
     std::unique_ptr<net::TcpListener> cleartext_listener_;
-    std::thread cleartext_thread_;
+    std::thread tls_thread_;  // TLS listener runs in background if both TLS+cleartext enabled
     std::atomic<bool> shutdown_flag_{false};
     std::string error_message_;
 

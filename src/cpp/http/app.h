@@ -34,6 +34,7 @@
 #include "router.h"
 #include "websocket.h"
 #include "sse.h"
+#include "http1_connection.h"
 
 #include <functional>
 #include <memory>
@@ -510,6 +511,27 @@ public:
      * Get server statistics.
      */
     HttpServer::Stats stats() const;
+
+    // =========================================================================
+    // Internal HTTP/1.1 Handler (called by UnifiedServer)
+    // =========================================================================
+
+    /**
+     * Handle HTTP/1.1 request directly - used by UnifiedServer.
+     * This bypasses HttpServer and calls router/middleware/handlers directly.
+     *
+     * @param method HTTP method
+     * @param path Request path
+     * @param headers Request headers
+     * @param body Request body
+     * @return Http1Response to send to client
+     */
+    http::Http1Response handle_http1(
+        const std::string& method,
+        const std::string& path,
+        const std::unordered_map<std::string, std::string>& headers,
+        const std::string& body
+    ) noexcept;
 
 private:
     Config config_;

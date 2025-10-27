@@ -329,6 +329,9 @@ CYTHON_EXECUTABLE:FILEPATH=/opt/homebrew/bin/cython
 //Maximum time allowed before CTest will kill the test.
 DART_TESTING_TIMEOUT:STRING=1500
 
+//Enable C++ exceptions (default: OFF for performance)
+ENABLE_EXCEPTIONS:BOOL=OFF
+
 //Build Cython Python bindings
 FA_BUILD_CYTHON:BOOL=ON
 

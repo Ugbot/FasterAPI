@@ -3,3 +3,5 @@
 - testing needs to be more complete than hellow world as webservers can do a lot. make sure all tests involve more than one route, different HTTP verbs and randomised inputdata.
 - allocations are expensive, we want preallocated buffers and pools where ever it makes sense.
 - keep allocations to a min, use buffer pools and ring buffers, aim for code that vectorises well
+- new, delete, malloc and free are expensive operattions. we should avoid them if possible. instead use object pools, and ring buffers by preference.
+- when planning, document it in files and tick things off as we go
