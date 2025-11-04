@@ -10,3 +10,6 @@
 [submodule "external/nghttp2"]
 	path = external/nghttp2
 	url = https://github.com/nghttp2/nghttp2.git
+[submodule "external/quiche-reference"]
+	path = external/quiche-reference
+	url = https://github.com/google/quiche
