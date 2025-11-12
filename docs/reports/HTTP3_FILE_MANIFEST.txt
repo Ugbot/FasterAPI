@@ -1,0 +1,53 @@
+HTTP/3 Implementation - File Manifest
+=====================================
+
+Documentation (3 files):
+  docs/HTTP3_ALGORITHMS.md              - Algorithm documentation from RFCs
+  HTTP3_IMPLEMENTATION_REPORT.md        - Full technical report
+  HTTP3_SUMMARY.md                      - Executive summary
+
+QUIC Implementation (13 files):
+  src/cpp/http/quic/quic_varint.h       - Variable-length integer encoding
+  src/cpp/http/quic/quic_packet.h       - Packet framing (long/short headers)
+  src/cpp/http/quic/quic_packet.cpp     - Stub for compilation
+  src/cpp/http/quic/quic_frames.h       - STREAM, ACK, CRYPTO frames
+  src/cpp/http/quic/quic_stream.h       - Stream multiplexing
+  src/cpp/http/quic/quic_stream.cpp     - Stub for compilation
+  src/cpp/http/quic/quic_flow_control.h - Flow control (stream + connection)
+  src/cpp/http/quic/quic_flow_control.cpp - Stub for compilation
+  src/cpp/http/quic/quic_congestion.h   - NewReno + Pacer
+  src/cpp/http/quic/quic_congestion.cpp - Stub for compilation
+  src/cpp/http/quic/quic_ack_tracker.h  - Loss detection + RTT estimation
+  src/cpp/http/quic/quic_ack_tracker.cpp - Stub for compilation
+  src/cpp/http/quic/quic_connection.h   - Connection management
+  src/cpp/http/quic/quic_connection.cpp - Stub for compilation
+
+QPACK Implementation (8 files):
+  src/cpp/http/qpack/qpack_static_table.h   - Static table (99 entries)
+  src/cpp/http/qpack/qpack_static_table.cpp - Stub for compilation
+  src/cpp/http/qpack/qpack_dynamic_table.h  - Dynamic table (ring buffer)
+  src/cpp/http/qpack/qpack_dynamic_table.cpp - Stub for compilation
+  src/cpp/http/qpack/qpack_encoder.h        - Header compression
+  src/cpp/http/qpack/qpack_encoder.cpp      - Stub for compilation
+  src/cpp/http/qpack/qpack_decoder.h        - Header decompression
+  src/cpp/http/qpack/qpack_decoder.cpp      - Stub for compilation
+
+HTTP/3 Layer (4 files):
+  src/cpp/http/http3_parser.h           - Frame parser
+  src/cpp/http/http3_parser.cpp         - Frame parser implementation
+  src/cpp/http/h3_handler.h             - HTTP/3 handler (rewritten)
+  src/cpp/http/h3_handler.cpp           - HTTP/3 handler implementation
+
+Testing (1 file):
+  tests/test_http3.py                   - Comprehensive test suite
+
+Build Configuration (1 file):
+  CMakeLists.txt                        - Updated for QUIC/QPACK (modified)
+
+Reference (1 directory):
+  external/quiche-reference/            - Google Quiche (reference only, not linked)
+
+Total: 31 files + 1 directory
+Total lines of code: ~7,200
+External dependencies removed: 1 (MsQuic)
+RFCs implemented: 4 (9000, 9002, 9114, 9204)
