@@ -37,20 +37,24 @@ async def when_all(futures: List[Future[T]]) -> List[T]:
 async def when_any(futures: List[Future[T]]) -> tuple[T, List[Future[T]]]:
     """
     Wait for first future to complete.
-    
+
     Args:
         futures: List of futures
-        
+
     Returns:
         (result, remaining_futures)
-        
+
     Example:
         result, pending = await when_any([
             cache.get_async(key),
             db.get_async(key),
         ])
     """
-    tasks = [asyncio.create_task(f.__await__()) for f in futures]
+    # Helper to properly await any awaitable
+    async def _await(f):
+        return await f
+
+    tasks = [asyncio.create_task(_await(f)) for f in futures]
     done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
     
     # Get first result
@@ -65,21 +69,25 @@ async def when_any(futures: List[Future[T]]) -> tuple[T, List[Future[T]]]:
 async def when_some(futures: List[Future[T]], count: int) -> List[T]:
     """
     Wait for at least 'count' futures to complete.
-    
+
     Args:
         futures: List of futures
         count: Minimum number of futures to wait for
-        
+
     Returns:
         List of results from first 'count' completed futures
     """
+    # Handle empty list or count <= 0
+    if not futures or count <= 0:
+        return []
+
     if count > len(futures):
         count = len(futures)
-    
+
     # Helper to await a future
     async def _await(f):
         return await f
-    
+
     tasks = [asyncio.create_task(_await(f)) for f in futures]
     done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
     
@@ -237,24 +245,28 @@ async def retry_async(
 async def timeout_async(future: Future[T], timeout_seconds: float) -> T:
     """
     Add timeout to a future.
-    
+
     Args:
         future: Future to timeout
         timeout_seconds: Timeout in seconds
-        
+
     Returns:
         Result if completed within timeout
-        
+
     Raises:
         asyncio.TimeoutError if timeout exceeded
-        
+
     Example:
         result = await timeout_async(
             slow_operation_async(),
             timeout_seconds=5.0
         )
     """
-    return await asyncio.wait_for(future.__await__(), timeout=timeout_seconds)
+    # Helper to properly await any awaitable
+    async def _await():
+        return await future
+
+    return await asyncio.wait_for(_await(), timeout=timeout_seconds)
 
 
 def chain(*funcs: Callable) -> Callable:
