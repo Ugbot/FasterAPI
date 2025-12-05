@@ -286,6 +286,8 @@ public:
         // Server settings
         bool enable_http2 = false;
         bool enable_http3 = false;
+        bool enable_webtransport = false;
+        uint16_t http3_port = 443;
         bool enable_compression = true;
         bool enable_cors = false;
         std::string cors_origin = "*";
@@ -306,6 +308,14 @@ public:
         bool enable_docs = true;
         std::string docs_url = "/docs";
         std::string openapi_url = "/openapi.json";
+
+        // Pure C++ mode - disables Python/ZMQ bridge entirely
+        // When true:
+        // - No ProcessPoolExecutor is created
+        // - No ZMQ sockets are initialized
+        // - All handlers must be C++ (no Python callbacks)
+        // - Uses UnifiedServer with pure_cpp_mode enabled
+        bool pure_cpp_mode = false;
     };
 
     /**
@@ -475,6 +485,27 @@ public:
     int start(const std::string& host = "0.0.0.0", uint16_t port = 8000);
 
     /**
+     * Run using UnifiedServer (multi-protocol: HTTP/1.1, HTTP/2, HTTP/3).
+     *
+     * This is the preferred method for production pure C++ servers.
+     * Supports:
+     * - HTTP/1.1 over cleartext (port configurable, default 8080)
+     * - HTTP/1.1 + HTTP/2 over TLS with ALPN (port 443)
+     * - HTTP/3 over QUIC (UDP port 443)
+     * - WebSocket over any HTTP protocol
+     *
+     * In pure_cpp_mode (config.pure_cpp_mode = true):
+     * - No Python/ZMQ bridges are initialized
+     * - All WebSocket handlers run in C++ only
+     * - Maximum performance, zero Python overhead
+     *
+     * @param host Host to bind (e.g., "0.0.0.0")
+     * @param port Cleartext HTTP/1.1 port (default 8080)
+     * @return Error code (0 = success)
+     */
+    int run_unified(const std::string& host = "0.0.0.0", uint16_t port = 8080);
+
+    /**
      * Stop the server.
      *
      * @return Error code (0 = success)
@@ -540,6 +571,9 @@ private:
     std::map<std::string, std::vector<MiddlewareFunc>> path_middleware_;
     std::map<std::string, std::string> static_paths_;
 
+    // WebSocket handlers stored for transfer to UnifiedServer in run_unified()
+    std::map<std::string, WSHandler> websocket_handlers_;
+
     // Route metadata for OpenAPI generation
     struct RouteMetadata {
         std::string method;
@@ -548,7 +582,9 @@ private:
         std::string summary;
         std::string description;
         std::map<int, std::string> response_models;
-        std::vector<MiddlewareFunc> middleware;
+        // NOTE: middleware removed - not needed for OpenAPI generation
+        // Storing std::function objects here caused destructor crashes due to
+        // complex captured state and potential double-frees
     };
     std::vector<RouteMetadata> route_metadata_;
 
@@ -559,7 +595,8 @@ private:
         const std::string& method,
         const std::string& path,
         Handler handler,
-        const RouteMetadata& metadata = RouteMetadata{}
+        const RouteMetadata& metadata = RouteMetadata{},
+        const std::vector<MiddlewareFunc>& route_middleware = {}
     );
 
     /**

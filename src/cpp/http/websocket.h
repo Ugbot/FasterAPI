@@ -108,14 +108,54 @@ public:
     
     /**
      * Handle incoming frame data.
-     * 
+     *
      * Called by server when data is received.
-     * 
+     *
      * @param data Frame data
      * @param length Data length
      * @return 0 on success, error code otherwise
      */
     int handle_frame(const uint8_t* data, size_t length);
+
+    /**
+     * Set socket file descriptor for direct I/O.
+     *
+     * @param fd Socket file descriptor
+     */
+    void set_socket_fd(int fd) noexcept;
+
+    /**
+     * Get socket file descriptor.
+     */
+    int get_socket_fd() const noexcept;
+
+    /**
+     * Check if there's pending output to send.
+     */
+    bool has_pending_output() const noexcept;
+
+    /**
+     * Get pending output frame.
+     * Returns the front of the send queue without removing it.
+     *
+     * @return Pointer to output data, or nullptr if empty
+     */
+    const std::string* get_pending_output() const noexcept;
+
+    /**
+     * Pop the front of the send queue after sending.
+     */
+    void pop_pending_output() noexcept;
+
+    /**
+     * Get WebSocket path (for handler lookup).
+     */
+    const std::string& get_path() const noexcept;
+
+    /**
+     * Set WebSocket path.
+     */
+    void set_path(const std::string& path) noexcept;
     
     /**
      * Check if connection is open.
@@ -161,6 +201,8 @@ private:
     
     uint64_t connection_id_;
     Config config_;
+    int socket_fd_{-1};
+    std::string path_;
     
     std::atomic<bool> open_{true};
     std::atomic<bool> closing_{false};

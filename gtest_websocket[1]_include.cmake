@@ -1,0 +1,5 @@
+if(EXISTS "/Users/bengamble/FasterAPI/gtest_websocket[1]_tests.cmake")
+  include("/Users/bengamble/FasterAPI/gtest_websocket[1]_tests.cmake")
+else()
+  add_test(gtest_websocket_NOT_BUILT gtest_websocket_NOT_BUILT)
+endif()

@@ -9,7 +9,7 @@ import os
 import sys
 from ctypes import (
     c_void_p, c_char_p, c_int, c_uint64, c_size_t,
-    c_uint8, c_uint16, c_bool, POINTER, Structure
+    c_uint8, c_uint16, c_uint32, c_bool, POINTER, Structure
 )
 
 # Find the native library
@@ -81,8 +81,8 @@ class _NativeLib:
         self._lib.http_lib_init.argtypes = []
         self._lib.http_lib_init.restype = c_int
 
-        # HttpServerHandle http_server_create(port, host, enable_h2, enable_h3, enable_compression, error_out)
-        self._lib.http_server_create.argtypes = [c_uint16, c_char_p, c_bool, c_bool, c_bool, POINTER(c_int)]
+        # HttpServerHandle http_server_create(port, host, enable_h2, enable_h3, enable_webtransport, http3_port, enable_compression, error_out)
+        self._lib.http_server_create.argtypes = [c_uint16, c_char_p, c_bool, c_bool, c_bool, c_uint16, c_bool, POINTER(c_int)]
         self._lib.http_server_create.restype = c_void_p
 
         # int http_add_route(handle, method, path, handler_id, error_out)
@@ -112,6 +112,22 @@ class _NativeLib:
         # void http_register_python_handler(method, path, handler_id, py_callable)
         self._lib.http_register_python_handler.argtypes = [c_char_p, c_char_p, c_int, c_void_p]
         self._lib.http_register_python_handler.restype = None
+
+        # void* http_get_route_handler(registry_ptr, method, path)
+        self._lib.http_get_route_handler.argtypes = [c_void_p, c_char_p, c_char_p]
+        self._lib.http_get_route_handler.restype = c_void_p
+
+        # int http_connect_route_registry(registry_ptr)
+        self._lib.http_connect_route_registry.argtypes = [c_void_p]
+        self._lib.http_connect_route_registry.restype = c_int
+
+        # int http_init_process_pool_executor(num_workers, python_executable, project_dir)
+        self._lib.http_init_process_pool_executor.argtypes = [c_uint32, c_char_p, c_char_p]
+        self._lib.http_init_process_pool_executor.restype = c_int
+
+        # int http_register_route_metadata(method, path, param_metadata_json)
+        self._lib.http_register_route_metadata.argtypes = [c_char_p, c_char_p, c_char_p]
+        self._lib.http_register_route_metadata.restype = c_int
 
         # ====================================================================
         # WebSocket Functions

@@ -27,11 +27,7 @@ class MCPClient:
         ```
     """
 
-    def __init__(
-        self,
-        name: str = "FasterAPI MCP Client",
-        version: str = "0.1.0"
-    ):
+    def __init__(self, name: str = "FasterAPI MCP Client", version: str = "0.1.0"):
         """
         Create an MCP client.
 
@@ -48,7 +44,7 @@ class MCPClient:
         self._connected = False
 
     def __del__(self):
-        if hasattr(self, '_handle') and self._handle:
+        if hasattr(self, "_handle") and self._handle:
             if self._connected:
                 self.disconnect()
             bindings.client_destroy(self._handle)
@@ -109,8 +105,15 @@ class MCPClient:
         Returns:
             List of Tool objects
         """
-        # TODO: Implement
-        raise NotImplementedError()
+        if not self._connected:
+            raise RuntimeError("Client not connected")
+
+        tools_json = bindings.client_list_tools(self._handle)
+        if not tools_json:
+            return []
+
+        tools_data = json.loads(tools_json)
+        return [Tool(**t) for t in tools_data]
 
     def list_resources(self) -> List[Resource]:
         """
@@ -119,8 +122,15 @@ class MCPClient:
         Returns:
             List of Resource objects
         """
-        # TODO: Implement
-        raise NotImplementedError()
+        if not self._connected:
+            raise RuntimeError("Client not connected")
+
+        resources_json = bindings.client_list_resources(self._handle)
+        if not resources_json:
+            return []
+
+        resources_data = json.loads(resources_json)
+        return [Resource(**r) for r in resources_data]
 
     def read_resource(self, uri: str) -> str:
         """
@@ -132,8 +142,15 @@ class MCPClient:
         Returns:
             Resource content
         """
-        # TODO: Implement
-        raise NotImplementedError()
+        if not self._connected:
+            raise RuntimeError("Client not connected")
+
+        content_json = bindings.client_read_resource(self._handle, uri)
+        if not content_json:
+            raise RuntimeError(f"Resource not found: {uri}")
+
+        content_data = json.loads(content_json)
+        return content_data.get("content", "")
 
     def list_prompts(self) -> List[Prompt]:
         """
@@ -142,8 +159,15 @@ class MCPClient:
         Returns:
             List of Prompt objects
         """
-        # TODO: Implement
-        raise NotImplementedError()
+        if not self._connected:
+            raise RuntimeError("Client not connected")
+
+        prompts_json = bindings.client_list_prompts(self._handle)
+        if not prompts_json:
+            return []
+
+        prompts_data = json.loads(prompts_json)
+        return [Prompt(**p) for p in prompts_data]
 
     def get_prompt(self, name: str, args: Optional[Dict[str, Any]] = None) -> str:
         """
@@ -156,5 +180,13 @@ class MCPClient:
         Returns:
             Prompt content
         """
-        # TODO: Implement
-        raise NotImplementedError()
+        if not self._connected:
+            raise RuntimeError("Client not connected")
+
+        args_json = json.dumps(args or {})
+        prompt_json = bindings.client_get_prompt(self._handle, name, args_json)
+
+        if not prompt_json:
+            raise RuntimeError(f"Prompt not found: {name}")
+
+        return prompt_json

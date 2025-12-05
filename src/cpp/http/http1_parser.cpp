@@ -72,47 +72,66 @@ int HTTP1Parser::parse(
         // Check for end of headers (empty line)
         if (pos_ + 1 < len && data[pos_] == '\r' && data[pos_ + 1] == '\n') {
             pos_ += 2;
-            state_ = HTTP1State::COMPLETE;
+            state_ = HTTP1State::BODY;
             break;
         }
-        
+
         if (parse_header_field(data, len, out_request) != 0) {
             return state_ == HTTP1State::ERROR ? 1 : -1;
         }
-        
+
         if (parse_header_value(data, len, out_request) != 0) {
             return state_ == HTTP1State::ERROR ? 1 : -1;
         }
     }
-    
+
     // Parse URL components
     parse_url_components(out_request);
-    
+
     // Extract important headers
     auto content_len = out_request.get_header("content-length");
     if (!content_len.empty()) {
         out_request.content_length = std::stoull(std::string(content_len));
         out_request.has_content_length = true;
     }
-    
+
     auto transfer_enc = out_request.get_header("transfer-encoding");
     if (!transfer_enc.empty() && transfer_enc.find("chunked") != std::string_view::npos) {
         out_request.chunked = true;
     }
-    
+
     auto connection = out_request.get_header("connection");
     if (out_request.version == HTTP1Version::HTTP_1_1) {
         out_request.keep_alive = connection.empty() || str_eq_ci(connection, "keep-alive");
     } else {
         out_request.keep_alive = str_eq_ci(connection, "keep-alive");
     }
-    
+
     auto upgrade = out_request.get_header("upgrade");
     if (!upgrade.empty()) {
         out_request.upgrade = true;
         out_request.upgrade_protocol = upgrade;
     }
-    
+
+    // 5. Parse body if Content-Length is present
+    if (out_request.has_content_length && out_request.content_length > 0) {
+        size_t body_start = pos_;
+        size_t body_available = len - pos_;
+
+        if (body_available < out_request.content_length) {
+            // Not enough data for complete body
+            return -1;  // Need more data
+        }
+
+        // Extract body as string_view (zero-copy)
+        out_request.body = std::string_view(
+            reinterpret_cast<const char*>(data + body_start),
+            out_request.content_length
+        );
+        pos_ += out_request.content_length;
+    }
+
+    state_ = HTTP1State::COMPLETE;
     out_consumed = pos_;
     return 0;
 }
@@ -151,6 +170,8 @@ int HTTP1Parser::parse_method(
     else if (req.method_str == "HEAD") req.method = HTTP1Method::HEAD;
     else if (req.method_str == "OPTIONS") req.method = HTTP1Method::OPTIONS;
     else if (req.method_str == "PATCH") req.method = HTTP1Method::PATCH;
+    else if (req.method_str == "CONNECT") req.method = HTTP1Method::CONNECT;
+    else if (req.method_str == "TRACE") req.method = HTTP1Method::TRACE;
     else req.method = HTTP1Method::UNKNOWN;
     
     pos_++;  // Skip space

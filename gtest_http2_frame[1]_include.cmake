@@ -1,0 +1,5 @@
+if(EXISTS "/Users/bengamble/FasterAPI/gtest_http2_frame[1]_tests.cmake")
+  include("/Users/bengamble/FasterAPI/gtest_http2_frame[1]_tests.cmake")
+else()
+  add_test(gtest_http2_frame_NOT_BUILT gtest_http2_frame_NOT_BUILT)
+endif()

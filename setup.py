@@ -102,6 +102,17 @@ class CMakeBuildExt(build_ext):
 extensions = []
 
 if HAS_CYTHON:
+    # Binary kwargs decoder (pure Cython - no C++ dependencies)
+    # Provides ~26x faster kwargs deserialization vs JSON
+    extensions.append(
+        Extension(
+            "fasterapi.core.binary_kwargs",
+            sources=["fasterapi/core/binary_kwargs.pyx"],
+            language="c",  # Pure C for maximum performance
+            extra_compile_args=["-O3"],
+        )
+    )
+
     # HTTP Server bindings (Cython - high performance)
     extensions.append(
         Extension(
@@ -112,6 +123,19 @@ if HAS_CYTHON:
             libraries=["fasterapi_http", "coroio"],
             language="c++",
             extra_compile_args=["-std=c++20", "-fexceptions"],  # CoroIO needs exceptions
+        )
+    )
+
+    # FastAPI-compatible native bindings (Cython - high performance)
+    extensions.append(
+        Extension(
+            "fasterapi._fastapi_native",
+            sources=["fasterapi/_fastapi_native.pyx"],
+            include_dirs=[".", "src/cpp", "external/simdjson/include"],
+            library_dirs=["fasterapi/_native", "build/lib"],
+            libraries=["fasterapi_http"],
+            language="c++",
+            extra_compile_args=["-std=c++20", "-fexceptions"],  # Cython needs exceptions for error handling
         )
     )
 

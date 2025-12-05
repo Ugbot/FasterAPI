@@ -1,0 +1,5 @@
+if(EXISTS "/Users/bengamble/FasterAPI/gtest_event_loop[1]_tests.cmake")
+  include("/Users/bengamble/FasterAPI/gtest_event_loop[1]_tests.cmake")
+else()
+  add_test(gtest_event_loop_NOT_BUILT gtest_event_loop_NOT_BUILT)
+endif()

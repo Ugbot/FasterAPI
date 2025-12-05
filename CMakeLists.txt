@@ -13,22 +13,40 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 option(FA_BUILD_PG           "Build PostgreSQL integration" ON)
 option(FA_BUILD_HTTP         "Build HTTP server" ON)
 option(FA_BUILD_MCP          "Build MCP (Model Context Protocol) support" ON)
-option(FA_USE_LIBUV          "Use libuv for event loop (required on Windows)" ON)
+# option(FA_USE_LIBUV          "Use libuv for event loop" OFF)  # REMOVED: FasterAPI uses native kqueue/epoll event loops
 option(FA_USE_ASIO           "Build with standalone Asio (for Beast/H2 path)" OFF)
 option(FA_ENABLE_HTTP2       "Enable HTTP/2 support (pure C++ implementation)" ON)
-option(FA_ENABLE_HTTP3       "Enable HTTP/3 support via MsQuic" OFF)
+option(FA_ENABLE_HTTP3       "Enable HTTP/3 support (pure C++ QUIC + QPACK + WebTransport)" ON)
 option(FA_ENABLE_COMPRESSION "Enable zstd compression" ON)
-option(FA_ENABLE_MIMALLOC    "Link mimalloc as default allocator" ON)
+option(FA_ENABLE_MIMALLOC    "Link mimalloc as default allocator" OFF)  # Disabled: causes memory corruption on macOS with shared libraries
 option(FA_USE_UWEBSOCKETS    "Use uWebSockets for HTTP/1.1 and WebSocket" OFF)
 option(FA_SANITIZE           "Enable Address/UB sanitizers (non-MSVC)" OFF)
 option(ENABLE_EXCEPTIONS     "Enable C++ exceptions (default: OFF for performance)" OFF)
+option(FA_BUILD_GTEST        "Build tests with Google Test framework" ON)
+option(FA_BUILD_GBENCH       "Build benchmarks with Google Benchmark" ON)
+option(FA_ENABLE_COVERAGE    "Enable code coverage (gcov/lcov)" OFF)
+option(FA_NATIVE_ARCH        "Enable -march=native/-mcpu=native (disable for CI)" ON)
 
 # Optimization flags for maximum performance
 # Use -mcpu=native on Apple, -march=native on other platforms
-if(APPLE)
-    set(NATIVE_FLAG "-mcpu=native")
+# Disable with FA_NATIVE_ARCH=OFF for CI builds
+if(FA_NATIVE_ARCH)
+    if(APPLE)
+        set(NATIVE_FLAG "-mcpu=native")
+    else()
+        set(NATIVE_FLAG "-march=native")
+    endif()
 else()
-    set(NATIVE_FLAG "-march=native")
+    set(NATIVE_FLAG "")
+    message(STATUS "Native architecture optimizations disabled (FA_NATIVE_ARCH=OFF)")
+endif()
+
+# Coverage flags
+if(FA_ENABLE_COVERAGE AND NOT MSVC)
+    set(COVERAGE_FLAGS "--coverage -fprofile-arcs -ftest-coverage")
+    message(STATUS "Code coverage enabled")
+else()
+    set(COVERAGE_FLAGS "")
 endif()
 
 # Conditional exception flags
@@ -38,8 +56,8 @@ else()
     set(EXCEPTION_FLAGS "")
 endif()
 
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 ${NATIVE_FLAG} -flto ${EXCEPTION_FLAGS}")
-set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g ${EXCEPTION_FLAGS}")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 ${NATIVE_FLAG} -flto ${EXCEPTION_FLAGS} ${COVERAGE_FLAGS}")
+set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g ${EXCEPTION_FLAGS} ${COVERAGE_FLAGS}")
 
 # Default to Release build
 if(NOT CMAKE_BUILD_TYPE)
@@ -92,7 +110,7 @@ elseif(UNIX)
     # Linux - epoll and optionally io_uring
     list(APPEND CORE_SOURCES src/cpp/core/async_io_epoll.cpp)
     message(STATUS "Async I/O backend: epoll (Linux)")
-    
+
     # Check for io_uring support (optional)
     find_library(LIBURING_LIB uring)
     if(LIBURING_LIB)
@@ -124,16 +142,19 @@ set(PYTHON_SOURCES
     src/cpp/python/gil_guard.cpp
     src/cpp/python/py_executor.cpp
     src/cpp/python/free_threading.cpp
-    src/cpp/python/subinterpreter_pool.cpp
-    src/cpp/python/subinterpreter_executor.cpp
+    src/cpp/python/shared_memory_ipc.cpp
+    src/cpp/python/process_pool_executor.cpp
+    src/cpp/python/zmq_ipc.cpp
 )
 
 set(PYTHON_HEADERS
     src/cpp/python/gil_guard.h
     src/cpp/python/py_executor.h
     src/cpp/python/free_threading.h
-    src/cpp/python/subinterpreter_pool.h
     src/cpp/python/pyobject_pool.h
+    src/cpp/python/shared_memory_ipc.h
+    src/cpp/python/process_pool_executor.h
+    src/cpp/python/zmq_ipc.h
 )
 
 # Native types (NumPy-style for web)
@@ -152,26 +173,32 @@ find_package(Python3 COMPONENTS Development REQUIRED)
 message(STATUS "Python found: ${Python3_VERSION}")
 
 # Check Python version for advanced features
-if (Python3_VERSION_MAJOR EQUAL 3 AND Python3_VERSION_MINOR GREATER_EQUAL 12)
-    message(STATUS "Python 3.12+ detected: Subinterpreter support available (per-interpreter GIL)")
-    add_compile_definitions(FASTERAPI_SUBINTERPRETERS_AVAILABLE)
-
-    if (Python3_VERSION_MINOR GREATER_EQUAL 13)
-        message(STATUS "Python 3.13+ detected: Free-threading support available")
-        message(STATUS "  - Check if built with --disable-gil for best performance")
-        message(STATUS "  - Expected ~60x speedup on ${CMAKE_SYSTEM_PROCESSOR} for CPU-bound workloads")
-        add_compile_definitions(FASTERAPI_FREE_THREADING_AVAILABLE)
-    endif()
-else()
-    message(WARNING "Python < 3.12 detected: Limited to single-interpreter mode (GIL-limited)")
-    message(WARNING "  - Upgrade to Python 3.12+ for subinterpreter support")
-    message(WARNING "  - Upgrade to Python 3.13+ --disable-gil for free-threading")
+if (Python3_VERSION_MAJOR EQUAL 3 AND Python3_VERSION_MINOR GREATER_EQUAL 13)
+    message(STATUS "Python 3.13+ detected: Free-threading support available")
+    message(STATUS "  - Check if built with --disable-gil for best performance")
+    message(STATUS "  - Expected ~60x speedup on ${CMAKE_SYSTEM_PROCESSOR} for CPU-bound workloads")
+    add_compile_definitions(FASTERAPI_FREE_THREADING_AVAILABLE)
 endif()
 
 # OpenSSL (required for TLS, ALPN)
 if (FA_ENABLE_HTTP2 OR FA_ENABLE_HTTP3)
     find_package(OpenSSL REQUIRED)
     message(STATUS "OpenSSL found: ${OPENSSL_VERSION}")
+endif()
+
+# ZeroMQ (optional IPC transport for multi-language workers)
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(ZMQ libzmq)
+    if(ZMQ_FOUND)
+        message(STATUS "ZeroMQ found: ${ZMQ_VERSION}")
+        message(STATUS "  - Optional IPC transport available for multi-language workers")
+        message(STATUS "  - Shared memory IPC remains default for best performance")
+    else()
+        message(STATUS "ZeroMQ not found - using shared memory IPC only")
+    endif()
+else()
+    message(STATUS "pkg-config not found - ZeroMQ detection skipped")
 endif()
 
 # mimalloc (allocator override)
@@ -192,15 +219,8 @@ endif()
 # -----------------------------
 
 if (FA_BUILD_HTTP)
-    # libuv (event loop - required on Windows)
-    if (FA_USE_LIBUV)
-        CPMAddPackage(
-            NAME libuv
-            GITHUB_REPOSITORY libuv/libuv
-            GIT_TAG v1.49.2
-            OPTIONS "LIBUV_BUILD_TESTS OFF"
-        )
-    endif()
+    # NOTE: libuv REMOVED - FasterAPI uses native kqueue (macOS) / epoll (Linux) event loops
+    # See: src/cpp/net/event_loop_kqueue.cpp, event_loop_epoll.cpp
 
     # uWebSockets (HTTP/1.1 + WebSocket) - has its own HTTP parser
     if (FA_USE_UWEBSOCKETS)
@@ -216,6 +236,8 @@ if (FA_BUILD_HTTP)
         NAME simdjson
         GITHUB_REPOSITORY simdjson/simdjson
         GIT_TAG v3.10.1
+        OPTIONS
+            "SIMDJSON_BUILD_STATIC ON"
     )
 
     # zstd (compression)
@@ -230,15 +252,49 @@ if (FA_BUILD_HTTP)
         )
     endif()
 
-    # MsQuic (HTTP/3 - optional)
-    if (FA_ENABLE_HTTP3)
-        CPMAddPackage(
-            NAME msquic
-            GITHUB_REPOSITORY microsoft/msquic
-            GIT_TAG v2.3.5
-            OPTIONS "QUIC_TLS=openssl"
-        )
-    endif()
+    # HTTP/3 Support:
+    # - Pure C++ QUIC implementation (RFC 9000)
+    # - QPACK header compression (RFC 9204)
+    # - HTTP/3 framing (RFC 9114)
+    # - WebTransport (RFC 9297)
+    # - No external dependencies (no MsQuic, no quiche)
+    # - Zero-allocation design with ring buffers and object pools
+endif()
+
+# -----------------------------
+# Testing Framework (Google Test)
+# -----------------------------
+
+if(FA_BUILD_GTEST)
+    CPMAddPackage(
+        NAME googletest
+        GITHUB_REPOSITORY google/googletest
+        GIT_TAG v1.14.0
+        OPTIONS
+            "BUILD_GMOCK ON"
+            "INSTALL_GTEST OFF"
+            "gtest_force_shared_crt ON"
+    )
+    include(GoogleTest)
+    enable_testing()
+    message(STATUS "Google Test enabled")
+endif()
+
+# -----------------------------
+# Benchmarking Framework (Google Benchmark)
+# -----------------------------
+
+if(FA_BUILD_GBENCH)
+    CPMAddPackage(
+        NAME benchmark
+        GITHUB_REPOSITORY google/benchmark
+        GIT_TAG v1.8.3
+        OPTIONS
+            "BENCHMARK_ENABLE_TESTING OFF"
+            "BENCHMARK_ENABLE_GTEST_TESTS OFF"
+            "BENCHMARK_ENABLE_INSTALL OFF"
+    )
+    message(STATUS "Google Benchmark enabled")
 endif()
 
 # -----------------------------
@@ -339,6 +395,8 @@ set(NET_SOURCES
     src/cpp/net/event_loop.cpp
     src/cpp/net/tcp_socket.cpp
     src/cpp/net/tcp_listener.cpp
+    src/cpp/net/udp_socket.cpp
+    src/cpp/net/udp_listener.cpp
     src/cpp/net/tls_context.cpp
     src/cpp/net/tls_cert_generator.cpp
     src/cpp/net/tls_socket.cpp
@@ -348,10 +406,14 @@ set(NET_SOURCES
 if(APPLE OR CMAKE_SYSTEM_NAME MATCHES "BSD")
     list(APPEND NET_SOURCES src/cpp/net/event_loop_kqueue.cpp)
     message(STATUS "Event loop backend: kqueue (macOS/BSD)")
-elseif(UNIX)
+elseif(UNIX AND NOT WIN32)
     # Linux - epoll and optionally io_uring
     list(APPEND NET_SOURCES src/cpp/net/event_loop_epoll.cpp)
     message(STATUS "Event loop backend: epoll (Linux)")
+elseif(WIN32)
+    # Windows - IOCP (I/O Completion Ports)
+    list(APPEND NET_SOURCES src/cpp/net/event_loop_iocp.cpp)
+    message(STATUS "Event loop backend: IOCP (Windows)")
 endif()
 
 if (FA_BUILD_HTTP)
@@ -369,41 +431,60 @@ if (FA_BUILD_HTTP)
         src/cpp/http/static_docs.cpp
         src/cpp/http/sse.cpp
     )
-    
+
     # Add HTTP/2 handler if enabled
     if (FA_ENABLE_HTTP2)
         list(APPEND HTTP_SOURCES src/cpp/http/h2_handler.cpp)
     endif()
-    
+
     # Add HTTP/3 handler if enabled
     if (FA_ENABLE_HTTP3)
-        list(APPEND HTTP_SOURCES src/cpp/http/h3_handler.cpp)
+        list(APPEND HTTP_SOURCES
+            src/cpp/http/h3_handler.cpp
+            src/cpp/http/http3_connection.cpp
+            # QUIC implementation (pure, no external deps)
+            src/cpp/http/quic/quic_packet.cpp
+            src/cpp/http/quic/quic_stream.cpp
+            src/cpp/http/quic/quic_connection.cpp
+            src/cpp/http/quic/quic_flow_control.cpp
+            src/cpp/http/quic/quic_congestion.cpp
+            src/cpp/http/quic/quic_ack_tracker.cpp
+            # QPACK implementation
+            src/cpp/http/qpack/qpack_encoder.cpp
+            src/cpp/http/qpack/qpack_decoder.cpp
+            src/cpp/http/qpack/qpack_static_table.cpp
+            src/cpp/http/qpack/qpack_dynamic_table.cpp
+            # WebTransport implementation (RFC 9297)
+            src/cpp/http/webtransport_connection.cpp
+        )
+        message(STATUS "HTTP/3: Pure QUIC + QPACK implementation (no MsQuic)")
+        message(STATUS "WebTransport: RFC 9297 implementation (streams + datagrams)")
     endif()
-    
+
     # Add middleware
     list(APPEND HTTP_SOURCES src/cpp/http/middleware.cpp)
-    
+
     # Add JSON parser
     list(APPEND HTTP_SOURCES src/cpp/http/json_parser.cpp)
-    
+
     # Add HTTP parser
     list(APPEND HTTP_SOURCES src/cpp/http/http_parser.cpp)
-    
+
     # Add health monitor
     list(APPEND HTTP_SOURCES src/cpp/http/health_monitor.cpp)
-    
+
     # Add SSE support
     list(APPEND HTTP_SOURCES src/cpp/http/sse.cpp)
     list(APPEND HTTP_SOURCES src/cpp/http/sse_lib.cpp)
-    
+
     # Add WebSocket support (from scratch, inspired by uWebSockets)
     list(APPEND HTTP_SOURCES src/cpp/http/websocket_parser.cpp)
     list(APPEND HTTP_SOURCES src/cpp/http/websocket.cpp)
     list(APPEND HTTP_SOURCES src/cpp/http/websocket_lib.cpp)
-    
+
     # Add HPACK support (zero-allocation HTTP/2 header compression)
     list(APPEND HTTP_SOURCES src/cpp/http/hpack.cpp)
-    
+
     # Add Huffman coding (for HPACK compression)
     list(APPEND HTTP_SOURCES src/cpp/http/huffman.cpp)
     list(APPEND HTTP_SOURCES src/cpp/http/huffman_table_data.cpp)
@@ -439,7 +520,7 @@ if (FA_BUILD_HTTP)
 
     # Add HTTP/3 parser (zero-allocation)
     list(APPEND HTTP_SOURCES src/cpp/http/http3_parser.cpp)
-    
+
     # Add WebRTC support (Pion-inspired + Aeron buffers)
     list(APPEND HTTP_SOURCES
         src/cpp/webrtc/sdp_parser.cpp
@@ -464,44 +545,46 @@ if (FA_BUILD_HTTP)
         src/cpp/http/compression.h
         src/cpp/http/app.h
     )
-    
+
     # Add HTTP/2 handler if enabled
     if (FA_ENABLE_HTTP2)
         list(APPEND HTTP_HEADERS src/cpp/http/h2_handler.h)
     endif()
-    
+
     # Add HTTP/3 handler if enabled
     if (FA_ENABLE_HTTP3)
         list(APPEND HTTP_HEADERS src/cpp/http/h3_handler.h)
+        list(APPEND HTTP_HEADERS src/cpp/http/http3_connection.h)
+        list(APPEND HTTP_HEADERS src/cpp/http/webtransport_connection.h)
     endif()
-    
+
     # Add JSON parser
     list(APPEND HTTP_HEADERS src/cpp/http/json_parser.h)
-    
+
     # Add HTTP parser
     list(APPEND HTTP_HEADERS src/cpp/http/http_parser.h)
-    
+
     # Add health monitor
     list(APPEND HTTP_HEADERS src/cpp/http/health_monitor.h)
-    
+
     # Add SSE support
     list(APPEND HTTP_HEADERS src/cpp/http/sse.h)
-    
+
     # Add HPACK support
     list(APPEND HTTP_HEADERS src/cpp/http/hpack.h)
-    
+
     # Add Huffman coding
     list(APPEND HTTP_HEADERS src/cpp/http/huffman.h)
-    
+
     # Add HTTP/2 Server Push
     list(APPEND HTTP_HEADERS src/cpp/http/h2_server_push.h)
-    
+
     # Add HTTP/1.1 parser
     list(APPEND HTTP_HEADERS src/cpp/http/http1_parser.h)
-    
+
     # Add HTTP/3 parser
     list(APPEND HTTP_HEADERS src/cpp/http/http3_parser.h)
-    
+
     # Add WebRTC support
     list(APPEND HTTP_HEADERS
         src/cpp/webrtc/sdp_parser.h
@@ -526,13 +609,13 @@ if (FA_BUILD_HTTP)
         FA_BUILD_HTTP=1
         FASTERAPI_ENABLE_LOGGING
     )
-    
+
     if (FA_USE_UWEBSOCKETS)
         target_compile_definitions(fasterapi_http PRIVATE FA_USE_UWEBSOCKETS=1)
         target_include_directories(fasterapi_http PRIVATE
             ${CMAKE_BINARY_DIR}/cpm-cache/uwebsockets/2d18d741850ab50ce1ba644223c67d92f4b33d01/src
         )
-        
+
         # Link uWebSockets (and its deps)
         if (TARGET uWS)
             target_link_libraries(fasterapi_http PRIVATE uWS)
@@ -541,18 +624,19 @@ if (FA_BUILD_HTTP)
         endif()
     endif()
 
-    # Link libuv (Windows required, Linux/macOS optional)
-    if (FA_USE_LIBUV)
-        if (TARGET uv_a)
-            target_link_libraries(fasterapi_http PRIVATE uv_a)
-        elseif (TARGET uv)
-            target_link_libraries(fasterapi_http PRIVATE uv)
-        endif()
-    endif()
+    # REMOVED: libuv not used - FasterAPI uses native kqueue/epoll event loops
+    # To restore, uncomment below and re-enable FA_USE_LIBUV option + CPMAddPackage
+    # if (FA_USE_LIBUV)
+    #     if (TARGET uv_a)
+    #         target_link_libraries(fasterapi_http PRIVATE uv_a)
+    #     elseif (TARGET uv)
+    #         target_link_libraries(fasterapi_http PRIVATE uv)
+    #     endif()
+    # endif()
 
     # Link simdjson
-    target_link_libraries(fasterapi_http PRIVATE simdjson::simdjson)
-    
+    target_link_libraries(fasterapi_http PRIVATE simdjson)
+
     # Link Python
     target_include_directories(fasterapi_http PRIVATE ${Python3_INCLUDE_DIRS})
     target_link_libraries(fasterapi_http PRIVATE ${Python3_LIBRARIES})
@@ -577,15 +661,27 @@ if (FA_BUILD_HTTP)
         target_link_libraries(fasterapi_http PRIVATE OpenSSL::SSL OpenSSL::Crypto)
     endif()
 
-    # Link MsQuic if HTTP/3 enabled
-    if (FA_ENABLE_HTTP3 AND TARGET msquic)
-        target_link_libraries(fasterapi_http PRIVATE msquic)
+    # Link ZeroMQ if available (optional IPC transport)
+    if(ZMQ_FOUND)
+        target_compile_definitions(fasterapi_http PRIVATE FASTERAPI_USE_ZMQ)
+        target_include_directories(fasterapi_http PRIVATE ${ZMQ_INCLUDE_DIRS})
+        target_link_directories(fasterapi_http PRIVATE ${ZMQ_LIBRARY_DIRS})
+        target_link_libraries(fasterapi_http PRIVATE ${ZMQ_LIBRARIES})
+    endif()
+
+    # HTTP/3 enabled with pure implementation (no MsQuic)
+    if (FA_ENABLE_HTTP3)
         target_compile_definitions(fasterapi_http PRIVATE FA_HTTP3_ENABLED)
+        message(STATUS "HTTP/3 enabled with pure QUIC + QPACK implementation")
     endif()
 
     # Windows socket libs
     if (WIN32)
-        target_link_libraries(fasterapi_http PRIVATE ws2_32 userenv iphlpapi)
+        # ws2_32 - Winsock2 core
+        # mswsock - Microsoft Winsock extensions (AcceptEx, ConnectEx, etc. for IOCP)
+        # userenv - User environment
+        # iphlpapi - IP helper (network interfaces)
+        target_link_libraries(fasterapi_http PRIVATE ws2_32 mswsock userenv iphlpapi)
         target_compile_definitions(fasterapi_http PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
     endif()
 
@@ -698,21 +794,21 @@ if (FA_BUILD_HTTP)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
     )
 
-    # Test native HTTP/2 server (if HTTP/2 is enabled)
-    if (FA_ENABLE_HTTP2)
-        add_executable(test_http2_native
-            tests/test_http2_native.cpp
-            ${NET_SOURCES}
-        )
-        target_include_directories(test_http2_native PRIVATE
-            ${CMAKE_SOURCE_DIR}
-            ${Python3_INCLUDE_DIRS}
-        )
-        target_link_libraries(test_http2_native PRIVATE OpenSSL::SSL OpenSSL::Crypto ${Python3_LIBRARIES})
-        set_target_properties(test_http2_native PROPERTIES
-            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
-        )
-    endif()
+    # Test native HTTP/2 server (disabled - needs nghttp2 library)
+    # if (FA_ENABLE_HTTP2)
+    #     add_executable(test_http2_native
+    #         tests/test_http2_native.cpp
+    #         ${NET_SOURCES}
+    #     )
+    #     target_include_directories(test_http2_native PRIVATE
+    #         ${CMAKE_SOURCE_DIR}
+    #         ${Python3_INCLUDE_DIRS}
+    #     )
+    #     target_link_libraries(test_http2_native PRIVATE OpenSSL::SSL OpenSSL::Crypto ${Python3_LIBRARIES})
+    #     set_target_properties(test_http2_native PROPERTIES
+    #         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+    #     )
+    # endif()
 
     # Test unified server (TLS/ALPN multi-protocol)
     add_executable(test_unified_server
@@ -735,63 +831,248 @@ if (FA_BUILD_HTTP)
     set_target_properties(test_router PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
     )
-    
+
+    add_executable(test_parameter_extractor tests/test_parameter_extractor.cpp src/cpp/http/parameter_extractor.cpp src/cpp/core/logger.cpp)
+    target_include_directories(test_parameter_extractor PRIVATE ${CMAKE_SOURCE_DIR}/src/cpp)
+    set_target_properties(test_parameter_extractor PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+    )
+
     add_executable(bench_router benchmarks/fasterapi/bench_router.cpp src/cpp/http/router.cpp)
     target_include_directories(bench_router PRIVATE ${CMAKE_SOURCE_DIR})
     set_target_properties(bench_router PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks"
     )
-    
-    add_executable(test_executor tests/test_executor.cpp ${PYTHON_SOURCES} ${CORE_SOURCES})
-    target_include_directories(test_executor PRIVATE ${CMAKE_SOURCE_DIR} ${Python3_INCLUDE_DIRS})
-    target_link_libraries(test_executor PRIVATE ${Python3_LIBRARIES})
-    set_target_properties(test_executor PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
-    )
-    
+
     add_executable(test_hpack tests/test_hpack.cpp src/cpp/http/hpack.cpp)
     target_include_directories(test_hpack PRIVATE ${CMAKE_SOURCE_DIR})
     set_target_properties(test_hpack PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
     )
-    
+
+    add_executable(test_qpack_static_table tests/test_qpack_static_table.cpp)
+    target_include_directories(test_qpack_static_table PRIVATE ${CMAKE_SOURCE_DIR})
+    set_target_properties(test_qpack_static_table PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+    )
+
+    add_executable(test_qpack_dynamic_table tests/test_qpack_dynamic_table.cpp)
+    target_include_directories(test_qpack_dynamic_table PRIVATE ${CMAKE_SOURCE_DIR})
+    set_target_properties(test_qpack_dynamic_table PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+    )
+
     add_executable(bench_hpack benchmarks/fasterapi/bench_hpack.cpp src/cpp/http/hpack.cpp)
     target_include_directories(bench_hpack PRIVATE ${CMAKE_SOURCE_DIR})
     set_target_properties(bench_hpack PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks"
     )
-    
+
     add_executable(test_http1_parser tests/test_http1_parser.cpp src/cpp/http/http1_parser.cpp)
     target_include_directories(test_http1_parser PRIVATE ${CMAKE_SOURCE_DIR})
     set_target_properties(test_http1_parser PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
     )
-    
+
     add_executable(bench_http1_parser benchmarks/fasterapi/bench_http1_parser.cpp src/cpp/http/http1_parser.cpp)
     target_include_directories(bench_http1_parser PRIVATE ${CMAKE_SOURCE_DIR})
     set_target_properties(bench_http1_parser PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks"
     )
-    
+
     add_executable(test_http3_parser tests/test_http3_parser.cpp src/cpp/http/http3_parser.cpp)
     target_include_directories(test_http3_parser PRIVATE ${CMAKE_SOURCE_DIR})
     set_target_properties(test_http3_parser PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
     )
-    
-    add_executable(test_webrtc tests/test_webrtc.cpp 
+
+    add_executable(test_http3_performance tests/test_http3_performance.cpp
+        src/cpp/http/http3_parser.cpp
+        src/cpp/http/qpack/qpack_encoder.cpp
+        src/cpp/http/qpack/qpack_decoder.cpp
+        src/cpp/http/qpack/qpack_static_table.cpp
+        src/cpp/http/qpack/qpack_dynamic_table.cpp
+        src/cpp/http/huffman.cpp
+        src/cpp/http/huffman_table.cpp
+        src/cpp/http/huffman_table_data.cpp
+    )
+    target_include_directories(test_http3_performance PRIVATE ${CMAKE_SOURCE_DIR})
+    set_target_properties(test_http3_performance PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+    )
+
+    # HTTP/3 End-to-End Integration Tests (Full Stack)
+    # Note: Uses QPACK without Huffman encoding (Huffman disabled via flag)
+    add_executable(test_http3_integration tests/test_http3_integration.cpp
+        # HTTP/3 Components
+        src/cpp/http/h3_handler.cpp
+        src/cpp/http/http3_parser.cpp
+        # QUIC Components
+        src/cpp/http/quic/quic_connection.cpp
+        src/cpp/http/quic/quic_packet.cpp
+        src/cpp/http/quic/quic_stream.cpp
+        src/cpp/http/quic/quic_flow_control.cpp
+        src/cpp/http/quic/quic_congestion.cpp
+        src/cpp/http/quic/quic_ack_tracker.cpp
+        # QPACK Components
+        src/cpp/http/qpack/qpack_encoder.cpp
+        src/cpp/http/qpack/qpack_decoder.cpp
+        src/cpp/http/qpack/qpack_static_table.cpp
+        src/cpp/http/qpack/qpack_dynamic_table.cpp
+        # Core Components
+        src/cpp/core/ring_buffer.cpp
+        src/cpp/core/logger.cpp
+        src/cpp/http/huffman.cpp
+        src/cpp/http/huffman_table_data.cpp
+    )
+    target_include_directories(test_http3_integration PRIVATE ${CMAKE_SOURCE_DIR})
+    set_target_properties(test_http3_integration PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+    )
+
+    add_executable(test_http3_stress tests/test_http3_stress.cpp
+        # HTTP/3 Components
+        src/cpp/http/http3_parser.cpp
+        # QUIC Components
+        src/cpp/http/quic/quic_connection.cpp
+        src/cpp/http/quic/quic_packet.cpp
+        src/cpp/http/quic/quic_stream.cpp
+        src/cpp/http/quic/quic_flow_control.cpp
+        src/cpp/http/quic/quic_congestion.cpp
+        src/cpp/http/quic/quic_ack_tracker.cpp
+        # QPACK Components
+        src/cpp/http/qpack/qpack_encoder.cpp
+        src/cpp/http/qpack/qpack_decoder.cpp
+        src/cpp/http/qpack/qpack_static_table.cpp
+        src/cpp/http/qpack/qpack_dynamic_table.cpp
+        # Core Components
+        src/cpp/core/ring_buffer.cpp
+        src/cpp/core/logger.cpp
+        src/cpp/http/huffman.cpp
+    )
+    target_include_directories(test_http3_stress PRIVATE ${CMAKE_SOURCE_DIR})
+    target_compile_definitions(test_http3_stress PRIVATE FASTERAPI_NO_HUFFMAN=1)
+    set_target_properties(test_http3_stress PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+    )
+
+    # HTTP/3 Interoperability Tests (multi-implementation compatibility)
+    add_executable(test_http3_interop tests/test_http3_interop.cpp
+        # HTTP/3 Components
+        src/cpp/http/h3_handler.cpp
+        src/cpp/http/http3_parser.cpp
+        src/cpp/http/http3_connection.cpp
+        # QUIC Components
+        src/cpp/http/quic/quic_connection.cpp
+        src/cpp/http/quic/quic_packet.cpp
+        src/cpp/http/quic/quic_stream.cpp
+        src/cpp/http/quic/quic_flow_control.cpp
+        src/cpp/http/quic/quic_congestion.cpp
+        src/cpp/http/quic/quic_ack_tracker.cpp
+        # QPACK Components
+        src/cpp/http/qpack/qpack_encoder.cpp
+        src/cpp/http/qpack/qpack_decoder.cpp
+        src/cpp/http/qpack/qpack_static_table.cpp
+        src/cpp/http/qpack/qpack_dynamic_table.cpp
+        # WebTransport
+        src/cpp/http/webtransport_connection.cpp
+        # Core Components
+        src/cpp/core/ring_buffer.cpp
+        src/cpp/core/logger.cpp
+        src/cpp/http/huffman.cpp
+        src/cpp/http/huffman_table_data.cpp
+    )
+    target_include_directories(test_http3_interop PRIVATE ${CMAKE_SOURCE_DIR})
+    target_compile_definitions(test_http3_interop PRIVATE FA_HTTP3_ENABLED)
+    set_target_properties(test_http3_interop PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+    )
+
+    # HTTP/3 UnifiedServer Integration Tests (end-to-end testing)
+    add_executable(test_http3_unified_integration tests/test_http3_unified_integration.cpp
+        # HTTP/3 Components
+        src/cpp/http/h3_handler.cpp
+        src/cpp/http/http3_parser.cpp
+        src/cpp/http/http3_connection.cpp
+        # QUIC Components
+        src/cpp/http/quic/quic_connection.cpp
+        src/cpp/http/quic/quic_packet.cpp
+        src/cpp/http/quic/quic_stream.cpp
+        src/cpp/http/quic/quic_flow_control.cpp
+        src/cpp/http/quic/quic_congestion.cpp
+        src/cpp/http/quic/quic_ack_tracker.cpp
+        # QPACK Components
+        src/cpp/http/qpack/qpack_encoder.cpp
+        src/cpp/http/qpack/qpack_decoder.cpp
+        src/cpp/http/qpack/qpack_static_table.cpp
+        src/cpp/http/qpack/qpack_dynamic_table.cpp
+        # WebTransport
+        src/cpp/http/webtransport_connection.cpp
+        # Core Components
+        src/cpp/core/ring_buffer.cpp
+        src/cpp/core/logger.cpp
+        src/cpp/http/huffman.cpp
+    )
+    target_include_directories(test_http3_unified_integration PRIVATE ${CMAKE_SOURCE_DIR})
+    target_compile_definitions(test_http3_unified_integration PRIVATE FASTERAPI_NO_HUFFMAN=1 FA_HTTP3_ENABLED)
+    target_link_libraries(test_http3_unified_integration PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+    set_target_properties(test_http3_unified_integration PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+    )
+
+    # HTTP/3 End-to-End Tests with App API
+    # Tests the high-level FasterAPI App class with HTTP/3 enabled
+    add_executable(test_app_http3_e2e tests/test_app_http3_e2e.cpp)
+    target_include_directories(test_app_http3_e2e PRIVATE ${CMAKE_SOURCE_DIR})
+    target_compile_definitions(test_app_http3_e2e PRIVATE FASTERAPI_NO_HUFFMAN=1 FA_HTTP3_ENABLED)
+    target_link_libraries(test_app_http3_e2e PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+    set_target_properties(test_app_http3_e2e PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+    )
+
+    # App Destructor Unit Tests
+    # Tests the App destructor for memory safety and proper cleanup
+    add_executable(test_app_destructor tests/test_app_destructor.cpp)
+    target_include_directories(test_app_destructor PRIVATE ${CMAKE_SOURCE_DIR})
+    target_compile_definitions(test_app_destructor PRIVATE FASTERAPI_NO_HUFFMAN=1 FA_HTTP3_ENABLED)
+    target_link_libraries(test_app_destructor PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+    set_target_properties(test_app_destructor PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+    )
+
+    # Multi-Protocol HTTP Verb Tests
+    # Comprehensive testing of all HTTP methods across HTTP/1.1, HTTP/2, and HTTP/3
+    # Verifies transparent protocol selection and clean user-facing API
+    add_executable(test_multi_protocol_verbs tests/test_multi_protocol_verbs.cpp)
+    target_include_directories(test_multi_protocol_verbs PRIVATE ${CMAKE_SOURCE_DIR})
+    target_compile_definitions(test_multi_protocol_verbs PRIVATE FA_HTTP3_ENABLED)
+    target_link_libraries(test_multi_protocol_verbs PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+    set_target_properties(test_multi_protocol_verbs PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+    )
+
+    # Debug test for App destructor crash
+    add_executable(test_app_crash_debug tests/test_app_crash_debug.cpp)
+    target_include_directories(test_app_crash_debug PRIVATE ${CMAKE_SOURCE_DIR})
+    target_compile_definitions(test_app_crash_debug PRIVATE FASTERAPI_NO_HUFFMAN=1 FA_HTTP3_ENABLED)
+    target_link_libraries(test_app_crash_debug PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+    set_target_properties(test_app_crash_debug PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+    )
+
+    add_executable(test_webrtc tests/test_webrtc.cpp
         src/cpp/webrtc/sdp_parser.cpp
         src/cpp/webrtc/ice.cpp
         src/cpp/webrtc/signaling.cpp
         src/cpp/webrtc/message_parser.cpp
     )
     target_include_directories(test_webrtc PRIVATE ${CMAKE_SOURCE_DIR})
-    target_link_libraries(test_webrtc PRIVATE simdjson::simdjson)
+    target_link_libraries(test_webrtc PRIVATE simdjson)
     set_target_properties(test_webrtc PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
     )
-    
-    add_executable(test_webrtc_media tests/test_webrtc_media.cpp 
+
+    add_executable(test_webrtc_media tests/test_webrtc_media.cpp
         src/cpp/webrtc/rtp.cpp
         src/cpp/webrtc/data_channel.cpp
         src/cpp/core/ring_buffer.cpp
@@ -800,7 +1081,7 @@ if (FA_BUILD_HTTP)
     set_target_properties(test_webrtc_media PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
     )
-    
+
     add_executable(test_h2_server_push tests/test_h2_server_push.cpp
         src/cpp/http/h2_server_push.cpp
         src/cpp/http/hpack.cpp
@@ -811,24 +1092,24 @@ if (FA_BUILD_HTTP)
     set_target_properties(test_h2_server_push PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
     )
-    
-    add_executable(test_native_types tests/test_native_types.cpp 
+
+    add_executable(test_native_types tests/test_native_types.cpp
         ${NATIVE_TYPES_SOURCES}
         src/cpp/http/http1_parser.cpp
     )
     target_include_directories(test_native_types PRIVATE ${CMAKE_SOURCE_DIR} ${Python3_INCLUDE_DIRS})
-    target_link_libraries(test_native_types PRIVATE ${Python3_LIBRARIES} simdjson::simdjson)
+    target_link_libraries(test_native_types PRIVATE ${Python3_LIBRARIES} simdjson)
     set_target_properties(test_native_types PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
     )
-    
+
     # Test lock-free queue
     add_executable(test_lockfree_queue tests/test_lockfree_queue.cpp)
     target_include_directories(test_lockfree_queue PRIVATE ${CMAKE_SOURCE_DIR})
     set_target_properties(test_lockfree_queue PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
     )
-    
+
     # Test PyObject pool
     add_executable(test_pyobject_pool tests/test_pyobject_pool.cpp)
     target_include_directories(test_pyobject_pool PRIVATE ${CMAKE_SOURCE_DIR} ${Python3_INCLUDE_DIRS})
@@ -836,7 +1117,7 @@ if (FA_BUILD_HTTP)
     set_target_properties(test_pyobject_pool PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
     )
-    
+
     # Test zero-copy response
     add_executable(test_zerocopy_response tests/test_zerocopy_response.cpp)
     target_include_directories(test_zerocopy_response PRIVATE ${CMAKE_SOURCE_DIR})
@@ -867,7 +1148,7 @@ if (FA_BUILD_HTTP)
     set_target_properties(bench_pure_cpp PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks"
     )
-    
+
     # TechEmpower benchmarks (pure C++)
     add_executable(bench_techempower_cpp benchmarks/techempower/techempower_cpp.cpp
         src/cpp/http/router.cpp
@@ -876,11 +1157,11 @@ if (FA_BUILD_HTTP)
         ${NATIVE_TYPES_SOURCES}
     )
     target_include_directories(bench_techempower_cpp PRIVATE ${CMAKE_SOURCE_DIR} ${Python3_INCLUDE_DIRS})
-    target_link_libraries(bench_techempower_cpp PRIVATE ${Python3_LIBRARIES} simdjson::simdjson)
+    target_link_libraries(bench_techempower_cpp PRIVATE ${Python3_LIBRARIES} simdjson)
     set_target_properties(bench_techempower_cpp PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks"
     )
-    
+
     # TechEmpower concurrent benchmarks (multithreaded)
     add_executable(bench_techempower_concurrent benchmarks/techempower/techempower_concurrent.cpp
         src/cpp/http/router.cpp
@@ -891,7 +1172,7 @@ if (FA_BUILD_HTTP)
     set_target_properties(bench_techempower_concurrent PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks"
     )
-    
+
     # 1 Million Request Challenge (1MRC) - Pure C++ server
     add_executable(1mrc_cpp_server benchmarks/1mrc/cpp/1mrc_cpp_server.cpp)
     target_include_directories(1mrc_cpp_server PRIVATE ${CMAKE_SOURCE_DIR})
@@ -900,7 +1181,7 @@ if (FA_BUILD_HTTP)
     set_target_properties(1mrc_cpp_server PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks"
     )
-    
+
     # 1MRC - Async I/O version (kqueue/epoll/io_uring/IOCP)
     add_executable(1mrc_async_server benchmarks/1mrc/cpp/1mrc_async_server.cpp
         ${CORE_SOURCES}
@@ -911,15 +1192,16 @@ if (FA_BUILD_HTTP)
     set_target_properties(1mrc_async_server PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks"
     )
-    
-    # 1MRC - libuv version (optimized, production-ready)
-    add_executable(1mrc_libuv_server benchmarks/1mrc/cpp/1mrc_libuv_server.cpp)
-    target_include_directories(1mrc_libuv_server PRIVATE ${CMAKE_SOURCE_DIR})
-    target_compile_options(1mrc_libuv_server PRIVATE -O3 -pthread)
-    target_link_libraries(1mrc_libuv_server PRIVATE uv pthread)
-    set_target_properties(1mrc_libuv_server PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks"
-    )
+
+    # REMOVED: libuv benchmark - FasterAPI uses native kqueue/epoll event loops
+    # To restore, uncomment below and re-enable FA_USE_LIBUV + CPMAddPackage(libuv)
+    # add_executable(1mrc_libuv_server benchmarks/1mrc/cpp/1mrc_libuv_server.cpp)
+    # target_include_directories(1mrc_libuv_server PRIVATE ${CMAKE_SOURCE_DIR})
+    # target_compile_options(1mrc_libuv_server PRIVATE -O3 -pthread)
+    # target_link_libraries(1mrc_libuv_server PRIVATE uv pthread)
+    # set_target_properties(1mrc_libuv_server PROPERTIES
+    #     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks"
+    # )
 
     # Note: 1mrc_coroio_server removed - used old CoroIO backend
     # Native event loop (test_http1_native, test_http2_native) is 250x faster
@@ -968,6 +1250,9 @@ if (FA_BUILD_MCP)
         src/cpp/mcp/protocol/message.cpp
         src/cpp/mcp/protocol/session.cpp
         src/cpp/mcp/transports/stdio_transport.cpp
+        src/cpp/mcp/transports/sse_transport.cpp
+        src/cpp/mcp/transports/websocket_transport.cpp
+        src/cpp/mcp/client/mcp_client.cpp
         src/cpp/mcp/server/mcp_server.cpp
         src/cpp/mcp/security/auth.cpp
         src/cpp/mcp/security/rate_limit.cpp
@@ -1071,9 +1356,26 @@ if (FA_BUILD_EXAMPLES AND FA_BUILD_HTTP)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples"
     )
 
+    # Pure C++ server - no Python/ZMQ, maximum performance
+    add_executable(pure_cpp_server examples/pure_cpp_server.cpp)
+    target_include_directories(pure_cpp_server PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(pure_cpp_server PRIVATE fasterapi_http)
+    set_target_properties(pure_cpp_server PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples"
+    )
+
+    # Pure C++ WebSocket test server - for E2E testing WebSocket in pure C++ mode
+    add_executable(test_pure_cpp_websocket_server tests/test_pure_cpp_websocket_server.cpp)
+    target_include_directories(test_pure_cpp_websocket_server PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(test_pure_cpp_websocket_server PRIVATE fasterapi_http)
+    set_target_properties(test_pure_cpp_websocket_server PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+    )
+
     message(STATUS "C++ examples will be built at: ${CMAKE_BINARY_DIR}/examples/")
     message(STATUS "  - hello_world: Minimal 'Hello World' example")
     message(STATUS "  - cpp_app_demo: Comprehensive feature demonstration")
+    message(STATUS "  - pure_cpp_server: Pure C++ server (no Python/ZMQ)")
 endif()
 
 # -----------------------------
@@ -1155,4 +1457,138 @@ if (FA_BUILD_CYTHON AND FA_BUILD_HTTP AND CYTHON_EXECUTABLE)
     endif()
 
     message(STATUS "Cython extensions will be built to: ${CMAKE_SOURCE_DIR}/fasterapi/_native/")
+endif()
+
+# -----------------------------
+# Google Test Based Tests
+# -----------------------------
+
+if(FA_BUILD_GTEST AND TARGET gtest)
+    message(STATUS "Building Google Test based tests")
+
+    # Helper function to create gtest executable
+    function(add_gtest_test name sources)
+        add_executable(${name} ${sources})
+        target_include_directories(${name} PRIVATE
+            ${CMAKE_SOURCE_DIR}
+            ${CMAKE_SOURCE_DIR}/src/cpp
+        )
+        target_link_libraries(${name} PRIVATE gtest gtest_main gmock)
+        set_target_properties(${name} PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests/gtest"
+            CXX_STANDARD 20
+            CXX_STANDARD_REQUIRED YES
+        )
+        # Enable exceptions for gtest (gtest requires them)
+        target_compile_options(${name} PRIVATE -fexceptions)
+        gtest_discover_tests(${name})
+    endfunction()
+
+    # Core module tests
+    add_gtest_test(gtest_ring_buffer
+        tests/core/ring_buffer_test.cpp
+    )
+    target_sources(gtest_ring_buffer PRIVATE
+        src/cpp/core/ring_buffer.cpp
+    )
+
+    add_gtest_test(gtest_lockfree_queue
+        tests/core/lockfree_queue_test.cpp
+    )
+
+    # Network layer tests
+    add_gtest_test(gtest_event_loop
+        tests/net/event_loop_test.cpp
+    )
+    target_sources(gtest_event_loop PRIVATE
+        src/cpp/net/event_loop.cpp
+        $<$<PLATFORM_ID:Darwin>:src/cpp/net/event_loop_kqueue.cpp>
+        $<$<PLATFORM_ID:Linux>:src/cpp/net/event_loop_epoll.cpp>
+    )
+
+    add_gtest_test(gtest_tcp_socket
+        tests/net/tcp_socket_test.cpp
+    )
+    target_sources(gtest_tcp_socket PRIVATE
+        src/cpp/net/event_loop.cpp
+        src/cpp/net/tcp_socket.cpp
+        $<$<PLATFORM_ID:Darwin>:src/cpp/net/event_loop_kqueue.cpp>
+        $<$<PLATFORM_ID:Linux>:src/cpp/net/event_loop_epoll.cpp>
+    )
+
+    # HTTP stack tests
+    add_gtest_test(gtest_router
+        tests/http/router_test.cpp
+    )
+    target_sources(gtest_router PRIVATE
+        src/cpp/http/router.cpp
+    )
+
+    add_gtest_test(gtest_http1_parser
+        tests/http/http1_parser_test.cpp
+    )
+    target_sources(gtest_http1_parser PRIVATE
+        src/cpp/http/http1_parser.cpp
+    )
+
+    add_gtest_test(gtest_http2_frame
+        tests/http/http2_frame_test.cpp
+    )
+    target_sources(gtest_http2_frame PRIVATE
+        src/cpp/http/http2_frame.cpp
+    )
+
+    # WebSocket tests
+    add_gtest_test(gtest_websocket
+        tests/gtest/gtest_websocket.cpp
+    )
+    target_sources(gtest_websocket PRIVATE
+        src/cpp/http/websocket.cpp
+        src/cpp/http/websocket_parser.cpp
+    )
+    target_link_libraries(gtest_websocket PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+
+    # WebTransport tests
+    add_gtest_test(gtest_webtransport
+        tests/test_webtransport.cpp
+    )
+    target_sources(gtest_webtransport PRIVATE
+        src/cpp/http/webtransport_connection.cpp
+    )
+    target_link_libraries(gtest_webtransport PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    message(STATUS "Google Test tests will be built at: ${CMAKE_BINARY_DIR}/tests/gtest/")
+endif()
+
+# -----------------------------
+# Google Benchmark Based Benchmarks
+# -----------------------------
+
+if(FA_BUILD_GBENCH AND TARGET benchmark)
+    message(STATUS "Building Google Benchmark based benchmarks")
+
+    # Helper function to create gbench executable
+    function(add_gbench name sources)
+        add_executable(${name} ${sources})
+        target_include_directories(${name} PRIVATE
+            ${CMAKE_SOURCE_DIR}
+            ${CMAKE_SOURCE_DIR}/src/cpp
+        )
+        target_link_libraries(${name} PRIVATE benchmark benchmark_main)
+        set_target_properties(${name} PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks/gbench"
+            CXX_STANDARD 20
+            CXX_STANDARD_REQUIRED YES
+        )
+    endfunction()
+
+    # Core module benchmarks
+    add_gbench(gbench_ring_buffer benchmarks/micro/ring_buffer_bench.cpp)
+    target_sources(gbench_ring_buffer PRIVATE
+        src/cpp/core/ring_buffer.cpp
+    )
+
+    add_gbench(gbench_queue benchmarks/micro/queue_bench.cpp)
+
+    message(STATUS "Google Benchmark benchmarks will be built at: ${CMAKE_BINARY_DIR}/benchmarks/gbench/")
 endif()

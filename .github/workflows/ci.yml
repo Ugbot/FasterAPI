@@ -1,0 +1,309 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/cpm-cache
+
+jobs:
+  # ============================================================================
+  # Build Matrix (Linux + macOS)
+  # ============================================================================
+  build:
+    name: Build (${{ matrix.os }}, ${{ matrix.compiler }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            compiler: gcc-13
+            cc: gcc-13
+            cxx: g++-13
+          - os: ubuntu-24.04
+            compiler: clang-18
+            cc: clang-18
+            cxx: clang++-18
+          - os: macos-14
+            compiler: apple-clang
+            cc: clang
+            cxx: clang++
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup CPM cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: cpm-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt', 'cmake/CPM.cmake') }}
+          restore-keys: |
+            cpm-${{ runner.os }}-
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential ninja-build \
+            libssl-dev python3-dev \
+            libzmq3-dev pkg-config
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install ninja openssl@3 python@3.13 zeromq pkg-config
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+            -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
+            -DFA_BUILD_HTTP=ON \
+            -DFA_BUILD_PG=OFF \
+            -DFA_BUILD_MCP=ON \
+            -DFA_ENABLE_HTTP2=ON \
+            -DFA_ENABLE_HTTP3=ON \
+            -DFA_BUILD_GTEST=ON \
+            -DFA_BUILD_GBENCH=ON \
+            -DFA_NATIVE_ARCH=OFF \
+            -DFA_BUILD_EXAMPLES=OFF
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.os }}-${{ matrix.compiler }}
+          path: |
+            build/lib/
+            build/tests/
+            build/benchmarks/
+          retention-days: 1
+
+  # ============================================================================
+  # Unit Tests (Google Test)
+  # ============================================================================
+  test-gtest:
+    name: GTest (${{ matrix.os }})
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-${{ matrix.os }}-${{ matrix.os == 'macos-14' && 'apple-clang' || 'gcc-13' }}
+          path: build
+
+      - name: Make tests executable
+        run: chmod -R +x build/tests/
+
+      - name: Run Google Test suite
+        run: |
+          cd build/tests/gtest
+          for test in gtest_*; do
+            if [ -x "$test" ]; then
+              echo "=== Running $test ==="
+              ./$test --gtest_output=xml:$test-results.xml
+            fi
+          done
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gtest-results-${{ matrix.os }}
+          path: build/tests/gtest/*-results.xml
+
+  # ============================================================================
+  # Legacy Tests
+  # ============================================================================
+  test-legacy:
+    name: Legacy Tests (${{ matrix.os }})
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-${{ matrix.os }}-${{ matrix.os == 'macos-14' && 'apple-clang' || 'gcc-13' }}
+          path: build
+
+      - name: Make tests executable
+        run: chmod -R +x build/tests/
+
+      - name: Run core tests
+        run: |
+          ./build/tests/test_router || true
+          ./build/tests/test_parameter_extractor || true
+          ./build/tests/test_hpack || true
+          ./build/tests/test_http1_parser || true
+          ./build/tests/test_lockfree_queue || true
+          ./build/tests/test_zerocopy_response || true
+
+      - name: Run QPACK tests
+        run: |
+          ./build/tests/test_qpack_static_table || true
+          ./build/tests/test_qpack_dynamic_table || true
+
+  # ============================================================================
+  # Sanitizers
+  # ============================================================================
+  sanitizers:
+    name: Sanitizers (ASan + UBSan)
+    runs-on: ubuntu-24.04
+    env:
+      ASAN_OPTIONS: detect_leaks=1:check_initialization_order=1
+      UBSAN_OPTIONS: print_stacktrace=1
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup CPM cache
+        uses: actions/cache@v4
+        with:
+          path: cpm-cache
+          key: cpm-sanitizer-${{ hashFiles('**/CMakeLists.txt') }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libssl-dev python3-dev clang-18
+
+      - name: Configure with sanitizers
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER=clang-18 \
+            -DCMAKE_CXX_COMPILER=clang++-18 \
+            -DFA_SANITIZE=ON \
+            -DFA_BUILD_HTTP=ON \
+            -DFA_BUILD_MCP=OFF \
+            -DFA_BUILD_PG=OFF \
+            -DFA_ENABLE_HTTP2=ON \
+            -DFA_ENABLE_HTTP3=OFF \
+            -DFA_BUILD_GTEST=ON \
+            -DFA_BUILD_GBENCH=OFF \
+            -DFA_NATIVE_ARCH=OFF
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Run tests with sanitizers
+        run: |
+          ./build/tests/test_router
+          ./build/tests/test_parameter_extractor
+          ./build/tests/test_hpack
+          ./build/tests/test_http1_parser
+          ./build/tests/test_lockfree_queue
+
+          # GTest tests
+          if [ -d build/tests/gtest ]; then
+            for test in build/tests/gtest/gtest_*; do
+              if [ -x "$test" ]; then
+                $test
+              fi
+            done
+          fi
+
+  # ============================================================================
+  # Benchmarks
+  # ============================================================================
+  benchmarks:
+    name: Benchmarks
+    needs: build
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-ubuntu-24.04-gcc-13
+          path: build
+
+      - name: Make benchmarks executable
+        run: chmod -R +x build/benchmarks/
+
+      - name: Run micro-benchmarks
+        run: |
+          mkdir -p benchmark-results
+
+          # Legacy benchmarks
+          ./build/benchmarks/bench_router 2>&1 | tee benchmark-results/router.txt || true
+          ./build/benchmarks/bench_hpack 2>&1 | tee benchmark-results/hpack.txt || true
+          ./build/benchmarks/bench_http1_parser 2>&1 | tee benchmark-results/http1_parser.txt || true
+
+          # Google Benchmark tests
+          if [ -d build/benchmarks/gbench ]; then
+            for bench in build/benchmarks/gbench/gbench_*; do
+              if [ -x "$bench" ]; then
+                name=$(basename $bench)
+                $bench --benchmark_format=json > benchmark-results/$name.json 2>&1 || true
+              fi
+            done
+          fi
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmark-results/
+          retention-days: 30
+
+  # ============================================================================
+  # Summary Job
+  # ============================================================================
+  ci-success:
+    name: CI Success
+    needs: [build, test-gtest, test-legacy, sanitizers, benchmarks]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [[ "${{ needs.build.result }}" != "success" ]]; then
+            echo "Build failed"
+            exit 1
+          fi
+          if [[ "${{ needs.test-gtest.result }}" != "success" ]]; then
+            echo "GTest failed"
+            exit 1
+          fi
+          if [[ "${{ needs.sanitizers.result }}" != "success" ]]; then
+            echo "Sanitizers failed"
+            exit 1
+          fi
+          echo "All CI checks passed!"

@@ -38,7 +38,7 @@ class MCPServer:
         self,
         name: str = "FasterAPI MCP Server",
         version: str = "0.1.0",
-        instructions: Optional[str] = None
+        instructions: Optional[str] = None,
     ):
         """
         Create an MCP server.
@@ -62,14 +62,14 @@ class MCPServer:
         self._next_id = 1
 
     def __del__(self):
-        if hasattr(self, '_handle') and self._handle:
+        if hasattr(self, "_handle") and self._handle:
             bindings.server_destroy(self._handle)
 
     def tool(
         self,
         name: Optional[str] = None,
         description: Optional[str] = None,
-        schema: Optional[dict] = None
+        schema: Optional[dict] = None,
     ):
         """
         Decorator to register a tool.
@@ -86,6 +86,7 @@ class MCPServer:
                 return f"Hello, {name}!"
             ```
         """
+
         def decorator(func: Callable) -> Callable:
             tool_name = name or func.__name__
             tool_desc = description or func.__doc__ or ""
@@ -96,11 +97,7 @@ class MCPServer:
 
             # Register with C++ layer
             result = bindings.server_register_tool(
-                self._handle,
-                tool_name,
-                tool_desc,
-                tool_schema,
-                handler_id
+                self._handle, tool_name, tool_desc, tool_schema, handler_id
             )
 
             if result != 0:
@@ -118,7 +115,7 @@ class MCPServer:
         uri: Optional[str] = None,
         name: Optional[str] = None,
         description: Optional[str] = None,
-        mime_type: str = "text/plain"
+        mime_type: str = "text/plain",
     ):
         """
         Decorator to register a resource.
@@ -136,6 +133,7 @@ class MCPServer:
                 return json.dumps({"setting": "value"})
             ```
         """
+
         def decorator(func: Callable) -> Callable:
             resource_uri = uri or f"resource://{func.__name__}"
             resource_name = name or func.__name__
@@ -151,7 +149,7 @@ class MCPServer:
                 resource_name,
                 resource_desc,
                 mime_type,
-                provider_id
+                provider_id,
             )
 
             if result != 0:
@@ -168,7 +166,7 @@ class MCPServer:
         self,
         name: Optional[str] = None,
         description: Optional[str] = None,
-        arguments: Optional[list] = None
+        arguments: Optional[list] = None,
     ):
         """
         Decorator to register a prompt.
@@ -185,29 +183,43 @@ class MCPServer:
                 return f"Please review this code:\n\n{code}"
             ```
         """
+
         def decorator(func: Callable) -> Callable:
             # TODO: Implement prompt registration
             return func
 
         return decorator
 
-    def run(self, transport: str = "stdio"):
+    def run(self, transport: str = "stdio", host: str = "0.0.0.0", port: int = 8000):
         """
         Start the server.
 
         Args:
             transport: Transport type ("stdio", "sse", "websocket")
+            host: Host to bind to (for SSE and WebSocket)
+            port: Port to listen on (for SSE and WebSocket)
         """
         if transport == "stdio":
             result = bindings.server_start_stdio(self._handle)
             if result != 0:
                 raise RuntimeError(f"Failed to start server: error code {result}")
+        elif transport == "sse":
+            result = bindings.server_start_sse(self._handle, host, port)
+            if result != 0:
+                raise RuntimeError(f"Failed to start SSE server: error code {result}")
+        elif transport == "websocket":
+            result = bindings.server_start_websocket(self._handle, host, port)
+            if result != 0:
+                raise RuntimeError(
+                    f"Failed to start WebSocket server: error code {result}"
+                )
         else:
-            raise NotImplementedError(f"Transport '{transport}' not yet implemented")
+            raise ValueError(f"Unknown transport: {transport}")
 
         try:
             # Keep server running
             import time
+
             while True:
                 time.sleep(0.1)
         except KeyboardInterrupt:
@@ -216,12 +228,20 @@ class MCPServer:
 
 
 # Standalone decorators for convenience
-def tool(name: Optional[str] = None, description: Optional[str] = None, schema: Optional[dict] = None):
+def tool(
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+    schema: Optional[dict] = None,
+):
     """Standalone tool decorator (use with MCPServer instance)."""
     raise RuntimeError("Use @server.tool() instead of @tool()")
 
 
-def resource(uri: Optional[str] = None, name: Optional[str] = None, description: Optional[str] = None):
+def resource(
+    uri: Optional[str] = None,
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+):
     """Standalone resource decorator (use with MCPServer instance)."""
     raise RuntimeError("Use @server.resource() instead of @resource()")
 

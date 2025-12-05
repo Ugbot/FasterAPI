@@ -34,8 +34,9 @@ namespace http {
 
 /**
  * JSON value types supported by the validator.
+ * Note: Using unscoped enum for Cython compatibility.
  */
-enum class SchemaType {
+enum SchemaType {
     STRING,
     INTEGER,
     FLOAT,
@@ -50,6 +51,18 @@ enum class SchemaType {
  * Convert SchemaType to string for error messages.
  */
 const char* schema_type_to_string(SchemaType type) noexcept;
+
+/**
+ * Python binding helpers: Convert between int and SchemaType.
+ * These wrappers work around Cython's limited support for scoped enums.
+ */
+inline SchemaType schema_type_from_int(int value) noexcept {
+    return static_cast<SchemaType>(value);
+}
+
+inline int schema_type_to_int(SchemaType type) noexcept {
+    return static_cast<int>(type);
+}
 
 /**
  * Validation error location and message.

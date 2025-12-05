@@ -1,258 +1,253 @@
 """
-Server-Sent Events (SSE) Support
+High-level Server-Sent Events (SSE) API for FasterAPI.
 
-High-performance SSE implementation backed by C++.
+Provides async-friendly SSE interface built on top of Cython bindings.
 """
 
-from typing import Optional, Callable, Any
+from typing import Union, Optional, Any
+import asyncio
 import json
-from .bindings import get_lib
+
+try:
+    from fasterapi.http.server_cy import PySSEConnection
+except ImportError:
+    # Fallback for development/testing
+    PySSEConnection = None
 
 
-class SSEConnection:
+class SSE:
     """
-    Server-Sent Events connection backed by C++.
-    
-    Sends events from server to client over HTTP.
-    Simpler than WebSockets for one-way communication.
-    
-    Features:
-    - Automatic keep-alive
-    - Event IDs for reconnection
-    - Named events
-    - JSON data support
-    - High performance (C++ core)
-    
-    Spec: https://html.spec.whatwg.org/multipage/server-sent-events.html
-    
+    High-level Server-Sent Events API.
+
+    Wraps PySSEConnection with async interface for streaming events to clients.
+
     Example:
-        @app.sse("/events")
-        def event_stream(sse: SSEConnection):
-            for i in range(100):
-                sse.send(
-                    {"count": i, "time": time.time()},
-                    event="count",
-                    id=str(i)
-                )
-                time.sleep(1)
+        @app.sse("/sse/events")
+        async def sse_handler(sse: SSE):
+            for i in range(10):
+                await sse.send({"count": i}, event="counter")
+                await asyncio.sleep(1)
     """
-    
-    def __init__(self, native_handle: Optional[int] = None):
+
+    def __init__(self, connection: "PySSEConnection"):
         """
-        Create SSE connection.
-        
+        Create SSE wrapper.
+
         Args:
-            native_handle: C++ SSEConnection pointer (or None for testing)
+            connection: Cython SSE connection object
         """
-        self._handle = native_handle
-        self._lib = get_lib() if native_handle else None
+        self._conn = connection
         self._closed = False
-    
-    def send(
+
+    async def send(
         self,
-        data: Any,
+        data: Union[str, dict, list, Any],
         event: Optional[str] = None,
-        id: Optional[str] = None,
-        retry: Optional[int] = None
+        event_id: Optional[str] = None,
+        retry: Optional[int] = None,
     ) -> None:
         """
-        Send an event to the client.
-        
+        Send SSE event to client.
+
         Args:
-            data: Event data (will be JSON-encoded if dict/list)
+            data: Event data (str, dict, list, or JSON-serializable object)
             event: Event type (optional, defaults to "message")
-            id: Event ID (optional, for reconnection)
+            event_id: Event ID for reconnection (optional)
             retry: Retry time in milliseconds (optional)
-        
-        Examples:
-            sse.send("Hello World")
-            sse.send({"message": "hi"}, event="chat", id="123")
-            sse.send([1, 2, 3], event="update")
-            
+
         Raises:
             RuntimeError: If connection is closed or send fails
         """
         if self._closed:
-            raise RuntimeError("Connection is closed")
-        
-        if not self._handle or not self._lib:
-            raise RuntimeError("SSE not connected")
-        
-        # JSON-encode data if needed
-        if isinstance(data, (dict, list)):
-            data_str = json.dumps(data)
+            raise RuntimeError("SSE connection is closed")
+
+        # Convert data to string if needed
+        if isinstance(data, str):
+            data_str = data
         else:
-            data_str = str(data)
-        
-        # Encode strings to bytes
-        data_bytes = data_str.encode('utf-8')
-        event_bytes = event.encode('utf-8') if event else None
-        id_bytes = id.encode('utf-8') if id else None
-        retry_val = retry if retry is not None else -1
-        
-        # Call C++ backend
-        result = self._lib.sse_send(
-            self._handle,
-            data_bytes,
-            event_bytes,
-            id_bytes,
-            retry_val
+            # Serialize to JSON
+            data_str = json.dumps(data, ensure_ascii=False)
+
+        # Determine retry value
+        retry_ms = retry if retry is not None else -1
+
+        # Call Cython binding (releases GIL)
+        await asyncio.get_event_loop().run_in_executor(
+            None, self._conn.send, data_str, event, event_id, retry_ms
         )
-        
-        if result != 0:
-            raise RuntimeError(f"Failed to send SSE event: error {result}")
-    
-    def send_comment(self, comment: str) -> None:
+
+    async def send_json(
+        self,
+        obj: Union[dict, list],
+        event: Optional[str] = None,
+        event_id: Optional[str] = None,
+    ) -> None:
         """
-        Send a comment (ignored by client).
-        
-        Useful for keep-alive pings.
-        
+        Send JSON event.
+
+        Args:
+            obj: JSON-serializable object
+            event: Event type (optional)
+            event_id: Event ID (optional)
+
+        Raises:
+            RuntimeError: If connection is closed or send fails
+        """
+        await self.send(obj, event=event, event_id=event_id)
+
+    async def send_text(
+        self, text: str, event: Optional[str] = None, event_id: Optional[str] = None
+    ) -> None:
+        """
+        Send text event.
+
+        Args:
+            text: Text data
+            event: Event type (optional)
+            event_id: Event ID (optional)
+
+        Raises:
+            RuntimeError: If connection is closed or send fails
+        """
+        await self.send(text, event=event, event_id=event_id)
+
+    async def send_comment(self, comment: str) -> None:
+        """
+        Send comment (ignored by client, useful for keep-alive).
+
         Args:
             comment: Comment text
+
+        Raises:
+            RuntimeError: If connection is closed or send fails
         """
         if self._closed:
-            raise RuntimeError("Connection is closed")
-        
-        if not self._handle or not self._lib:
-            raise RuntimeError("SSE not connected")
-        
-        comment_bytes = comment.encode('utf-8')
-        result = self._lib.sse_send_comment(self._handle, comment_bytes)
-        
-        if result != 0:
-            raise RuntimeError(f"Failed to send comment: error {result}")
-    
-    def ping(self) -> None:
-        """Send keep-alive ping."""
+            raise RuntimeError("SSE connection is closed")
+
+        await asyncio.get_event_loop().run_in_executor(
+            None, self._conn.send_comment, comment
+        )
+
+    async def ping(self) -> None:
+        """
+        Send keep-alive ping.
+
+        Sends a comment to keep connection alive and prevent timeouts.
+
+        Raises:
+            RuntimeError: If ping fails
+        """
         if self._closed:
-            raise RuntimeError("Connection is closed")
-        
-        if not self._handle or not self._lib:
-            raise RuntimeError("SSE not connected")
-        
-        result = self._lib.sse_ping(self._handle)
-        
-        if result != 0:
-            raise RuntimeError(f"Failed to send ping: error {result}")
-    
-    def close(self) -> None:
-        """Close the connection."""
+            raise RuntimeError("SSE connection is closed")
+
+        success = await asyncio.get_event_loop().run_in_executor(None, self._conn.ping)
+
+        if not success:
+            raise RuntimeError("Failed to send SSE ping")
+
+    async def close(self) -> None:
+        """
+        Close SSE connection.
+
+        After calling close(), no more events can be sent.
+        """
         if self._closed:
             return
-        
-        if self._handle and self._lib:
-            self._lib.sse_close(self._handle)
-        
+
         self._closed = True
-    
+        await asyncio.get_event_loop().run_in_executor(None, self._conn.close)
+
+    @property
     def is_open(self) -> bool:
         """Check if connection is open."""
         if self._closed:
             return False
-        
-        if self._handle and self._lib:
-            return self._lib.sse_is_open(self._handle)
-        
-        return False
-    
+        return self._conn.is_open
+
+    @property
+    def connection_id(self) -> int:
+        """Get connection ID."""
+        return self._conn.connection_id
+
     @property
     def events_sent(self) -> int:
         """Get number of events sent."""
-        if self._handle and self._lib:
-            return self._lib.sse_events_sent(self._handle)
-        return 0
-    
-    def __del__(self):
-        """Cleanup on destruction."""
-        if not self._closed:
-            self.close()
-        
-        if self._handle and self._lib:
-            self._lib.sse_destroy(self._handle)
-    
-    def __repr__(self) -> str:
-        """String representation."""
-        state = "open" if self.is_open() else "closed"
-        return f"SSEConnection(state={state}, events_sent={self.events_sent})"
+        return self._conn.events_sent
 
+    @property
+    def bytes_sent(self) -> int:
+        """Get total bytes sent."""
+        return self._conn.bytes_sent
 
-class SSEResponse:
-    """
-    SSE response helper.
-    
-    Sets proper headers and creates SSE connection.
-    """
-    
-    @staticmethod
-    def create(
-        handler: Callable[[SSEConnection], None],
-        headers: Optional[dict] = None
-    ) -> dict:
+    async def keep_alive(self, interval: float = 30.0) -> None:
         """
-        Create SSE response.
-        
+        Start automatic keep-alive loop.
+
+        Sends ping comments at regular intervals to prevent connection timeout.
+        Runs until connection is closed.
+
         Args:
-            handler: Function that handles the SSE connection
-            headers: Additional headers
-        
-        Returns:
-            Response dict with proper SSE headers
-        
-        Example:
-            @app.get("/events")
-            def event_stream(req, res):
-                def handle_sse(sse):
-                    for i in range(10):
-                        sse.send({"count": i}, event="count", id=str(i))
-                        time.sleep(1)
-                
-                return SSEResponse.create(handle_sse)
+            interval: Interval in seconds between pings (default: 30)
         """
-        # Set SSE headers
-        response_headers = {
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # Disable nginx buffering
-        }
-        
-        if headers:
-            response_headers.update(headers)
-        
-        return {
-            "handler": handler,
-            "headers": response_headers,
-            "type": "sse"
-        }
+        while self.is_open and not self._closed:
+            try:
+                await self.ping()
+            except RuntimeError:
+                # Connection closed
+                break
+
+            await asyncio.sleep(interval)
 
 
-# Decorator for easier SSE usage
-def sse_endpoint(func: Callable) -> Callable:
+class SSEStream:
     """
-    Decorator for SSE endpoints.
-    
-    Automatically sets up SSE headers and connection.
-    
+    Context manager for SSE streaming.
+
+    Provides automatic keep-alive and clean connection closing.
+
     Example:
-        @app.get("/events")
-        @sse_endpoint
-        def event_stream(sse: SSEConnection):
-            while sse.is_open():
-                sse.send({"time": time.time()}, event="time")
-                time.sleep(1)
+        @app.sse("/sse/events")
+        async def sse_handler(sse: SSE):
+            async with SSEStream(sse) as stream:
+                for i in range(100):
+                    await stream.send({"count": i})
+                    await asyncio.sleep(1)
     """
-    def wrapper(*args, **kwargs):
-        def sse_handler(conn: SSEConnection):
-            func(conn, *args, **kwargs)
-        
-        return SSEResponse.create(sse_handler)
-    
-    return wrapper
+
+    def __init__(self, sse: SSE, keep_alive_interval: float = 30.0):
+        """
+        Create SSE stream manager.
+
+        Args:
+            sse: SSE connection
+            keep_alive_interval: Keep-alive ping interval in seconds
+        """
+        self.sse = sse
+        self.keep_alive_interval = keep_alive_interval
+        self._keep_alive_task = None
+
+    async def __aenter__(self) -> SSE:
+        """Enter context: Start keep-alive."""
+        # Start background keep-alive task
+        self._keep_alive_task = asyncio.create_task(
+            self.sse.keep_alive(self.keep_alive_interval)
+        )
+        return self.sse
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Exit context: Stop keep-alive and close connection."""
+        # Cancel keep-alive task
+        if self._keep_alive_task:
+            self._keep_alive_task.cancel()
+            try:
+                await self._keep_alive_task
+            except asyncio.CancelledError:
+                pass
+
+        # Close connection
+        await self.sse.close()
+
+        return False  # Don't suppress exceptions
 
 
-__all__ = [
-    'SSEConnection',
-    'SSEResponse',
-    'sse_endpoint',
-]
+__all__ = ["SSE", "SSEStream"]

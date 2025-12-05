@@ -42,6 +42,8 @@ public:
         bool enable_h1 = true;
         bool enable_h2 = false;
         bool enable_h3 = false;
+        bool enable_webtransport = false;
+        uint16_t http3_port = 443;
         bool enable_compression = true;
         bool enable_websocket = true;
 

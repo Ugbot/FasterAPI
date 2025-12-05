@@ -45,6 +45,10 @@ struct Http1Response {
     std::unordered_map<std::string, std::string> headers;
     std::string body;
 
+    // WebSocket upgrade flag
+    bool websocket_upgrade = false;
+    std::string websocket_path;  // Path for WebSocket handler lookup
+
     // Helper: Add header
     void add_header(const std::string& name, const std::string& value) {
         headers[name] = value;
@@ -53,6 +57,12 @@ struct Http1Response {
     // Helper: Set content type
     void set_content_type(const std::string& type) {
         headers["Content-Type"] = type;
+    }
+
+    // Helper: Mark as WebSocket upgrade response
+    void mark_websocket_upgrade(const std::string& path) {
+        websocket_upgrade = true;
+        websocket_path = path;
     }
 };
 
@@ -186,6 +196,21 @@ public:
         return error_message_;
     }
 
+    /**
+     * Check if connection is pending WebSocket upgrade.
+     * Returns true if the last response was a 101 Switching Protocols.
+     */
+    bool is_websocket_upgrade() const noexcept {
+        return pending_websocket_upgrade_;
+    }
+
+    /**
+     * Get WebSocket path (for handler lookup after upgrade).
+     */
+    const std::string& get_websocket_path() const noexcept {
+        return pending_websocket_path_;
+    }
+
 private:
     /**
      * Parse request from input buffer
@@ -234,6 +259,10 @@ private:
 
     // Error tracking
     std::string error_message_;
+
+    // WebSocket upgrade tracking
+    bool pending_websocket_upgrade_ = false;
+    std::string pending_websocket_path_;
 };
 
 } // namespace http

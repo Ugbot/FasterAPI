@@ -12,6 +12,7 @@
 #include <atomic>
 #include <unordered_map>
 #include <functional>
+#include <iostream>
 
 using namespace fasterapi::http;
 
@@ -242,9 +243,16 @@ void HttpServer::handle_unified_request(
     HttpResponse response;
     LOG_DEBUG("Server", "Created HttpResponse");
 
-    // Match route and get handler
+    // Strip query string from path for route matching
+    std::string route_path = path;
+    size_t query_pos = path.find('?');
+    if (query_pos != std::string::npos) {
+        route_path = path.substr(0, query_pos);
+    }
+
+    // Match route and get handler (use route_path without query string)
     fasterapi::http::RouteParams params;
-    fasterapi::http::RouteHandler handler = router_->match(method, path, params);
+    fasterapi::http::RouteHandler handler = router_->match(method, route_path, params);
 
     if (handler) {
         LOG_DEBUG("Server", "Found handler, calling it...");

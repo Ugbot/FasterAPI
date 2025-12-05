@@ -1,36 +1,16 @@
 #pragma once
 
+#include "quic/quic_varint.h"
+#include "qpack/qpack_decoder.h"
 #include <cstdint>
+#include <cstddef>
 #include <string>
 #include <string_view>
-#include <array>
-#include <vector>
 #include <utility>
+#include <vector>
 
 namespace fasterapi {
 namespace http {
-
-/**
- * Zero-allocation HTTP/3 (QUIC) frame parser.
- * 
- * HTTP/3 uses QUIC as transport and QPACK for header compression.
- * 
- * Based on:
- * - HTTP/3 Spec: RFC 9114
- * - QPACK Spec: RFC 9204
- * - Algorithm concepts from MsQuic and nghttp3
- * 
- * Adapted for:
- * - Zero allocations (stack only)
- * - Zero-copy (string_view)
- * - No callbacks
- * - Inline hot paths
- * 
- * Performance targets:
- * - Parse frame: <100ns
- * - QPACK decode: <500ns per header
- * - Zero allocations
- */
 
 /**
  * HTTP/3 frame types (RFC 9114 Section 7.2).
@@ -42,10 +22,7 @@ enum class HTTP3FrameType : uint64_t {
     SETTINGS = 0x04,
     PUSH_PROMISE = 0x05,
     GOAWAY = 0x07,
-    MAX_PUSH_ID = 0x0d,
-    // QPACK frames
-    QPACK_ENCODER = 0x02,
-    QPACK_DECODER = 0x03,
+    MAX_PUSH_ID = 0x0D,
 };
 
 /**
@@ -54,25 +31,22 @@ enum class HTTP3FrameType : uint64_t {
 struct HTTP3FrameHeader {
     HTTP3FrameType type;
     uint64_t length;
-    
-    // Frame payload follows
 };
 
 /**
- * HTTP/3 SETTINGS frame parameters.
+ * HTTP/3 SETTINGS frame parameters (RFC 9114 Section 7.2.4).
  */
 struct HTTP3Settings {
-    uint64_t max_header_list_size{0};
-    uint64_t qpack_max_table_capacity{0};
-    uint64_t qpack_blocked_streams{0};
-    
-    // Additional settings as needed
+    uint64_t qpack_max_table_capacity{4096};
+    uint64_t max_header_list_size{16384};
+    uint64_t qpack_blocked_streams{100};
 };
 
 /**
  * HTTP/3 frame parser.
  * 
  * Parses HTTP/3 frames from QUIC stream data.
+ * Zero-allocation, uses QPACK decoder for headers.
  */
 class HTTP3Parser {
 public:
@@ -109,72 +83,42 @@ public:
     ) noexcept;
     
     /**
-     * Parse variable-length integer (RFC 9000 Section 16).
+     * Parse HEADERS frame (uses QPACK decoder).
      * 
-     * QUIC uses variable-length integers for efficiency.
-     * 
-     * @param data Input buffer
-     * @param len Buffer length
-     * @param out_value Decoded integer
-     * @param out_consumed Bytes consumed
-     * @return 0 on success, -1 if need more data
+     * @param data Frame payload (QPACK-encoded headers)
+     * @param len Payload length
+     * @param out_headers Output headers
+     * @param out_count Number of headers decoded
+     * @return 0 on success, -1 on error
      */
-    static int parse_varint(
+    int parse_headers(
         const uint8_t* data,
         size_t len,
-        uint64_t& out_value,
-        size_t& out_consumed
-    ) noexcept;
+        std::pair<std::string, std::string>* out_headers,
+        size_t& out_count
+    ) noexcept {
+        return qpack_decoder_.decode_field_section(data, len, out_headers, out_count);
+    }
     
     /**
      * Reset parser state.
      */
     void reset() noexcept;
     
+    /**
+     * Get QPACK decoder reference.
+     */
+    qpack::QPACKDecoder& qpack_decoder() noexcept { return qpack_decoder_; }
+
 private:
     // Parser state
     uint64_t current_frame_type_{0};
     uint64_t current_frame_length_{0};
     bool in_frame_{false};
-};
-
-/**
- * QPACK decoder (simplified).
- * 
- * QPACK is similar to HPACK but designed for QUIC's
- * unordered stream delivery.
- * 
- * For now, we implement a simplified version.
- * Full QPACK is complex due to dynamic table updates
- * on separate streams.
- */
-class QPACKDecoder {
-public:
-    QPACKDecoder(size_t max_table_size = 4096);
     
-    /**
-     * Decode QPACK-encoded headers.
-     * 
-     * @param data QPACK-encoded data
-     * @param len Data length
-     * @param out_headers Output headers
-     * @param max_headers Max headers to decode
-     * @return 0 on success, error code otherwise
-     */
-    int decode(
-        const uint8_t* data,
-        size_t len,
-        std::vector<std::pair<std::string_view, std::string_view>>& out_headers,
-        size_t max_headers = 100
-    ) noexcept;
-    
-private:
-    size_t max_table_size_;
-    
-    // QPACK uses a dynamic table similar to HPACK
-    // For simplicity, we use a basic implementation
+    // QPACK decoder for HEADERS frames
+    qpack::QPACKDecoder qpack_decoder_;
 };
 
 } // namespace http
 } // namespace fasterapi
-

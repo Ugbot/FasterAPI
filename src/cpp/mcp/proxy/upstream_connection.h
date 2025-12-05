@@ -48,7 +48,7 @@ private:
     bool connected_ = false;
 
     // HTTP client state
-    // TODO: Add HTTP client implementation
+    int sock_fd_ = -1;
 };
 
 /**
@@ -70,7 +70,8 @@ private:
     bool connected_ = false;
 
     // WebSocket client state
-    // TODO: Add WebSocket client implementation
+    int sock_fd_ = -1;
+    std::mutex send_mutex_;
 };
 
 /**

@@ -30,14 +30,27 @@ namespace http {
 
 /**
  * Parameter location in HTTP request.
+ * Note: Using unscoped enum for Cython compatibility.
  */
-enum class ParameterLocation {
+enum ParameterLocation {
     PATH,      // URL path parameter (/users/{user_id})
     QUERY,     // Query string parameter (?q=search)
     BODY,      // Request body
     HEADER,    // HTTP header
     COOKIE     // Cookie
 };
+
+/**
+ * Python binding helpers: Convert between int and ParameterLocation.
+ * These wrappers work around Cython's limited support for scoped enums.
+ */
+inline ParameterLocation param_location_from_int(int value) noexcept {
+    return static_cast<ParameterLocation>(value);
+}
+
+inline int param_location_to_int(ParameterLocation loc) noexcept {
+    return static_cast<int>(loc);
+}
 
 /**
  * Information about a single parameter.

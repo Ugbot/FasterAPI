@@ -3,6 +3,9 @@
 # Core framework
 pydantic>=2.0
 
+# Multi-language IPC support (optional - enables ZeroMQ for workers in Go, Rust, etc.)
+pyzmq>=25.0  # Only needed if FASTERAPI_USE_ZMQ=1
+
 # Development & Testing
 pytest>=7.0
 pytest-cov>=4.0
@@ -12,6 +15,9 @@ psycopg[binary]>=3.0
 asyncpg>=0.27
 fastapi>=0.100
 uvicorn>=0.23
+
+# HTTP/2 testing support
+httpx>=0.25.0
 
 # Type checking
 mypy>=1.5

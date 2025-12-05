@@ -1,0 +1,5 @@
+if(EXISTS "/Users/bengamble/FasterAPI/gtest_router[1]_tests.cmake")
+  include("/Users/bengamble/FasterAPI/gtest_router[1]_tests.cmake")
+else()
+  add_test(gtest_router_NOT_BUILT gtest_router_NOT_BUILT)
+endif()

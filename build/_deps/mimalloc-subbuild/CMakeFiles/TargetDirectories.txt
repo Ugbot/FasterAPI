@@ -1,3 +1,0 @@
-/Users/bengamble/FasterAPI/build/_deps/mimalloc-subbuild/CMakeFiles/mimalloc-populate.dir
-/Users/bengamble/FasterAPI/build/_deps/mimalloc-subbuild/CMakeFiles/edit_cache.dir
-/Users/bengamble/FasterAPI/build/_deps/mimalloc-subbuild/CMakeFiles/rebuild_cache.dir

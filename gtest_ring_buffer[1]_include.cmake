@@ -1,0 +1,5 @@
+if(EXISTS "/Users/bengamble/FasterAPI/gtest_ring_buffer[1]_tests.cmake")
+  include("/Users/bengamble/FasterAPI/gtest_ring_buffer[1]_tests.cmake")
+else()
+  add_test(gtest_ring_buffer_NOT_BUILT gtest_ring_buffer_NOT_BUILT)
+endif()

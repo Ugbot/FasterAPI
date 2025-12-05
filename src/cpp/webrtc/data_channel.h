@@ -60,15 +60,37 @@ enum class DataChannelState : uint8_t {
 };
 
 /**
+ * SCTP Payload Protocol Identifiers for WebRTC (RFC 8831).
+ */
+enum class SCTPPayloadProtocolId : uint32_t {
+    WEBRTC_DCEP = 50,           // Data Channel Establishment Protocol
+    WEBRTC_STRING = 51,         // Text message
+    WEBRTC_BINARY_PARTIAL = 52, // Binary partial (deprecated)
+    WEBRTC_BINARY = 53,         // Binary message
+    WEBRTC_STRING_EMPTY = 54,   // Empty text message
+    WEBRTC_BINARY_PARTIAL2 = 55, // Binary partial (deprecated)
+    WEBRTC_BINARY_EMPTY = 56,   // Empty binary message
+};
+
+/**
  * Data channel message.
  */
 struct DataChannelMessage {
     bool binary{false};              // Binary or text
     std::string_view data;           // Message data (view into buffer)
-    
+
     DataChannelMessage() = default;
     DataChannelMessage(std::string_view d, bool is_binary = false)
         : binary(is_binary), data(d) {}
+
+    // Convenience for binary data access
+    const uint8_t* binary_data() const noexcept {
+        return reinterpret_cast<const uint8_t*>(data.data());
+    }
+
+    size_t size() const noexcept {
+        return data.size();
+    }
 };
 
 /**
@@ -148,7 +170,26 @@ public:
      * Close channel.
      */
     int close() noexcept;
-    
+
+    /**
+     * Simulate receiving data (for testing).
+     *
+     * Allows injecting data as if received via SCTP.
+     *
+     * @param data Data buffer
+     * @param len Data length
+     * @param ppid SCTP Payload Protocol Identifier
+     * @return 0 on success
+     */
+    int receive_data(const uint8_t* data, size_t len, SCTPPayloadProtocolId ppid) noexcept;
+
+    /**
+     * Force channel state (for testing).
+     *
+     * @param state New state
+     */
+    void set_state(DataChannelState state) noexcept { state_ = state; }
+
     /**
      * Get statistics.
      */

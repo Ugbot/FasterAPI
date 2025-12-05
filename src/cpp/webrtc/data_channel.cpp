@@ -88,22 +88,57 @@ int DataChannel::process_sctp_data(const uint8_t* data, size_t len) noexcept {
     if (!data || len == 0) {
         return 1;
     }
-    
-    // TODO: Parse SCTP chunk
-    // For now, simplified implementation
-    
+
+    // Default to text - this is used when PPID not available
+    return receive_data(data, len, SCTPPayloadProtocolId::WEBRTC_STRING);
+}
+
+int DataChannel::receive_data(const uint8_t* data, size_t len, SCTPPayloadProtocolId ppid) noexcept {
+    // Handle empty messages (RFC 8831)
+    // Empty PPIDs (54, 56) allow null/empty data
+    if (len == 0) {
+        if (ppid != SCTPPayloadProtocolId::WEBRTC_STRING_EMPTY &&
+            ppid != SCTPPayloadProtocolId::WEBRTC_BINARY_EMPTY) {
+            return 1;  // Empty data must use empty PPIDs
+        }
+    } else if (!data) {
+        // Non-empty messages require data pointer
+        return 1;
+    }
+
     messages_received_++;
     bytes_received_ += len;
-    
+
+    // Determine if binary based on PPID
+    bool is_binary = false;
+    switch (ppid) {
+        case SCTPPayloadProtocolId::WEBRTC_BINARY:
+        case SCTPPayloadProtocolId::WEBRTC_BINARY_EMPTY:
+        case SCTPPayloadProtocolId::WEBRTC_BINARY_PARTIAL:
+        case SCTPPayloadProtocolId::WEBRTC_BINARY_PARTIAL2:
+            is_binary = true;
+            break;
+        case SCTPPayloadProtocolId::WEBRTC_STRING:
+        case SCTPPayloadProtocolId::WEBRTC_STRING_EMPTY:
+        case SCTPPayloadProtocolId::WEBRTC_DCEP:
+        default:
+            is_binary = false;
+            break;
+    }
+
     // Call message handler
     if (message_handler_) {
+        // Handle null data for empty messages (string_view with nullptr is UB)
+        static const char empty_data[] = "";
+        const char* msg_data = data ? reinterpret_cast<const char*>(data) : empty_data;
+
         DataChannelMessage msg(
-            std::string_view(reinterpret_cast<const char*>(data), len),
-            false  // Assume text for now
+            std::string_view(msg_data, len),
+            is_binary
         );
         message_handler_(msg);
     }
-    
+
     return 0;
 }
 

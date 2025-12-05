@@ -1,179 +1,186 @@
 #pragma once
 
+#include "http3_parser.h"
+#include "quic/quic_connection.h"
+#include "qpack/qpack_encoder.h"
 #include <string>
 #include <memory>
 #include <functional>
 #include <unordered_map>
 #include <vector>
 #include <cstdint>
+#include <atomic>
 
-// Forward declarations for MsQuic
-struct QUIC_API_TABLE;
-struct QUIC_HANDLE;
-struct QUIC_CONNECTION;
-struct QUIC_STREAM;
+namespace fasterapi {
+namespace http {
 
 /**
- * HTTP/3 handler with QUIC support and QPACK compression.
+ * HTTP/3 handler with pure QUIC implementation.
  * 
  * Features:
- * - MsQuic integration for QUIC protocol
+ * - Native QUIC protocol (no MsQuic dependency)
  * - HTTP/3 over QUIC
  * - QPACK header compression/decompression
- * - Multiplexing support
+ * - Stream multiplexing
  * - Server push capability
  * - Flow control
- * - TLS 1.3 support
+ * - Congestion control (NewReno)
+ * - Loss detection
  */
 class Http3Handler {
 public:
-    // HTTP/3 settings
-    struct Settings {
-        uint32_t max_header_list_size = 8192;
-        uint32_t max_field_section_size = 4096;
-        uint32_t qpack_max_table_capacity = 4096;
-        uint32_t qpack_blocked_streams = 100;
-        uint32_t connection_window_size = 16777216;  // 16MB
-        uint32_t stream_window_size = 16777216;     // 16MB
-    };
-
-    // QUIC configuration
-    struct QuicConfig {
-        std::string server_name = "localhost";
-        uint16_t port = 443;
-        std::string cert_file;
-        std::string key_file;
-        bool enable_0rtt = true;
-        bool enable_migration = false;
-    };
-
-    // Stream state
-    struct Stream {
-        QUIC_STREAM* quic_stream;
-        int32_t stream_id;
+    /**
+     * HTTP/3 request.
+     */
+    struct Request {
+        uint64_t stream_id;
         std::string method;
         std::string path;
+        std::string scheme;
+        std::string authority;
         std::unordered_map<std::string, std::string> headers;
         std::vector<uint8_t> body;
-        bool headers_sent = false;
-        bool body_sent = false;
-        bool closed = false;
     };
-
+    
+    /**
+     * HTTP/3 response.
+     */
+    struct Response {
+        int status{200};
+        std::unordered_map<std::string, std::string> headers;
+        std::vector<uint8_t> body;
+    };
+    
+    /**
+     * Route handler callback.
+     */
+    using RouteHandler = std::function<void(const Request&, Response&)>;
+    
+    /**
+     * HTTP/3 settings.
+     */
+    struct Settings {
+        uint32_t max_header_list_size = 16384;
+        uint32_t qpack_max_table_capacity = 4096;
+        uint32_t qpack_blocked_streams = 100;
+        uint32_t connection_window_size = 16 * 1024 * 1024;  // 16MB
+        uint32_t stream_window_size = 1024 * 1024;           // 1MB
+    };
+    
     /**
      * Constructor.
-     * 
+     *
      * @param settings HTTP/3 settings
-     * @param quic_config QUIC configuration
      */
-    Http3Handler(const Settings& settings = {}, const QuicConfig& quic_config = {});
-
+    explicit Http3Handler(const Settings& settings);
+    
     /**
      * Destructor.
      */
     ~Http3Handler();
-
+    
     /**
      * Initialize HTTP/3 handler.
      * 
-     * @return Error code (0 = success)
+     * @return 0 on success, -1 on error
      */
     int initialize() noexcept;
-
-    /**
-     * Start HTTP/3 server.
-     * 
-     * @param port Port to listen on
-     * @param host Host to bind to
-     * @return Error code (0 = success)
-     */
-    int start(uint16_t port, const std::string& host) noexcept;
-
-    /**
-     * Stop HTTP/3 server.
-     * 
-     * @return Error code (0 = success)
-     */
-    int stop() noexcept;
-
-    /**
-     * Check if server is running.
-     * 
-     * @return true if running, false otherwise
-     */
-    bool is_running() const noexcept;
-
+    
     /**
      * Add route handler.
      * 
-     * @param method HTTP method
+     * @param method HTTP method (GET, POST, etc.)
      * @param path Route path
      * @param handler Route handler function
-     * @return Error code (0 = success)
+     * @return 0 on success, -1 on error
      */
     int add_route(const std::string& method, const std::string& path, 
-                  std::function<void(Stream*)> handler) noexcept;
-
+                  RouteHandler handler) noexcept;
+    
     /**
-     * Process incoming data.
+     * Process incoming UDP datagram (contains QUIC packets).
      * 
-     * @param data Incoming data
-     * @param length Data length
-     * @return Error code (0 = success)
+     * @param data Datagram data
+     * @param length Datagram length
+     * @param source_addr Source address (for routing responses)
+     * @param now Current time (microseconds since epoch)
+     * @return 0 on success, -1 on error
      */
-    int process_data(const uint8_t* data, size_t length) noexcept;
-
+    int process_datagram(const uint8_t* data, size_t length,
+                        const void* source_addr, uint64_t now) noexcept;
+    
     /**
-     * Send response.
+     * Generate outgoing UDP datagrams (contains QUIC packets).
+     * 
+     * @param output Output buffer
+     * @param capacity Output capacity
+     * @param dest_addr Destination address (output)
+     * @param now Current time (microseconds)
+     * @return Number of bytes written
+     */
+    size_t generate_datagrams(uint8_t* output, size_t capacity,
+                             void** dest_addr, uint64_t now) noexcept;
+    
+    /**
+     * Send response on stream.
      * 
      * @param stream_id Stream ID
-     * @param status HTTP status code
-     * @param headers Response headers
-     * @param body Response body
-     * @return Error code (0 = success)
+     * @param response Response to send
+     * @return 0 on success, -1 on error
      */
-    int send_response(int32_t stream_id, int status, 
-                     const std::unordered_map<std::string, std::string>& headers,
-                     const std::vector<uint8_t>& body) noexcept;
-
+    int send_response(uint64_t stream_id, const Response& response) noexcept;
+    
     /**
      * Send server push.
      * 
      * @param stream_id Parent stream ID
      * @param path Path to push
-     * @param headers Push headers
-     * @param body Push body
-     * @return Error code (0 = success)
+     * @param response Response to push
+     * @return 0 on success, -1 on error
      */
-    int send_push(int32_t stream_id, const std::string& path,
-                  const std::unordered_map<std::string, std::string>& headers,
-                  const std::vector<uint8_t>& body) noexcept;
-
+    int send_push(uint64_t stream_id, const std::string& path,
+                  const Response& response) noexcept;
+    
     /**
      * Get statistics.
      * 
      * @return Statistics map
      */
     std::unordered_map<std::string, uint64_t> get_stats() const noexcept;
+    
+    /**
+     * Check if handler is running.
+     */
+    bool is_running() const noexcept { return running_.load(); }
+    
+    /**
+     * Start handler.
+     */
+    void start() noexcept { running_.store(true); }
+    
+    /**
+     * Stop handler.
+     */
+    void stop() noexcept { running_.store(false); }
 
 private:
     Settings settings_;
-    QuicConfig quic_config_;
     std::atomic<bool> running_;
     
-    // MsQuic API table
-    QUIC_API_TABLE* api_table_;
+    // QUIC connections (keyed by connection ID)
+    std::unordered_map<std::string, std::unique_ptr<quic::QUICConnection>> connections_;
     
-    // QUIC handles
-    QUIC_HANDLE* registration_;
-    QUIC_HANDLE* listener_;
-    QUIC_CONNECTION* connection_;
+    // HTTP/3 parser
+    HTTP3Parser parser_;
+    
+    // QPACK encoder for responses
+    qpack::QPACKEncoder qpack_encoder_;
     
     // Route handlers
-    std::unordered_map<std::string, std::function<void(Stream*)>> routes_;
+    std::unordered_map<std::string, RouteHandler> routes_;
     
-    // Active streams
-    std::unordered_map<int32_t, std::unique_ptr<Stream>> streams_;
+    // Pending requests (keyed by stream ID)
+    std::unordered_map<uint64_t, Request> pending_requests_;
     
     // Statistics
     std::atomic<uint64_t> total_requests_;
@@ -183,142 +190,76 @@ private:
     std::atomic<uint64_t> push_responses_;
     std::atomic<uint64_t> quic_connections_;
     
-    // Next stream ID
-    std::atomic<int32_t> next_stream_id_;
-    
     /**
-     * Initialize MsQuic.
+     * Get or create connection.
      * 
-     * @return Error code (0 = success)
+     * @param conn_id Connection ID
+     * @param source_addr Source address
+     * @return Connection pointer
      */
-    int initialize_quic() noexcept;
+    quic::QUICConnection* get_or_create_connection(
+        const quic::ConnectionID& conn_id,
+        const void* source_addr
+    ) noexcept;
     
     /**
-     * Initialize QUIC registration.
+     * Process HTTP/3 stream.
      * 
-     * @return Error code (0 = success)
+     * @param conn Connection
+     * @param stream_id Stream ID
+     * @param now Current time
      */
-    int initialize_registration() noexcept;
+    void process_http3_stream(quic::QUICConnection* conn, 
+                             uint64_t stream_id,
+                             uint64_t now) noexcept;
     
     /**
-     * Initialize QUIC listener.
-     * 
-     * @return Error code (0 = success)
-     */
-    int initialize_listener() noexcept;
-    
-    /**
-     * Handle QUIC connection event.
-     * 
-     * @param connection QUIC connection
-     * @param event Event data
-     * @return Error code (0 = success)
-     */
-    int handle_connection_event(QUIC_CONNECTION* connection, void* event) noexcept;
-    
-    /**
-     * Handle QUIC stream event.
-     * 
-     * @param stream QUIC stream
-     * @param event Event data
-     * @return Error code (0 = success)
-     */
-    int handle_stream_event(QUIC_STREAM* stream, void* event) noexcept;
-    
-    /**
-     * Handle HTTP/3 frame.
+     * Handle HEADERS frame.
      * 
      * @param stream_id Stream ID
-     * @param frame Frame data
-     * @param length Frame length
-     * @return Error code (0 = success)
-     */
-    int handle_frame(int32_t stream_id, const uint8_t* frame, size_t length) noexcept;
-    
-    /**
-     * Handle headers frame.
-     * 
-     * @param stream_id Stream ID
-     * @param headers Headers data
-     * @param length Headers length
-     * @return Error code (0 = success)
-     */
-    int handle_headers(int32_t stream_id, const uint8_t* headers, size_t length) noexcept;
-    
-    /**
-     * Handle data frame.
-     * 
-     * @param stream_id Stream ID
-     * @param data Data
+     * @param data QPACK-encoded headers
      * @param length Data length
-     * @return Error code (0 = success)
      */
-    int handle_data(int32_t stream_id, const uint8_t* data, size_t length) noexcept;
+    void handle_headers_frame(uint64_t stream_id, const uint8_t* data, 
+                             size_t length) noexcept;
     
     /**
-     * Handle stream close.
+     * Handle DATA frame.
      * 
      * @param stream_id Stream ID
-     * @return Error code (0 = success)
-     */
-    int handle_stream_close(int32_t stream_id) noexcept;
-    
-    /**
-     * Parse headers from QPACK data.
-     * 
-     * @param data QPACK data
+     * @param data Frame data
      * @param length Data length
-     * @param headers Output headers
-     * @return Error code (0 = success)
      */
-    int parse_headers(const uint8_t* data, size_t length, 
-                     std::unordered_map<std::string, std::string>& headers) noexcept;
+    void handle_data_frame(uint64_t stream_id, const uint8_t* data,
+                          size_t length) noexcept;
     
     /**
-     * Compress headers to QPACK.
+     * Handle SETTINGS frame.
      * 
-     * @param headers Headers to compress
+     * @param data Settings data
+     * @param length Data length
+     */
+    void handle_settings_frame(const uint8_t* data, size_t length) noexcept;
+    
+    /**
+     * Dispatch request to route handler.
+     * 
+     * @param request Request
+     */
+    void dispatch_request(const Request& request) noexcept;
+    
+    /**
+     * Encode response to QPACK + HTTP/3 frames.
+     * 
+     * @param response Response to encode
      * @param output Output buffer
-     * @return Error code (0 = success)
+     * @param capacity Output capacity
+     * @param out_length Encoded length
+     * @return 0 on success, -1 on error
      */
-    int compress_headers(const std::unordered_map<std::string, std::string>& headers,
-                        std::vector<uint8_t>& output) noexcept;
-    
-    /**
-     * Send frame.
-     * 
-     * @param stream_id Stream ID
-     * @param frame Frame data
-     * @param length Frame length
-     * @return Error code (0 = success)
-     */
-    int send_frame(int32_t stream_id, const uint8_t* frame, size_t length) noexcept;
-    
-    /**
-     * Create stream.
-     * 
-     * @param stream_id Stream ID
-     * @param quic_stream QUIC stream handle
-     * @return Stream pointer
-     */
-    Stream* create_stream(int32_t stream_id, QUIC_STREAM* quic_stream) noexcept;
-    
-    /**
-     * Get stream.
-     * 
-     * @param stream_id Stream ID
-     * @return Stream pointer or nullptr
-     */
-    Stream* get_stream(int32_t stream_id) noexcept;
-    
-    /**
-     * Remove stream.
-     * 
-     * @param stream_id Stream ID
-     */
-    void remove_stream(int32_t stream_id) noexcept;
-    
-    // Static callbacks for MsQuic
-    static void connection_callback(QUIC_HANDLE* listener, void* context, QUIC_CONNECTION_EVENT* event);
-    static void stream_callback(QUIC_STREAM* stream, void* context, QUIC_STREAM_EVENT* event);
+    int encode_response(const Response& response, uint8_t* output,
+                       size_t capacity, size_t& out_length) noexcept;
 };
+
+} // namespace http
+} // namespace fasterapi

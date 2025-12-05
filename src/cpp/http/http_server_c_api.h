@@ -42,12 +42,25 @@ typedef void* HttpServerHandle;
 int http_lib_init();
 
 /**
+ * Connect a RouteRegistry to the Python callback bridge.
+ *
+ * This enables metadata-aware parameter extraction from registered routes.
+ * Must be called after both the HTTP library and Cython module are loaded.
+ *
+ * @param registry_ptr Pointer to RouteRegistry instance (from Cython module)
+ * @return HTTP_OK on success, error code otherwise
+ */
+int http_connect_route_registry(void* registry_ptr);
+
+/**
  * Create a new HTTP server.
  *
- * @param port Server port
+ * @param port Server port (TCP for HTTP/1.1 and HTTP/2)
  * @param host Server host (e.g., "0.0.0.0" or "127.0.0.1")
- * @param enable_h2 Enable HTTP/2
- * @param enable_h3 Enable HTTP/3
+ * @param enable_h2 Enable HTTP/2 over TLS with ALPN
+ * @param enable_h3 Enable HTTP/3 over QUIC (UDP)
+ * @param enable_webtransport Enable WebTransport over HTTP/3
+ * @param http3_port UDP port for HTTP/3 (default 443)
  * @param enable_compression Enable zstd compression
  * @param error_out [out] Error code if creation fails
  * @return Server handle on success, NULL on failure
@@ -57,6 +70,8 @@ HttpServerHandle http_server_create(
     const char* host,
     bool enable_h2,
     bool enable_h3,
+    bool enable_webtransport,
+    uint16_t http3_port,
     bool enable_compression,
     int* error_out
 );
@@ -96,6 +111,23 @@ int http_add_websocket(
     const char* path,
     uint32_t handler_id,
     int* error_out
+);
+
+/**
+ * Register WebSocket handler metadata for Python handler lookup.
+ *
+ * This stores the module.function info for a WebSocket path so that
+ * when a WebSocket connection is made, the worker can import and call
+ * the correct Python handler.
+ *
+ * @param path WebSocket path (e.g., "/ws/echo")
+ * @param module_name Python module name (e.g., "myapp.handlers")
+ * @param function_name Python function name (e.g., "ws_echo_handler")
+ */
+void http_register_websocket_handler_metadata(
+    const char* path,
+    const char* module_name,
+    const char* function_name
 );
 
 /**
@@ -156,6 +188,58 @@ void http_register_python_handler(
     const char* path,
     int handler_id,
     void* py_callable
+);
+
+/**
+ * Get handler from RouteRegistry.
+ *
+ * This retrieves the Python callable handler stored in RouteRegistry metadata.
+ * Used by Server._sync_routes_from_registry() to get handlers for routes
+ * registered via FastAPI decorators.
+ *
+ * @param registry_ptr Pointer to RouteRegistry instance
+ * @param method HTTP method
+ * @param path Route path pattern
+ * @return Python callable object (PyObject*) or NULL if not found
+ */
+void* http_get_route_handler(
+    void* registry_ptr,
+    const char* method,
+    const char* path
+);
+
+/**
+ * Initialize ProcessPoolExecutor for multiprocessing Python handler execution.
+ *
+ * This creates a pool of Python worker processes for true multi-core parallelism.
+ * Call this instead of initializing SubinterpreterExecutor for better performance.
+ *
+ * @param num_workers Number of worker processes (0 = auto-detect CPU cores)
+ * @param python_executable Path to Python executable (e.g., "python3.13")
+ * @param project_dir Project directory to add to sys.path
+ * @return HTTP_OK on success, error code otherwise
+ */
+int http_init_process_pool_executor(
+    uint32_t num_workers,
+    const char* python_executable,
+    const char* project_dir
+);
+
+/**
+ * Register route metadata for parameter extraction.
+ *
+ * This registers parameter information for a route, enabling automatic parameter
+ * extraction from URLs. Called by Python API when routes are registered.
+ *
+ * @param method HTTP method (e.g., "GET", "POST")
+ * @param path Route path pattern (e.g., "/user/{user_id}")
+ * @param param_metadata_json JSON string containing parameter metadata
+ * @return HTTP_OK on success, error code otherwise
+ */
+int http_register_route_metadata(
+    const char* method,
+    const char* path,
+    const char* param_metadata_json
 );
 
 #ifdef __cplusplus

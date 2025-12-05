@@ -73,24 +73,26 @@ public:
      */
     bool try_push(const T& item) noexcept {
         const uint64_t current_tail = tail_.load(std::memory_order_relaxed);
-        const uint64_t wrap_point = current_tail - capacity_;
-        
+
         // Check cached head first (fast path - no atomic read)
-        if (wrap_point >= cached_head_.load(std::memory_order_relaxed)) {
+        // Full when: (tail - head) >= capacity
+        uint64_t cached = cached_head_.load(std::memory_order_relaxed);
+        if ((current_tail - cached) >= capacity_) {
             // Might be full, refresh cache from actual head
-            cached_head_.store(head_.load(std::memory_order_acquire), std::memory_order_relaxed);
-            
-            if (wrap_point >= cached_head_.load(std::memory_order_relaxed)) {
+            cached = head_.load(std::memory_order_acquire);
+            cached_head_.store(cached, std::memory_order_relaxed);
+
+            if ((current_tail - cached) >= capacity_) {
                 return false;  // Full
             }
         }
-        
+
         // Write item
         buffer_[current_tail & mask_] = item;
-        
+
         // Publish tail (release ensures item is visible to consumer)
         tail_.store(current_tail + 1, std::memory_order_release);
-        
+
         return true;
     }
     
@@ -99,19 +101,20 @@ public:
      */
     bool try_push(T&& item) noexcept {
         const uint64_t current_tail = tail_.load(std::memory_order_relaxed);
-        const uint64_t wrap_point = current_tail - capacity_;
-        
-        if (wrap_point >= cached_head_.load(std::memory_order_relaxed)) {
-            cached_head_.store(head_.load(std::memory_order_acquire), std::memory_order_relaxed);
-            
-            if (wrap_point >= cached_head_.load(std::memory_order_relaxed)) {
+
+        uint64_t cached = cached_head_.load(std::memory_order_relaxed);
+        if ((current_tail - cached) >= capacity_) {
+            cached = head_.load(std::memory_order_acquire);
+            cached_head_.store(cached, std::memory_order_relaxed);
+
+            if ((current_tail - cached) >= capacity_) {
                 return false;
             }
         }
-        
+
         buffer_[current_tail & mask_] = std::move(item);
         tail_.store(current_tail + 1, std::memory_order_release);
-        
+
         return true;
     }
     

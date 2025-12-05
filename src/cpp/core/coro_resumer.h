@@ -5,6 +5,7 @@
 #include <coroutine>
 #include <atomic>
 #include <memory>
+#include <functional>
 
 namespace fasterapi {
 namespace core {
@@ -68,11 +69,33 @@ public:
     static CoroResumer* get_global() noexcept;
 
     /**
+     * Wake the event loop (for cross-thread signaling).
+     *
+     * Use this to wake the event loop when data is available for processing.
+     * The wake callback will be invoked on the event loop thread.
+     */
+    void wake() noexcept {
+        if (io_) io_->wake();
+    }
+
+    /**
      * Set global instance.
      *
      * Should be called once during server initialization.
      */
     static void set_global(CoroResumer* resumer) noexcept;
+
+    /**
+     * Set callback to run after wake processing.
+     *
+     * Used to chain additional processing (e.g., WebSocket response dispatch)
+     * after coroutines are resumed.
+     *
+     * @param callback Function to call after process_queue()
+     */
+    void set_post_wake_callback(std::function<void()> callback) noexcept {
+        post_wake_callback_ = std::move(callback);
+    }
 
 private:
     explicit CoroResumer(async_io* io);
@@ -87,6 +110,9 @@ private:
     std::atomic<uint64_t> queued_count_{0};
     std::atomic<uint64_t> resumed_count_{0};
 
+    // Callback to run after coroutine processing (e.g., WS response dispatch)
+    std::function<void()> post_wake_callback_;
+
     static std::atomic<CoroResumer*> global_instance_;
 };
 
@@ -98,9 +124,14 @@ inline std::atomic<CoroResumer*> CoroResumer::global_instance_{nullptr};
 inline CoroResumer::CoroResumer(async_io* io)
     : io_(io) {
 
-    // Register wake callback to process queue
+    // Register wake callback to process queue and run post-wake callbacks
     io_->set_wake_callback([this]() {
         this->process_queue();
+
+        // Run additional callbacks (e.g., WebSocket response dispatch)
+        if (post_wake_callback_) {
+            post_wake_callback_();
+        }
     });
 }
 

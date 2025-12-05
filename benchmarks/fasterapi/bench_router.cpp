@@ -8,7 +8,7 @@
  * - Mixed workloads
  */
 
-#include "../src/cpp/http/router.h"
+#include "../../src/cpp/http/router.h"
 #include <iostream>
 #include <chrono>
 #include <vector>

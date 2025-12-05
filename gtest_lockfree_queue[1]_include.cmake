@@ -1,0 +1,5 @@
+if(EXISTS "/Users/bengamble/FasterAPI/gtest_lockfree_queue[1]_tests.cmake")
+  include("/Users/bengamble/FasterAPI/gtest_lockfree_queue[1]_tests.cmake")
+else()
+  add_test(gtest_lockfree_queue_NOT_BUILT gtest_lockfree_queue_NOT_BUILT)
+endif()

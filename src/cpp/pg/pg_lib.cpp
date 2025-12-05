@@ -58,23 +58,15 @@ void* pg_pool_create(
         return nullptr;
     }
     
-    // Create pool implementation
-    auto* pool_impl = new PgPoolImpl(dsn, min_size, max_size);
+    // Create pool implementation directly (use nothrow to avoid exceptions)
+    auto* pool_impl = new (std::nothrow) PgPoolImpl(dsn, min_size, max_size);
     if (!pool_impl) {
         *error_out = 2;  // Memory allocation failed
         return nullptr;
     }
-    
-    // Create pool wrapper
-    auto* pool = new PgPool(dsn, min_size, max_size);
-    if (!pool) {
-        delete pool_impl;
-        *error_out = 2;  // Memory allocation failed
-        return nullptr;
-    }
-    
+
     *error_out = 0;
-    return pool;
+    return pool_impl;
 }
 
 /**
@@ -84,9 +76,10 @@ void* pg_pool_create(
  * @return Error code (0 = success)
  */
 int pg_pool_destroy(void* pool) noexcept {
-    // Stub: Actual cleanup
-    // auto* p = reinterpret_cast<PgPool*>(pool);
-    // delete p;
+    if (!pool) return 1;
+
+    auto* p = reinterpret_cast<PgPoolImpl*>(pool);
+    delete p;
     return 0;
 }
 
@@ -104,12 +97,10 @@ void* pg_pool_get(void* pool, uint32_t core_id, uint64_t deadline_ms, int* error
         if (error_out) *error_out = 1;
         return nullptr;
     }
-    
-    // Stub: Get connection from pool
-    // auto* p = reinterpret_cast<PgPool*>(pool);
-    // auto* conn = p->get(core_id, deadline_ms, error_out);
-    *error_out = 0;
-    return nullptr;  // Stub
+
+    auto* p = reinterpret_cast<PgPoolImpl*>(pool);
+    auto* conn = p->get(core_id, deadline_ms, error_out);
+    return conn;
 }
 
 /**
@@ -121,12 +112,10 @@ void* pg_pool_get(void* pool, uint32_t core_id, uint64_t deadline_ms, int* error
  */
 int pg_pool_release(void* pool, void* conn) noexcept {
     if (!pool || !conn) return 1;
-    
-    // Stub: Release connection
-    // auto* p = reinterpret_cast<PgPool*>(pool);
-    // auto* c = reinterpret_cast<PgConnection*>(conn);
-    // return p->release(c);
-    return 0;
+
+    auto* p = reinterpret_cast<PgPoolImpl*>(pool);
+    auto* c = reinterpret_cast<PgConnection*>(conn);
+    return p->release(c);
 }
 
 /**
@@ -138,11 +127,12 @@ int pg_pool_release(void* pool, void* conn) noexcept {
  */
 int pg_pool_stats_get(void* pool, void* out_stats) noexcept {
     if (!pool || !out_stats) return 1;
-    
-    // Stub: Retrieve stats
-    // auto* p = reinterpret_cast<PgPool*>(pool);
-    // auto* stats = reinterpret_cast<PgPoolStats*>(out_stats);
-    // *stats = p->stats();
+
+    auto* p = reinterpret_cast<PgPoolImpl*>(pool);
+    auto stats = p->stats();
+
+    // Copy stats to output structure (simplified - just copy memory)
+    std::memcpy(out_stats, &stats, sizeof(PgPoolImpl::PoolStats));
     return 0;
 }
 
@@ -171,12 +161,10 @@ void* pg_exec_query(
         if (error_out) *error_out = 1;
         return nullptr;
     }
-    
-    // Stub: Execute query
-    // auto* c = reinterpret_cast<PgConnection*>(conn);
-    // auto* result = c->exec_query(sql, param_count, params, error_out);
-    *error_out = 0;
-    return nullptr;  // Stub
+
+    auto* c = reinterpret_cast<PgConnection*>(conn);
+    auto* result = c->exec_query(sql, param_count, params, error_out);
+    return result;
 }
 
 /**
@@ -187,11 +175,9 @@ void* pg_exec_query(
  */
 int64_t pg_result_row_count(void* result) noexcept {
     if (!result) return -1;
-    
-    // Stub: Get row count
-    // auto* r = reinterpret_cast<PgResult*>(result);
-    // return r->row_count();
-    return 0;  // Stub
+
+    auto* r = reinterpret_cast<PgResult*>(result);
+    return r->row_count();
 }
 
 /**
@@ -202,11 +188,108 @@ int64_t pg_result_row_count(void* result) noexcept {
  */
 int pg_result_destroy(void* result) noexcept {
     if (!result) return 1;
-    
-    // Stub: Free result
-    // auto* r = reinterpret_cast<PgResult*>(result);
-    // delete r;
+
+    auto* r = reinterpret_cast<PgResult*>(result);
+    delete r;
     return 0;
+}
+
+/**
+ * Get number of columns in result.
+ *
+ * @param result Result handle
+ * @return Number of columns, or -1 on error
+ */
+int32_t pg_result_field_count(void* result) noexcept {
+    if (!result) return -1;
+
+    auto* r = reinterpret_cast<PgResult*>(result);
+    return r->field_count();
+}
+
+/**
+ * Get column name.
+ *
+ * @param result Result handle
+ * @param col_index Column index (0-based)
+ * @return Column name, or nullptr on error
+ */
+const char* pg_result_field_name(void* result, int32_t col_index) noexcept {
+    if (!result) return nullptr;
+
+    auto* r = reinterpret_cast<PgResult*>(result);
+    return r->field_name(col_index);
+}
+
+/**
+ * Get value from result.
+ *
+ * @param result Result handle
+ * @param row_index Row index (0-based)
+ * @param col_index Column index (0-based)
+ * @return Value string, or nullptr if NULL/error
+ */
+const char* pg_result_get_value(void* result, int64_t row_index, int32_t col_index) noexcept {
+    if (!result) return nullptr;
+
+    auto* r = reinterpret_cast<PgResult*>(result);
+    return r->get_value(row_index, col_index);
+}
+
+/**
+ * Check if value is NULL.
+ *
+ * @param result Result handle
+ * @param row_index Row index (0-based)
+ * @param col_index Column index (0-based)
+ * @return 1 if NULL, 0 if not NULL, -1 on error
+ */
+int pg_result_is_null(void* result, int64_t row_index, int32_t col_index) noexcept {
+    if (!result) return -1;
+
+    auto* r = reinterpret_cast<PgResult*>(result);
+    return r->is_null(row_index, col_index) ? 1 : 0;
+}
+
+/**
+ * Get value length.
+ *
+ * @param result Result handle
+ * @param row_index Row index (0-based)
+ * @param col_index Column index (0-based)
+ * @return Value length, or -1 on error/NULL
+ */
+int32_t pg_result_get_length(void* result, int64_t row_index, int32_t col_index) noexcept {
+    if (!result) return -1;
+
+    auto* r = reinterpret_cast<PgResult*>(result);
+    return r->get_length(row_index, col_index);
+}
+
+/**
+ * Get scalar value (single row, single column).
+ *
+ * @param result Result handle
+ * @return Scalar value, or nullptr on error
+ */
+const char* pg_result_scalar(void* result) noexcept {
+    if (!result) return nullptr;
+
+    auto* r = reinterpret_cast<PgResult*>(result);
+    return r->scalar();
+}
+
+/**
+ * Get error message from result.
+ *
+ * @param result Result handle
+ * @return Error message, or nullptr if no error
+ */
+const char* pg_result_error_message(void* result) noexcept {
+    if (!result) return nullptr;
+
+    auto* r = reinterpret_cast<PgResult*>(result);
+    return r->error_message();
 }
 
 // ==============================================================================
@@ -223,12 +306,9 @@ int pg_result_destroy(void* result) noexcept {
  */
 int pg_tx_begin(void* conn, const char* isolation, int* error_out) noexcept {
     if (!conn || !error_out) return 1;
-    
-    // Stub: Begin transaction
-    // auto* c = reinterpret_cast<PgConnection*>(conn);
-    // return c->begin_tx(isolation, error_out);
-    *error_out = 0;
-    return 0;
+
+    auto* c = reinterpret_cast<PgConnection*>(conn);
+    return c->begin_tx(isolation, error_out);
 }
 
 /**
@@ -240,12 +320,9 @@ int pg_tx_begin(void* conn, const char* isolation, int* error_out) noexcept {
  */
 int pg_tx_commit(void* conn, int* error_out) noexcept {
     if (!conn || !error_out) return 1;
-    
-    // Stub: Commit transaction
-    // auto* c = reinterpret_cast<PgConnection*>(conn);
-    // return c->commit_tx(error_out);
-    *error_out = 0;
-    return 0;
+
+    auto* c = reinterpret_cast<PgConnection*>(conn);
+    return c->commit_tx(error_out);
 }
 
 /**
@@ -256,11 +333,9 @@ int pg_tx_commit(void* conn, int* error_out) noexcept {
  */
 int pg_tx_rollback(void* conn) noexcept {
     if (!conn) return 1;
-    
-    // Stub: Rollback transaction
-    // auto* c = reinterpret_cast<PgConnection*>(conn);
-    // return c->rollback_tx();
-    return 0;
+
+    auto* c = reinterpret_cast<PgConnection*>(conn);
+    return c->rollback_tx();
 }
 
 // ==============================================================================
@@ -277,12 +352,9 @@ int pg_tx_rollback(void* conn) noexcept {
  */
 int pg_copy_in_start(void* conn, const char* sql, int* error_out) noexcept {
     if (!conn || !sql || !error_out) return 1;
-    
-    // Stub: Start COPY IN
-    // auto* c = reinterpret_cast<PgConnection*>(conn);
-    // return c->copy_in_start(sql, error_out);
-    *error_out = 0;
-    return 0;
+
+    auto* c = reinterpret_cast<PgConnection*>(conn);
+    return c->copy_in_start(sql, error_out);
 }
 
 /**
@@ -296,12 +368,9 @@ int pg_copy_in_start(void* conn, const char* sql, int* error_out) noexcept {
  */
 uint64_t pg_copy_in_write(void* conn, const char* data, uint64_t length, int* error_out) noexcept {
     if (!conn || !data || !error_out) return 0;
-    
-    // Stub: Write to COPY IN
-    // auto* c = reinterpret_cast<PgConnection*>(conn);
-    // return c->copy_in_write(data, length, error_out);
-    *error_out = 0;
-    return length;  // Stub: pretend all written
+
+    auto* c = reinterpret_cast<PgConnection*>(conn);
+    return c->copy_in_write(data, length, error_out);
 }
 
 /**
@@ -313,12 +382,9 @@ uint64_t pg_copy_in_write(void* conn, const char* data, uint64_t length, int* er
  */
 int pg_copy_in_end(void* conn, int* error_out) noexcept {
     if (!conn || !error_out) return 1;
-    
-    // Stub: End COPY IN
-    // auto* c = reinterpret_cast<PgConnection*>(conn);
-    // return c->copy_in_end(error_out);
-    *error_out = 0;
-    return 0;
+
+    auto* c = reinterpret_cast<PgConnection*>(conn);
+    return c->copy_in_end(error_out);
 }
 
 // ==============================================================================

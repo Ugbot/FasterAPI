@@ -5,3 +5,9 @@
 - keep allocations to a min, use buffer pools and ring buffers, aim for code that vectorises well
 - new, delete, malloc and free are expensive operattions. we should avoid them if possible. instead use object pools, and ring buffers by preference.
 - when planning, document it in files and tick things off as we go
+- use cython over pybind
+- dont make short cuts, the goal is to use our server here to back the python not what ever libraries you can find. we have built a high perf aysnc server, we are going to use that.
+- we're now using python multiprocessing instead of sub interpreterers because of the overhead. we can try them again later.
+- for hosted language implementations (Python, etc), we use ZeroMQ IPC for multi-process communication. This enables true multi-core parallelism and supports multiple language runtimes. ZeroMQ is the default IPC mode. Shared memory IPC is deprecated/unfinished and can be enabled with FASTERAPI_USE_ZMQ=0 for testing.
+- the subinterpreter model is still in the codebase but not actively used. focus on the ProcessPoolExecutor + ZeroMQ/SharedMemory architecture for production workloads.
+- don't mock things, build them properly.

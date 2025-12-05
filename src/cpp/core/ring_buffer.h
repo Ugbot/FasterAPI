@@ -140,13 +140,129 @@ private:
 };
 
 /**
+ * Simple byte-oriented ring buffer for streaming data.
+ *
+ * Used for QUIC streams, TCP buffers, etc.
+ * - Fixed-size circular buffer
+ * - Continuous read/write operations
+ * - No message framing
+ * - Zero-copy peek operations
+ *
+ * Not thread-safe - caller must handle synchronization.
+ */
+class RingBuffer {
+public:
+    /**
+     * Create ring buffer with specified capacity.
+     *
+     * @param capacity Buffer capacity in bytes
+     */
+    explicit RingBuffer(size_t capacity);
+
+    /**
+     * Destructor.
+     */
+    ~RingBuffer();
+
+    // No copy
+    RingBuffer(const RingBuffer&) = delete;
+    RingBuffer& operator=(const RingBuffer&) = delete;
+
+    /**
+     * Write data to buffer.
+     *
+     * @param data Data to write
+     * @param length Number of bytes to write
+     * @return Number of bytes actually written (may be less if buffer full)
+     */
+    size_t write(const uint8_t* data, size_t length) noexcept;
+
+    /**
+     * Read data from buffer.
+     *
+     * @param buffer Output buffer
+     * @param length Maximum bytes to read
+     * @return Number of bytes actually read (may be less if buffer empty)
+     */
+    size_t read(uint8_t* buffer, size_t length) noexcept;
+
+    /**
+     * Peek at data without consuming it.
+     *
+     * @param buffer Output buffer
+     * @param length Maximum bytes to peek
+     * @return Number of bytes available
+     */
+    size_t peek(uint8_t* buffer, size_t length) const noexcept;
+
+    /**
+     * Discard bytes from buffer without reading.
+     *
+     * @param length Number of bytes to discard
+     * @return Number of bytes actually discarded
+     */
+    size_t discard(size_t length) noexcept;
+
+    /**
+     * Get number of bytes available to read.
+     */
+    size_t available() const noexcept {
+        return size_;
+    }
+
+    /**
+     * Get number of bytes available to write.
+     */
+    size_t space() const noexcept {
+        return capacity_ - size_;
+    }
+
+    /**
+     * Get total capacity.
+     */
+    size_t capacity() const noexcept {
+        return capacity_;
+    }
+
+    /**
+     * Check if buffer is empty.
+     */
+    bool is_empty() const noexcept {
+        return size_ == 0;
+    }
+
+    /**
+     * Check if buffer is full.
+     */
+    bool is_full() const noexcept {
+        return size_ == capacity_;
+    }
+
+    /**
+     * Clear buffer (reset to empty state).
+     */
+    void clear() noexcept {
+        head_ = 0;
+        tail_ = 0;
+        size_ = 0;
+    }
+
+private:
+    uint8_t* buffer_;   // Buffer storage
+    size_t capacity_;   // Total capacity
+    size_t head_;       // Write position
+    size_t tail_;       // Read position
+    size_t size_;       // Current data size
+};
+
+/**
  * Message buffer for variable-length messages.
- * 
+ *
  * Based on Aeron's message framing:
  * - Length-prefixed messages
  * - Zero-copy via claim/commit
  * - Padding for alignment
- * 
+ *
  * Frame format:
  *   [4 bytes: length] [N bytes: data] [padding]
  */

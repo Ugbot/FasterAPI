@@ -9,6 +9,7 @@
 #include "../src/cpp/core/ring_buffer.h"
 #include <iostream>
 #include <cstring>
+#include <vector>
 
 using namespace fasterapi::webrtc;
 using namespace fasterapi::core;
@@ -111,13 +112,179 @@ TEST(data_channel_create) {
 
 TEST(data_channel_send_text) {
     DataChannel channel("test");
-    
-    // Simulate open state
-    // In real implementation, would go through connection process
-    
-    // Send would queue message
-    // For testing, just verify API works
-    ASSERT(channel.get_label() == std::string("test"));
+
+    // Force channel to open state for testing
+    channel.set_state(DataChannelState::OPEN);
+
+    // Send text should succeed
+    int result = channel.send_text("Hello, World!");
+    ASSERT_EQ(result, 0);
+
+    // Verify stats
+    auto stats = channel.get_stats();
+    ASSERT_EQ(stats.messages_sent, 1);
+    ASSERT_EQ(stats.bytes_sent, 13);
+}
+
+TEST(data_channel_send_binary) {
+    DataChannel channel("binary-test");
+
+    // Force channel to open state for testing
+    channel.set_state(DataChannelState::OPEN);
+
+    // Random binary data
+    uint8_t binary_data[] = {0x00, 0x01, 0x02, 0xFF, 0xFE, 0x80, 0x7F, 0x00};
+
+    // Send binary should succeed
+    int result = channel.send_binary(binary_data, sizeof(binary_data));
+    ASSERT_EQ(result, 0);
+
+    // Verify stats
+    auto stats = channel.get_stats();
+    ASSERT_EQ(stats.messages_sent, 1);
+    ASSERT_EQ(stats.bytes_sent, 8);
+}
+
+TEST(data_channel_receive_text) {
+    DataChannel channel("recv-text-test");
+    channel.set_state(DataChannelState::OPEN);
+
+    // Track received message
+    bool received = false;
+    bool was_binary = true;  // Start with wrong value
+    std::string received_data;
+
+    channel.on_message([&](const DataChannelMessage& msg) {
+        received = true;
+        was_binary = msg.binary;
+        received_data = std::string(msg.data);
+    });
+
+    // Simulate receiving text data (PPID 51)
+    const char* text = "Hello from peer";
+    channel.receive_data(
+        reinterpret_cast<const uint8_t*>(text),
+        strlen(text),
+        SCTPPayloadProtocolId::WEBRTC_STRING
+    );
+
+    ASSERT(received);
+    ASSERT(!was_binary);  // Text, not binary
+    ASSERT(received_data == std::string("Hello from peer"));
+
+    auto stats = channel.get_stats();
+    ASSERT_EQ(stats.messages_received, 1);
+}
+
+TEST(data_channel_receive_binary) {
+    DataChannel channel("recv-binary-test");
+    channel.set_state(DataChannelState::OPEN);
+
+    // Track received message
+    bool received = false;
+    bool was_binary = false;  // Start with wrong value
+    size_t received_len = 0;
+    uint8_t received_bytes[64] = {0};
+
+    channel.on_message([&](const DataChannelMessage& msg) {
+        received = true;
+        was_binary = msg.binary;
+        received_len = msg.size();
+        if (received_len <= sizeof(received_bytes)) {
+            std::memcpy(received_bytes, msg.binary_data(), received_len);
+        }
+    });
+
+    // Simulate receiving binary data (PPID 53)
+    uint8_t binary[] = {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01, 0x02, 0x03};
+    channel.receive_data(
+        binary,
+        sizeof(binary),
+        SCTPPayloadProtocolId::WEBRTC_BINARY
+    );
+
+    ASSERT(received);
+    ASSERT(was_binary);  // Must be binary
+    ASSERT_EQ(received_len, 8);
+
+    // Verify exact bytes
+    ASSERT_EQ(received_bytes[0], 0xDE);
+    ASSERT_EQ(received_bytes[1], 0xAD);
+    ASSERT_EQ(received_bytes[2], 0xBE);
+    ASSERT_EQ(received_bytes[3], 0xEF);
+    ASSERT_EQ(received_bytes[7], 0x03);
+
+    auto stats = channel.get_stats();
+    ASSERT_EQ(stats.messages_received, 1);
+    ASSERT_EQ(stats.bytes_received, 8);
+}
+
+TEST(data_channel_receive_empty_binary) {
+    DataChannel channel("empty-binary-test");
+    channel.set_state(DataChannelState::OPEN);
+
+    bool received = false;
+    bool was_binary = false;
+    size_t received_len = 999;  // Non-zero to verify it's updated
+
+    channel.on_message([&](const DataChannelMessage& msg) {
+        received = true;
+        was_binary = msg.binary;
+        received_len = msg.size();
+    });
+
+    // Simulate receiving empty binary (PPID 56)
+    channel.receive_data(
+        nullptr,
+        0,
+        SCTPPayloadProtocolId::WEBRTC_BINARY_EMPTY
+    );
+
+    ASSERT(received);
+    ASSERT(was_binary);  // Empty binary is still binary
+    ASSERT_EQ(received_len, 0);
+}
+
+TEST(data_channel_large_binary) {
+    DataChannel channel("large-binary-test");
+    channel.set_state(DataChannelState::OPEN);
+
+    // Generate 16KB of random data
+    constexpr size_t LARGE_SIZE = 16384;
+    std::vector<uint8_t> large_data(LARGE_SIZE);
+    for (size_t i = 0; i < LARGE_SIZE; i++) {
+        large_data[i] = static_cast<uint8_t>(i % 256);
+    }
+
+    bool received = false;
+    size_t received_len = 0;
+    bool data_matches = false;
+
+    channel.on_message([&](const DataChannelMessage& msg) {
+        received = true;
+        received_len = msg.size();
+
+        // Verify data integrity
+        if (msg.size() == LARGE_SIZE) {
+            data_matches = true;
+            for (size_t i = 0; i < LARGE_SIZE; i++) {
+                if (msg.binary_data()[i] != static_cast<uint8_t>(i % 256)) {
+                    data_matches = false;
+                    break;
+                }
+            }
+        }
+    });
+
+    channel.receive_data(
+        large_data.data(),
+        large_data.size(),
+        SCTPPayloadProtocolId::WEBRTC_BINARY
+    );
+
+    ASSERT(received);
+    ASSERT_EQ(received_len, LARGE_SIZE);
+    ASSERT(data_matches);
 }
 
 // ============================================================================
@@ -204,6 +371,11 @@ int main() {
     std::cout << "=== Data Channels (Pion-inspired) ===" << std::endl;
     RUN_TEST(data_channel_create);
     RUN_TEST(data_channel_send_text);
+    RUN_TEST(data_channel_send_binary);
+    RUN_TEST(data_channel_receive_text);
+    RUN_TEST(data_channel_receive_binary);
+    RUN_TEST(data_channel_receive_empty_binary);
+    RUN_TEST(data_channel_large_binary);
     std::cout << std::endl;
     
     std::cout << "=== Ring Buffers (Aeron-inspired) ===" << std::endl;

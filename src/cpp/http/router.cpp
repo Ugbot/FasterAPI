@@ -1,4 +1,5 @@
 #include "router.h"
+#include "../core/logger.h"
 #include <algorithm>
 #include <iostream>
 
@@ -120,8 +121,8 @@ int Router::add_route(
         return 0;
     }
 
-    // Insert route
-    int result = insert_route(tree.get(), path, std::move(handler), 0);
+    // Insert route (start at pos=1 to skip root's '/')
+    int result = insert_route(tree.get(), path, std::move(handler), 1);
     if (result == 0) {
         route_count_++;
     }
@@ -148,8 +149,8 @@ RouteHandler Router::match(
         return it->second->handler;
     }
 
-    // Match in tree
-    return match_route(it->second.get(), path, params, 0);
+    // Match in tree (start at pos=1 to skip root's '/')
+    return match_route(it->second.get(), path, params, 1);
 }
 
 size_t Router::route_count(const std::string& method) const noexcept {
@@ -198,24 +199,14 @@ int Router::insert_route(
     RouteHandler handler,
     size_t pos
 ) noexcept {
-    std::cerr << "[insert_route] path='" << path << "' pos=" << pos
-              << " node->path='" << node->path << "' has_handler=" << (node->handler ? "yes" : "no") << std::endl;
-    std::cerr.flush();
-
     // Increment priority
     node->increment_priority();
 
     // If we've consumed the entire path
     if (pos >= path.length()) {
-        std::cerr << "[insert_route] At end of path. Checking for duplicate..." << std::endl;
-        std::cerr.flush();
         if (node->handler) {
-            std::cerr << "Router: duplicate route: " << path << std::endl;
-            std::cerr.flush();
-            return 1;
+            return 1;  // Duplicate route
         }
-        std::cerr << "[insert_route] Setting handler for path: " << path << std::endl;
-        std::cerr.flush();
         node->handler = std::move(handler);
         return 0;
     }
@@ -248,50 +239,74 @@ int Router::insert_route(
     
     // Find or create child for this segment
     RouterNode* child = nullptr;
-    
+    bool need_new_child = false;  // Flag to track if we need to add remaining segment after split
+
     if (seg_type == NodeType::STATIC) {
         // Look for existing static child with matching prefix
         char first_char = segment.empty() ? '/' : segment[0];
-        
+
         for (auto& c : node->children) {
             if (c->type == NodeType::STATIC && !c->path.empty() && c->path[0] == first_char) {
                 // Found potential match
                 size_t lcp = longest_common_prefix(c->path, segment);
-                
+
                 if (lcp == c->path.length() && lcp == segment.length()) {
                     // Exact match - continue with this child
                     child = c.get();
                     break;
+                } else if (lcp == c->path.length() && lcp < segment.length()) {
+                    // Child's path is prefix of segment - recursively descend into
+                    // this child with the updated position (after matching the child's path)
+                    return insert_route(c.get(), path, std::move(handler), pos + lcp);
                 } else if (lcp > 0 && lcp < c->path.length()) {
                     // Need to split this node
-                    auto new_node = std::make_unique<RouterNode>(NodeType::STATIC);
-                    new_node->path = c->path.substr(0, lcp);
-                    new_node->priority = c->priority;
-                    
-                    // Old node becomes child of new node
+                    auto split_node = std::make_unique<RouterNode>(NodeType::STATIC);
+                    split_node->path = c->path.substr(0, lcp);
+                    split_node->priority = c->priority;
+
+                    // Old node becomes child of split node
                     c->path = c->path.substr(lcp);
-                    new_node->indices = c->path[0];
-                    new_node->children.push_back(std::move(c));
-                    
-                    // Replace old child with new node
-                    c = std::move(new_node);
+
+                    // Update split node's child tracking
+                    split_node->indices = std::string(1, c->path[0]);
+                    split_node->child_map[c->path[0]] = 0;
+                    split_node->children.push_back(std::move(c));
+
+                    // Replace old child with split node
+                    c = std::move(split_node);
                     child = c.get();
-                    
-                    // Adjust segment for remaining path
+
+                    // Adjust segment for remaining path after common prefix
                     segment = segment.substr(lcp);
+                    if (!segment.empty()) {
+                        need_new_child = true;
+                    }
                     break;
                 }
             }
         }
-        
-        if (!child && !segment.empty()) {
-            // Create new static child
+
+        // Add new child for remaining segment if needed
+        if (need_new_child && !segment.empty()) {
+            auto new_child = std::make_unique<RouterNode>(NodeType::STATIC);
+            new_child->path = segment;
+            RouterNode* new_child_ptr = new_child.get();
+
+            // Add to current child (the split node or prefix-matched node)
+            child->indices += segment[0];
+            child->child_map[segment[0]] = child->children.size();
+            child->children.push_back(std::move(new_child));
+            child = new_child_ptr;
+        } else if (!child && !segment.empty()) {
+            // Create new static child directly under current node
             auto new_child = std::make_unique<RouterNode>(NodeType::STATIC);
             new_child->path = segment;
             child = new_child.get();
-            
+
             node->indices += segment[0];
+            size_t child_idx = node->children.size();
             node->children.push_back(std::move(new_child));
+            node->child_map[segment[0]] = child_idx;
         }
     } else {
         // Parameter or wildcard node
@@ -330,7 +345,7 @@ RouteHandler Router::match_route(
     if (!node) {
         return nullptr;
     }
-    
+
     // Check if we've matched the entire path
     if (pos >= path.length()) {
         return node->handler;
@@ -355,7 +370,7 @@ RouteHandler Router::match_route(
                             break;
                         }
                     }
-                    
+
                     if (matches) {
                         auto handler = match_route(child.get(), path, params, pos + child->path.length());
                         if (handler) {
@@ -403,26 +418,26 @@ RouteHandler Router::match_route(
         if (child->type != NodeType::PARAM) {
             continue;
         }
-        
+
         // Extract parameter value until next '/' or end
         size_t next_slash = path.find('/', pos + 1);
         if (next_slash == std::string::npos) {
             next_slash = path.length();
         }
-        
+
         if (next_slash > pos + 1) {  // Must have at least one character
             std::string value = path.substr(pos + 1, next_slash - pos - 1);
-            
+
             // Save param value
             size_t param_count_before = params.size();
             params.add(child->param_name, value);
-            
+
             // Try to match rest of path
             auto handler = match_route(child.get(), path, params, next_slash);
             if (handler) {
                 return handler;
             }
-            
+
             // Backtrack: remove param if match failed
             while (params.size() > param_count_before) {
                 params.clear();  // Simple clear for now

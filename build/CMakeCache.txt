@@ -14,11 +14,54 @@
 # EXTERNAL cache entries
 ########################
 
-//Enable AddressSanitizer (ASan)
-ASAN:BOOL=OFF
+//Build a 32 bit version of the library.
+BENCHMARK_BUILD_32_BITS:BOOL=OFF
 
-//Build the testing tree.
-BUILD_TESTING:BOOL=ON
+//Flags used by the C++ compiler during coverage builds.
+BENCHMARK_CXX_FLAGS_COVERAGE:STRING='-O0 -g -fno-exceptions -fno-rtti '
+
+//Allow the downloading and in-tree building of unmet dependencies
+BENCHMARK_DOWNLOAD_DEPENDENCIES:BOOL=OFF
+
+//Enable building and running the assembly tests
+BENCHMARK_ENABLE_ASSEMBLY_TESTS:BOOL=OFF
+
+//Build documentation with Doxygen.
+BENCHMARK_ENABLE_DOXYGEN:BOOL=OFF
+
+//Enable the use of exceptions in the benchmark library.
+BENCHMARK_ENABLE_EXCEPTIONS:BOOL=ON
+
+//Enable performance counters provided by libpfm
+BENCHMARK_ENABLE_LIBPFM:BOOL=OFF
+
+//Enable link time optimisation of the benchmark library.
+BENCHMARK_ENABLE_LTO:BOOL=OFF
+
+//Build Release candidates with -Werror.
+BENCHMARK_ENABLE_WERROR:BOOL=ON
+
+//Flags used for linking binaries during coverage builds.
+BENCHMARK_EXE_LINKER_FLAGS_COVERAGE:STRING=
+
+//Build Release candidates with -Werror regardless of compiler
+// issues.
+BENCHMARK_FORCE_WERROR:BOOL=OFF
+
+//Enable installation of documentation.
+BENCHMARK_INSTALL_DOCS:BOOL=ON
+
+//Flags used by the shared libraries linker during coverage builds.
+BENCHMARK_SHARED_LINKER_FLAGS_COVERAGE:STRING=
+
+//Use bundled GoogleTest. If disabled, the find_package(GTest)
+// will be used.
+BENCHMARK_USE_BUNDLED_GTEST:BOOL=ON
+
+//Build and test using libc++ as the standard library.
+BENCHMARK_USE_LIBCXX:BOOL=OFF
+
+BUILD_SHARED_LIBS:BOOL=OFF
 
 //Path to a program.
 CMAKE_ADDR2LINE:FILEPATH=CMAKE_ADDR2LINE-NOTFOUND
@@ -28,7 +71,10 @@ CMAKE_AR:FILEPATH=/usr/bin/ar
 
 //Choose the type of build, options are: None Debug Release RelWithDebInfo
 // MinSizeRel ...
-CMAKE_BUILD_TYPE:STRING=
+CMAKE_BUILD_TYPE:STRING=Release
+
+//Enable/Disable color output during build.
+CMAKE_COLOR_MAKEFILE:BOOL=ON
 
 //CXX compiler
 CMAKE_CXX_COMPILER:FILEPATH=/usr/bin/c++
@@ -83,9 +129,6 @@ CMAKE_EXE_LINKER_FLAGS_RELEASE:STRING=
 
 //Flags used by the linker during RELWITHDEBINFO builds.
 CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO:STRING=
-
-//Enable/Disable output of build database during the build.
-CMAKE_EXPORT_BUILD_DATABASE:BOOL=
 
 //Enable/Disable output of compile commands during generation.
 CMAKE_EXPORT_COMPILE_COMMANDS:BOOL=
@@ -150,8 +193,8 @@ CMAKE_INSTALL_SYSCONFDIR:PATH=etc
 //Path to a program.
 CMAKE_LINKER:FILEPATH=/usr/bin/ld
 
-//Program used to build from build.ninja files.
-CMAKE_MAKE_PROGRAM:FILEPATH=/opt/homebrew/bin/ninja
+//Path to a program.
+CMAKE_MAKE_PROGRAM:FILEPATH=/usr/bin/make
 
 //Flags used by the linker during the creation of modules during
 // all build types.
@@ -285,13 +328,6 @@ CMAKE_TAPI:FILEPATH=/Library/Developer/CommandLineTools/usr/bin/tapi
 // Studio IDE projects all commands are done without /nologo.
 CMAKE_VERBOSE_MAKEFILE:BOOL=FALSE
 
-//Path to the coverage program that CTest uses for performing coverage
-// inspection
-COVERAGE_COMMAND:FILEPATH=/usr/bin/gcov
-
-//Extra command line flags to pass to the coverage tool
-COVERAGE_EXTRA_FLAGS:STRING=-l
-
 //Don't create a package lock file in the binary path
 CPM_DONT_CREATE_PACKAGE_LOCK:BOOL=OFF
 
@@ -317,17 +353,11 @@ CPM_USE_LOCAL_PACKAGES:BOOL=OFF
 // nested level.
 CPM_USE_NAMED_CACHE_DIRECTORIES:BOOL=OFF
 
-//How many times to retry timed-out CTest submissions.
-CTEST_SUBMIT_RETRY_COUNT:STRING=3
-
-//How long to wait between timed-out CTest submissions.
-CTEST_SUBMIT_RETRY_DELAY:STRING=5
+//OFF
+CXXFEATURECHECK_DEBUG:BOOL=OFF
 
 //Path to a program.
 CYTHON_EXECUTABLE:FILEPATH=/opt/homebrew/bin/cython
-
-//Maximum time allowed before CTest will kill the test.
-DART_TESTING_TIMEOUT:STRING=1500
 
 //Enable C++ exceptions (default: OFF for performance)
 ENABLE_EXCEPTIONS:BOOL=OFF
@@ -337,6 +367,12 @@ FA_BUILD_CYTHON:BOOL=ON
 
 //Build C++ example programs
 FA_BUILD_EXAMPLES:BOOL=ON
+
+//Build benchmarks with Google Benchmark
+FA_BUILD_GBENCH:BOOL=ON
+
+//Build tests with Google Test framework
+FA_BUILD_GTEST:BOOL=ON
 
 //Build HTTP server
 FA_BUILD_HTTP:BOOL=ON
@@ -350,23 +386,26 @@ FA_BUILD_PG:BOOL=ON
 //Enable zstd compression
 FA_ENABLE_COMPRESSION:BOOL=ON
 
+//Enable code coverage (gcov/lcov)
+FA_ENABLE_COVERAGE:BOOL=OFF
+
 //Enable HTTP/2 support (pure C++ implementation)
 FA_ENABLE_HTTP2:BOOL=ON
 
-//Enable HTTP/3 support via MsQuic
-FA_ENABLE_HTTP3:BOOL=OFF
+//Enable HTTP/3 support (pure C++ QUIC + QPACK + WebTransport)
+FA_ENABLE_HTTP3:BOOL=ON
 
 //Link mimalloc as default allocator
-FA_ENABLE_MIMALLOC:BOOL=ON
+FA_ENABLE_MIMALLOC:BOOL=OFF
+
+//Enable -march=native/-mcpu=native (disable for CI)
+FA_NATIVE_ARCH:BOOL=ON
 
 //Enable Address/UB sanitizers (non-MSVC)
 FA_SANITIZE:BOOL=OFF
 
 //Build with standalone Asio (for Beast/H2 path)
 FA_USE_ASIO:BOOL=OFF
-
-//Use libuv for event loop (required on Windows)
-FA_USE_LIBUV:BOOL=ON
 
 //Use uWebSockets for HTTP/1.1 and WebSocket
 FA_USE_UWEBSOCKETS:BOOL=OFF
@@ -381,154 +420,24 @@ FETCHCONTENT_FULLY_DISCONNECTED:BOOL=OFF
 //Enables QUIET option for all content population
 FETCHCONTENT_QUIET:BOOL=ON
 
-//When not empty, overrides where to find pre-populated content
-// for libuv
-FETCHCONTENT_SOURCE_DIR_LIBUV:PATH=
-
-//When not empty, overrides where to find pre-populated content
-// for mimalloc
-FETCHCONTENT_SOURCE_DIR_MIMALLOC:PATH=
-
-//When not empty, overrides where to find pre-populated content
-// for simdjson
-FETCHCONTENT_SOURCE_DIR_SIMDJSON:PATH=
-
-//When not empty, overrides where to find pre-populated content
-// for zstd
-FETCHCONTENT_SOURCE_DIR_ZSTD:PATH=
-
 //Enables UPDATE_DISCONNECTED behavior for all content population
 FETCHCONTENT_UPDATES_DISCONNECTED:BOOL=OFF
-
-//Enables UPDATE_DISCONNECTED behavior just for population of libuv
-FETCHCONTENT_UPDATES_DISCONNECTED_LIBUV:BOOL=OFF
-
-//Enables UPDATE_DISCONNECTED behavior just for population of mimalloc
-FETCHCONTENT_UPDATES_DISCONNECTED_MIMALLOC:BOOL=OFF
-
-//Enables UPDATE_DISCONNECTED behavior just for population of simdjson
-FETCHCONTENT_UPDATES_DISCONNECTED_SIMDJSON:BOOL=OFF
-
-//Enables UPDATE_DISCONNECTED behavior just for population of zstd
-FETCHCONTENT_UPDATES_DISCONNECTED_ZSTD:BOOL=OFF
-
-//Path to a program.
-GITCOMMAND:FILEPATH=/usr/bin/git
 
 //Git command line client
 GIT_EXECUTABLE:FILEPATH=/usr/bin/git
 
-//Build shared lib
-LIBUV_BUILD_SHARED:BOOL=ON
-
-//Command to build the project
-MAKECOMMAND:STRING=/opt/homebrew/bin/cmake --build . --config "${CTEST_CONFIGURATION_TYPE}"
-
-//Path to the memory checking command, used for memory error detection.
-MEMORYCHECK_COMMAND:FILEPATH=MEMORYCHECK_COMMAND-NOTFOUND
-
-//File that contains suppressions for the memory checker
-MEMORYCHECK_SUPPRESSIONS_FILE:FILEPATH=
-
-//Build object library
-MI_BUILD_OBJECT:BOOL=ON
-
-//Use full internal invariant checking in DEBUG mode (deprecated,
-// use MI_DEBUG_FULL instead)
-MI_CHECK_FULL:BOOL=OFF
-
-//Use full internal heap invariant checking in DEBUG mode (expensive)
-MI_DEBUG_FULL:BOOL=OFF
-
-//Build with thread sanitizer (needs clang)
-MI_DEBUG_TSAN:BOOL=OFF
-
-//Build with undefined-behavior sanitizer (needs clang++)
-MI_DEBUG_UBSAN:BOOL=OFF
-
-//Install directly into $CMAKE_INSTALL_PREFIX instead of PREFIX/lib/mimalloc-version
-MI_INSTALL_TOPLEVEL:BOOL=OFF
-
-//Set this when linking with musl libc
-MI_LIBC_MUSL:BOOL=OFF
+//Use Abseil and RE2. Requires Abseil and RE2 to be separately
+// added to the build.
+GTEST_HAS_ABSL:BOOL=OFF
 
 //Path to a library.
-MI_LIBPATH:FILEPATH=MI_LIBPATH-NOTFOUND
-
-//Use slightly slower, dlopen-compatible TLS mechanism (Unix)
-MI_LOCAL_DYNAMIC_TLS:BOOL=OFF
-
-//Force no use of padding even in DEBUG mode etc.
-MI_NO_PADDING:BOOL=OFF
-
-//Disable transparent huge pages support on Linux/Android for the
-// mimalloc process only
-MI_NO_THP:BOOL=OFF
-
-//Use interpose to override standard malloc on macOS
-MI_OSX_INTERPOSE:BOOL=ON
-
-//Use malloc zone to override standard malloc on macOS
-MI_OSX_ZONE:BOOL=ON
-
-//Override the standard malloc interface (e.g. define entry points
-// for malloc() etc)
-MI_OVERRIDE:BOOL=ON
-
-//Enable padding to detect heap block overflow (always on in DEBUG
-// or SECURE mode, or with Valgrind/ASAN)
-MI_PADDING:BOOL=OFF
-
-//Use full security mitigations (like guard pages, allocation randomization,
-// double-free mitigation, and free-list corruption detection)
-MI_SECURE:BOOL=OFF
-
-//Generate assembly files
-MI_SEE_ASM:BOOL=OFF
-
-//Show error and warning messages by default (only enabled by default
-// in DEBUG mode)
-MI_SHOW_ERRORS:BOOL=OFF
-
-//Skip collecting memory on program exit
-MI_SKIP_COLLECT_ON_EXIT:BOOL=OFF
-
-//Compile with address sanitizer support (adds a small overhead)
-MI_TRACK_ASAN:BOOL=OFF
-
-//Compile with Windows event tracing (ETW) support (adds a small
-// overhead)
-MI_TRACK_ETW:BOOL=OFF
-
-//Compile with Valgrind support (adds a small overhead)
-MI_TRACK_VALGRIND:BOOL=OFF
-
-//Use the C++ compiler to compile the library (instead of the C
-// compiler)
-MI_USE_CXX:BOOL=OFF
-
-//Explicitly link with -latomic (on older systems) (deprecated
-// and detected automatically)
-MI_USE_LIBATOMIC:BOOL=OFF
-
-//Use redirection module ('mimalloc-redirect') on Windows if compiling
-// mimalloc as a DLL
-MI_WIN_REDIRECT:BOOL=ON
-
-//Enable abort() call on memory allocation failure by default
-MI_XMALLOC:BOOL=OFF
-
-//Enable MemorySanitizer (MSan)
-MSAN:BOOL=OFF
-
-//Path to a library.
-OPENSSL_CRYPTO_LIBRARY:FILEPATH=/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.dylib
+OPENSSL_CRYPTO_LIBRARY:FILEPATH=/opt/homebrew/Cellar/openssl@3/3.6.0/lib/libcrypto.dylib
 
 //Path to a file.
-OPENSSL_INCLUDE_DIR:PATH=/opt/homebrew/Cellar/openssl@3/3.5.2/include
+OPENSSL_INCLUDE_DIR:PATH=/opt/homebrew/Cellar/openssl@3/3.6.0/include
 
 //Path to a library.
-OPENSSL_SSL_LIBRARY:FILEPATH=/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.dylib
+OPENSSL_SSL_LIBRARY:FILEPATH=/opt/homebrew/Cellar/openssl@3/3.6.0/lib/libssl.dylib
 
 //Arguments to supply to pkg-config
 PKG_CONFIG_ARGN:STRING=
@@ -553,9 +462,6 @@ PostgreSQL_LIBRARY_RELEASE:FILEPATH=/opt/homebrew/lib/postgresql@14/libpq.dylib
 // directory containing the PostgreSQL include directories. E.g
 // /usr/local/include/PostgreSQL/8.4 or C:/Program Files/PostgreSQL/8.4/include
 PostgreSQL_TYPE_INCLUDE_DIR:PATH=/opt/homebrew/include/postgresql@14/server
-
-//build for qemu
-QEMU:BOOL=OFF
 
 //Enable AVX-512 instructions (only affects processors and compilers
 // with AVX-512 support).
@@ -663,14 +569,14 @@ SIMDJSON_VERBOSE_LOGGING:BOOL=OFF
 // for easier profiling inside tools like VTune
 SIMDJSON_VISUAL_STUDIO_BUILD_WITH_DEBUG_INFO_FOR_PROFILING:BOOL=OFF
 
-//Name of the computer/site where compile is being run
-SITE:STRING=Bens-MacBook-Pro-3.local
+//Value Computed by CMake
+benchmark_BINARY_DIR:STATIC=/Users/bengamble/FasterAPI/build/_deps/benchmark-build
 
-//Enable ThreadSanitizer (TSan)
-TSAN:BOOL=OFF
+//Value Computed by CMake
+benchmark_IS_TOP_LEVEL:STATIC=OFF
 
-//Enable UndefinedBehaviorSanitizer (UBSan)
-UBSAN:BOOL=OFF
+//Value Computed by CMake
+benchmark_SOURCE_DIR:STATIC=/Users/bengamble/FasterAPI/build/cpm-cache/benchmark/6ab6f9ea5fa3003095935f1af4b6b363c23ce9d7
 
 //Value Computed by CMake
 fasterapi_BINARY_DIR:STATIC=/Users/bengamble/FasterAPI/build
@@ -682,28 +588,55 @@ fasterapi_IS_TOP_LEVEL:STATIC=ON
 fasterapi_SOURCE_DIR:STATIC=/Users/bengamble/FasterAPI
 
 //Value Computed by CMake
-libmimalloc_BINARY_DIR:STATIC=/Users/bengamble/FasterAPI/build/_deps/mimalloc-build
+gmock_BINARY_DIR:STATIC=/Users/bengamble/FasterAPI/build/_deps/googletest-build/googlemock
 
 //Value Computed by CMake
-libmimalloc_IS_TOP_LEVEL:STATIC=OFF
+gmock_IS_TOP_LEVEL:STATIC=OFF
 
 //Value Computed by CMake
-libmimalloc_SOURCE_DIR:STATIC=/Users/bengamble/FasterAPI/build/cpm-cache/mimalloc/72f0d2cb40cc97ffde9214409da7eaed994d09ec
+gmock_SOURCE_DIR:STATIC=/Users/bengamble/FasterAPI/build/cpm-cache/googletest/9b33dc2441e2da8f3c6ddb3d202ec097d87a0994/googlemock
+
+//Build all of Google Mock's own tests.
+gmock_build_tests:BOOL=OFF
 
 //Value Computed by CMake
-libuv_BINARY_DIR:STATIC=/Users/bengamble/FasterAPI/build/_deps/libuv-build
+googletest-distribution_BINARY_DIR:STATIC=/Users/bengamble/FasterAPI/build/_deps/googletest-build
 
 //Value Computed by CMake
-libuv_IS_TOP_LEVEL:STATIC=OFF
+googletest-distribution_IS_TOP_LEVEL:STATIC=OFF
 
 //Value Computed by CMake
-libuv_SOURCE_DIR:STATIC=/Users/bengamble/FasterAPI/build/cpm-cache/libuv/0fdf53e314c00b21e3a18653959403e1fdb56ee9
+googletest-distribution_SOURCE_DIR:STATIC=/Users/bengamble/FasterAPI/build/cpm-cache/googletest/9b33dc2441e2da8f3c6ddb3d202ec097d87a0994
+
+//Value Computed by CMake
+gtest_BINARY_DIR:STATIC=/Users/bengamble/FasterAPI/build/_deps/googletest-build/googletest
+
+//Value Computed by CMake
+gtest_IS_TOP_LEVEL:STATIC=OFF
+
+//Value Computed by CMake
+gtest_SOURCE_DIR:STATIC=/Users/bengamble/FasterAPI/build/cpm-cache/googletest/9b33dc2441e2da8f3c6ddb3d202ec097d87a0994/googletest
+
+//Build gtest's sample programs.
+gtest_build_samples:BOOL=OFF
+
+//Build all of gtest's own tests.
+gtest_build_tests:BOOL=OFF
+
+//Disable uses of pthreads in gtest.
+gtest_disable_pthreads:BOOL=OFF
+
+//Build gtest with internal symbols hidden in shared libraries.
+gtest_hide_internal_symbols:BOOL=OFF
 
 //Path to a library.
-pkgcfg_lib__OPENSSL_crypto:FILEPATH=/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.dylib
+pkgcfg_lib_ZMQ_zmq:FILEPATH=/opt/homebrew/Cellar/zeromq/4.3.5_2/lib/libzmq.dylib
 
 //Path to a library.
-pkgcfg_lib__OPENSSL_ssl:FILEPATH=/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.dylib
+pkgcfg_lib__OPENSSL_crypto:FILEPATH=/opt/homebrew/Cellar/openssl@3/3.6.0/lib/libcrypto.dylib
+
+//Path to a library.
+pkgcfg_lib__OPENSSL_ssl:FILEPATH=/opt/homebrew/Cellar/openssl@3/3.6.0/lib/libssl.dylib
 
 //Value Computed by CMake
 simdjson_BINARY_DIR:STATIC=/Users/bengamble/FasterAPI/build/_deps/simdjson-build
@@ -714,17 +647,17 @@ simdjson_IS_TOP_LEVEL:STATIC=OFF
 //Value Computed by CMake
 simdjson_SOURCE_DIR:STATIC=/Users/bengamble/FasterAPI/build/cpm-cache/simdjson/e2872dae246ae21201588fe57bc477e26fdade81
 
-//Dependencies for the target
-uv_LIB_DEPENDS:STATIC=general;pthread;
-
-//Dependencies for the target
-uv_a_LIB_DEPENDS:STATIC=general;pthread;
-
 
 ########################
 # INTERNAL cache entries
 ########################
 
+//ADVANCED property for variable: BENCHMARK_CXX_FLAGS_COVERAGE
+BENCHMARK_CXX_FLAGS_COVERAGE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: BENCHMARK_EXE_LINKER_FLAGS_COVERAGE
+BENCHMARK_EXE_LINKER_FLAGS_COVERAGE-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: BENCHMARK_SHARED_LINKER_FLAGS_COVERAGE
+BENCHMARK_SHARED_LINKER_FLAGS_COVERAGE-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_ADDR2LINE
 CMAKE_ADDR2LINE-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_AR
@@ -737,12 +670,12 @@ CMAKE_CACHE_MAJOR_VERSION:INTERNAL=4
 CMAKE_CACHE_MINOR_VERSION:INTERNAL=1
 //Patch version of cmake used to create the current loaded cache
 CMAKE_CACHE_PATCH_VERSION:INTERNAL=1
+//ADVANCED property for variable: CMAKE_COLOR_MAKEFILE
+CMAKE_COLOR_MAKEFILE-ADVANCED:INTERNAL=1
 //Path to CMake executable.
 CMAKE_COMMAND:INTERNAL=/opt/homebrew/bin/cmake
 //Path to cpack program executable.
 CMAKE_CPACK_COMMAND:INTERNAL=/opt/homebrew/bin/cpack
-//ADVANCED property for variable: CMAKE_CTEST_COMMAND
-CMAKE_CTEST_COMMAND-ADVANCED:INTERNAL=1
 //Path to ctest program executable.
 CMAKE_CTEST_COMMAND:INTERNAL=/opt/homebrew/bin/ctest
 //ADVANCED property for variable: CMAKE_CXX_COMPILER
@@ -785,14 +718,12 @@ CMAKE_EXE_LINKER_FLAGS_MINSIZEREL-ADVANCED:INTERNAL=1
 CMAKE_EXE_LINKER_FLAGS_RELEASE-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO
 CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
-//ADVANCED property for variable: CMAKE_EXPORT_BUILD_DATABASE
-CMAKE_EXPORT_BUILD_DATABASE-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_EXPORT_COMPILE_COMMANDS
 CMAKE_EXPORT_COMPILE_COMMANDS-ADVANCED:INTERNAL=1
 //Name of external makefile project generator.
 CMAKE_EXTRA_GENERATOR:INTERNAL=
 //Name of generator.
-CMAKE_GENERATOR:INTERNAL=Ninja
+CMAKE_GENERATOR:INTERNAL=Unix Makefiles
 //Generator instance identifier.
 CMAKE_GENERATOR_INSTANCE:INTERNAL=
 //Name of generator platform.
@@ -857,7 +788,7 @@ CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_NM
 CMAKE_NM-ADVANCED:INTERNAL=1
 //number of local generators
-CMAKE_NUMBER_OF_MAKEFILES:INTERNAL=4
+CMAKE_NUMBER_OF_MAKEFILES:INTERNAL=7
 //ADVANCED property for variable: CMAKE_OBJCOPY
 CMAKE_OBJCOPY-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_OBJDUMP
@@ -902,24 +833,32 @@ CMAKE_TAPI-ADVANCED:INTERNAL=1
 CMAKE_UNAME:INTERNAL=/usr/bin/uname
 //ADVANCED property for variable: CMAKE_VERBOSE_MAKEFILE
 CMAKE_VERBOSE_MAKEFILE-ADVANCED:INTERNAL=1
-//ADVANCED property for variable: COVERAGE_COMMAND
-COVERAGE_COMMAND-ADVANCED:INTERNAL=1
-//ADVANCED property for variable: COVERAGE_EXTRA_FLAGS
-COVERAGE_EXTRA_FLAGS-ADVANCED:INTERNAL=1
+//Result of TRY_COMPILE
+COMPILE_HAVE_GNU_POSIX_REGEX:INTERNAL=FALSE
+//Result of TRY_COMPILE
+COMPILE_HAVE_POSIX_REGEX:INTERNAL=TRUE
+//Result of TRY_COMPILE
+COMPILE_HAVE_PTHREAD_AFFINITY:INTERNAL=FALSE
+//Result of TRY_COMPILE
+COMPILE_HAVE_STD_REGEX:INTERNAL=TRUE
+//Result of TRY_COMPILE
+COMPILE_HAVE_STEADY_CLOCK:INTERNAL=TRUE
+//Result of TRY_COMPILE
+COMPILE_HAVE_THREAD_SAFETY_ATTRIBUTES:INTERNAL=TRUE
 CPM_DIRECTORY:INTERNAL=/Users/bengamble/FasterAPI/build/cmake
 //Don't download or configure dependencies (for testing)
 CPM_DRY_RUN:INTERNAL=OFF
 CPM_FILE:INTERNAL=/Users/bengamble/FasterAPI/build/cmake/CPM_0.38.7.cmake
 CPM_INDENT:INTERNAL=CPM:
 CPM_MODULE_PATH:INTERNAL=/Users/bengamble/FasterAPI/build/CPM_modules
-CPM_PACKAGES:INTERNAL=mimalloc;libuv;simdjson;zstd
+CPM_PACKAGES:INTERNAL=simdjson;zstd;googletest;benchmark
 CPM_PACKAGE_LOCK_FILE:INTERNAL=/Users/bengamble/FasterAPI/build/cpm-package-lock.cmake
-CPM_PACKAGE_libuv_BINARY_DIR:INTERNAL=/Users/bengamble/FasterAPI/build/_deps/libuv-build
-CPM_PACKAGE_libuv_SOURCE_DIR:INTERNAL=/Users/bengamble/FasterAPI/build/cpm-cache/libuv/0fdf53e314c00b21e3a18653959403e1fdb56ee9
-CPM_PACKAGE_libuv_VERSION:INTERNAL=1.49.2
-CPM_PACKAGE_mimalloc_BINARY_DIR:INTERNAL=/Users/bengamble/FasterAPI/build/_deps/mimalloc-build
-CPM_PACKAGE_mimalloc_SOURCE_DIR:INTERNAL=/Users/bengamble/FasterAPI/build/cpm-cache/mimalloc/72f0d2cb40cc97ffde9214409da7eaed994d09ec
-CPM_PACKAGE_mimalloc_VERSION:INTERNAL=2.1.7
+CPM_PACKAGE_benchmark_BINARY_DIR:INTERNAL=/Users/bengamble/FasterAPI/build/_deps/benchmark-build
+CPM_PACKAGE_benchmark_SOURCE_DIR:INTERNAL=/Users/bengamble/FasterAPI/build/cpm-cache/benchmark/6ab6f9ea5fa3003095935f1af4b6b363c23ce9d7
+CPM_PACKAGE_benchmark_VERSION:INTERNAL=1.8.3
+CPM_PACKAGE_googletest_BINARY_DIR:INTERNAL=/Users/bengamble/FasterAPI/build/_deps/googletest-build
+CPM_PACKAGE_googletest_SOURCE_DIR:INTERNAL=/Users/bengamble/FasterAPI/build/cpm-cache/googletest/9b33dc2441e2da8f3c6ddb3d202ec097d87a0994
+CPM_PACKAGE_googletest_VERSION:INTERNAL=1.14.0
 CPM_PACKAGE_simdjson_BINARY_DIR:INTERNAL=/Users/bengamble/FasterAPI/build/_deps/simdjson-build
 CPM_PACKAGE_simdjson_SOURCE_DIR:INTERNAL=/Users/bengamble/FasterAPI/build/cpm-cache/simdjson/e2872dae246ae21201588fe57bc477e26fdade81
 CPM_PACKAGE_simdjson_VERSION:INTERNAL=3.10.1
@@ -927,37 +866,56 @@ CPM_PACKAGE_zstd_BINARY_DIR:INTERNAL=/Users/bengamble/FasterAPI/build/_deps/zstd
 CPM_PACKAGE_zstd_SOURCE_DIR:INTERNAL=/Users/bengamble/FasterAPI/build/cpm-cache/zstd/5375622b5fd73dea578f509561685c3376dce674
 CPM_PACKAGE_zstd_VERSION:INTERNAL=1.5.6
 CPM_VERSION:INTERNAL=0.38.7
-//ADVANCED property for variable: CTEST_SUBMIT_RETRY_COUNT
-CTEST_SUBMIT_RETRY_COUNT-ADVANCED:INTERNAL=1
-//ADVANCED property for variable: CTEST_SUBMIT_RETRY_DELAY
-CTEST_SUBMIT_RETRY_DELAY-ADVANCED:INTERNAL=1
-//ADVANCED property for variable: DART_TESTING_TIMEOUT
-DART_TESTING_TIMEOUT-ADVANCED:INTERNAL=1
 //Details about finding Git
-FIND_PACKAGE_MESSAGE_DETAILS_Git:INTERNAL=[/usr/bin/git][v2.39.5 (Apple Git-154)()]
+FIND_PACKAGE_MESSAGE_DETAILS_Git:INTERNAL=[/usr/bin/git][v2.50.1 (Apple Git-155)()]
 //Details about finding OpenSSL
-FIND_PACKAGE_MESSAGE_DETAILS_OpenSSL:INTERNAL=[/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.dylib][/opt/homebrew/Cellar/openssl@3/3.5.2/include][ ][v3.5.2()]
+FIND_PACKAGE_MESSAGE_DETAILS_OpenSSL:INTERNAL=[/opt/homebrew/Cellar/openssl@3/3.6.0/lib/libcrypto.dylib][/opt/homebrew/Cellar/openssl@3/3.6.0/include][ ][v3.6.0()]
 //Details about finding Python3
-FIND_PACKAGE_MESSAGE_DETAILS_Python3:INTERNAL=[/opt/homebrew/opt/python@3.13/Frameworks/Python.framework/Versions/3.13/include/python3.13][/opt/homebrew/opt/python@3.13/Frameworks/Python.framework/Versions/3.13/lib/libpython3.13.dylib][found components: Development Development.Module Development.Embed ][v3.13.7()]
+FIND_PACKAGE_MESSAGE_DETAILS_Python3:INTERNAL=[/opt/homebrew/Frameworks/Python.framework/Versions/3.13/bin/python3.13][found components: Interpreter ][v3.13.7()]
 //Details about finding Threads
 FIND_PACKAGE_MESSAGE_DETAILS_Threads:INTERNAL=[TRUE][v()]
-//ADVANCED property for variable: GITCOMMAND
-GITCOMMAND-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: GIT_EXECUTABLE
 GIT_EXECUTABLE-ADVANCED:INTERNAL=1
+//Test HAVE_CXX_FLAG_COVERAGE
+HAVE_CXX_FLAG_COVERAGE:INTERNAL=1
+//Test HAVE_CXX_FLAG_FSTRICT_ALIASING
+HAVE_CXX_FLAG_FSTRICT_ALIASING:INTERNAL=1
+//Test HAVE_CXX_FLAG_PEDANTIC
+HAVE_CXX_FLAG_PEDANTIC:INTERNAL=1
+//Test HAVE_CXX_FLAG_PEDANTIC_ERRORS
+HAVE_CXX_FLAG_PEDANTIC_ERRORS:INTERNAL=1
+//Test HAVE_CXX_FLAG_WALL
+HAVE_CXX_FLAG_WALL:INTERNAL=1
+//Test HAVE_CXX_FLAG_WD654
+HAVE_CXX_FLAG_WD654:INTERNAL=
+//Test HAVE_CXX_FLAG_WERROR
+HAVE_CXX_FLAG_WERROR:INTERNAL=1
+//Test HAVE_CXX_FLAG_WEXTRA
+HAVE_CXX_FLAG_WEXTRA:INTERNAL=1
+//Test HAVE_CXX_FLAG_WFLOAT_EQUAL
+HAVE_CXX_FLAG_WFLOAT_EQUAL:INTERNAL=1
+//Test HAVE_CXX_FLAG_WNO_DEPRECATED
+HAVE_CXX_FLAG_WNO_DEPRECATED:INTERNAL=1
+//Test HAVE_CXX_FLAG_WNO_DEPRECATED_DECLARATIONS
+HAVE_CXX_FLAG_WNO_DEPRECATED_DECLARATIONS:INTERNAL=1
+//Test HAVE_CXX_FLAG_WOLD_STYLE_CAST
+HAVE_CXX_FLAG_WOLD_STYLE_CAST:INTERNAL=1
+//Test HAVE_CXX_FLAG_WSHADOW
+HAVE_CXX_FLAG_WSHADOW:INTERNAL=1
+//Test HAVE_CXX_FLAG_WSHORTEN_64_TO_32
+HAVE_CXX_FLAG_WSHORTEN_64_TO_32:INTERNAL=1
+//Test HAVE_CXX_FLAG_WSTRICT_ALIASING
+HAVE_CXX_FLAG_WSTRICT_ALIASING:INTERNAL=1
+//Test HAVE_CXX_FLAG_WSUGGEST_OVERRIDE
+HAVE_CXX_FLAG_WSUGGEST_OVERRIDE:INTERNAL=1
+//Test HAVE_CXX_FLAG_WTHREAD_SAFETY
+HAVE_CXX_FLAG_WTHREAD_SAFETY:INTERNAL=1
+//Have library rt
+HAVE_LIB_RT:INTERNAL=
 //Have symbol fork
 HAVE_POSIX_FORK:INTERNAL=1
 //Have symbol wait
 HAVE_POSIX_WAIT:INTERNAL=1
-//Build the unit tests when BUILD_TESTING is enabled and we are
-// the root project
-LIBUV_BUILD_TESTS:INTERNAL=OFF
-//ADVANCED property for variable: MAKECOMMAND
-MAKECOMMAND-ADVANCED:INTERNAL=1
-//ADVANCED property for variable: MEMORYCHECK_COMMAND
-MEMORYCHECK_COMMAND-ADVANCED:INTERNAL=1
-//ADVANCED property for variable: MEMORYCHECK_SUPPRESSIONS_FILE
-MEMORYCHECK_SUPPRESSIONS_FILE-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: OPENSSL_CRYPTO_LIBRARY
 OPENSSL_CRYPTO_LIBRARY-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: OPENSSL_INCLUDE_DIR
@@ -976,6 +934,14 @@ PostgreSQL_LIBRARY_DEBUG-ADVANCED:INTERNAL=1
 PostgreSQL_LIBRARY_RELEASE-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: PostgreSQL_TYPE_INCLUDE_DIR
 PostgreSQL_TYPE_INCLUDE_DIR-ADVANCED:INTERNAL=1
+//Result of try_run()
+RUN_HAVE_POSIX_REGEX:INTERNAL=0
+//Result of try_run()
+RUN_HAVE_STD_REGEX:INTERNAL=0
+//Result of try_run()
+RUN_HAVE_STEADY_CLOCK:INTERNAL=0
+//Result of try_run()
+RUN_HAVE_THREAD_SAFETY_ATTRIBUTES:INTERNAL=0
 //ADVANCED property for variable: SIMDJSON_IMPLEMENTATION_ARM64
 SIMDJSON_IMPLEMENTATION_ARM64-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: SIMDJSON_IMPLEMENTATION_FALLBACK
@@ -990,77 +956,74 @@ SIMDJSON_IMPLEMENTATION_PPC64-ADVANCED:INTERNAL=1
 SIMDJSON_IMPLEMENTATION_WESTMERE-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: SIMDJSON_INSTALL_CMAKEDIR
 SIMDJSON_INSTALL_CMAKEDIR-ADVANCED:INTERNAL=1
-//ADVANCED property for variable: SITE
-SITE-ADVANCED:INTERNAL=1
-//Test UV_F_STRICT_ALIASING
-UV_F_STRICT_ALIASING:INTERNAL=1
-//Test UV_LINT_EXTRA
-UV_LINT_EXTRA:INTERNAL=1
-//Test UV_LINT_NO_CONDITIONAL_ASSIGNMENT_MSVC
-UV_LINT_NO_CONDITIONAL_ASSIGNMENT_MSVC:INTERNAL=
-//Test UV_LINT_NO_CONDITIONAL_CONSTANT_MSVC
-UV_LINT_NO_CONDITIONAL_CONSTANT_MSVC:INTERNAL=
-//Test UV_LINT_NO_HIDES_GLOBAL
-UV_LINT_NO_HIDES_GLOBAL:INTERNAL=
-//Test UV_LINT_NO_HIDES_LOCAL
-UV_LINT_NO_HIDES_LOCAL:INTERNAL=
-//Test UV_LINT_NO_HIDES_PARAM
-UV_LINT_NO_HIDES_PARAM:INTERNAL=
-//Test UV_LINT_NO_NONSTANDARD_EMPTY_TU_MSVC
-UV_LINT_NO_NONSTANDARD_EMPTY_TU_MSVC:INTERNAL=
-//Test UV_LINT_NO_NONSTANDARD_FILE_SCOPE_MSVC
-UV_LINT_NO_NONSTANDARD_FILE_SCOPE_MSVC:INTERNAL=
-//Test UV_LINT_NO_NONSTANDARD_MSVC
-UV_LINT_NO_NONSTANDARD_MSVC:INTERNAL=
-//Test UV_LINT_NO_NONSTANDARD_NONSTATIC_DLIMPORT_MSVC
-UV_LINT_NO_NONSTANDARD_NONSTATIC_DLIMPORT_MSVC:INTERNAL=
-//Test UV_LINT_NO_UNSAFE_MSVC
-UV_LINT_NO_UNSAFE_MSVC:INTERNAL=
-//Test UV_LINT_NO_UNUSED_PARAMETER
-UV_LINT_NO_UNUSED_PARAMETER:INTERNAL=1
-//Test UV_LINT_NO_UNUSED_PARAMETER_MSVC
-UV_LINT_NO_UNUSED_PARAMETER_MSVC:INTERNAL=
-//Test UV_LINT_STRICT_PROTOTYPES
-UV_LINT_STRICT_PROTOTYPES:INTERNAL=1
-//Test UV_LINT_UTF8_MSVC
-UV_LINT_UTF8_MSVC:INTERNAL=
-//Test UV_LINT_W4
-UV_LINT_W4:INTERNAL=
-//Test UV_LINT_WALL
-UV_LINT_WALL:INTERNAL=1
+ZMQ_CFLAGS:INTERNAL=-I/opt/homebrew/Cellar/zeromq/4.3.5_2/include;-DZMQ_BUILD_DRAFT_API=1;-I/opt/homebrew/Cellar/libsodium/1.0.20/include
+ZMQ_CFLAGS_I:INTERNAL=
+ZMQ_CFLAGS_OTHER:INTERNAL=-DZMQ_BUILD_DRAFT_API=1
+ZMQ_FOUND:INTERNAL=1
+ZMQ_INCLUDEDIR:INTERNAL=/opt/homebrew/Cellar/zeromq/4.3.5_2/include
+ZMQ_INCLUDE_DIRS:INTERNAL=/opt/homebrew/Cellar/zeromq/4.3.5_2/include;/opt/homebrew/Cellar/libsodium/1.0.20/include
+ZMQ_LDFLAGS:INTERNAL=-L/opt/homebrew/Cellar/zeromq/4.3.5_2/lib;-lzmq
+ZMQ_LDFLAGS_OTHER:INTERNAL=
+ZMQ_LIBDIR:INTERNAL=/opt/homebrew/Cellar/zeromq/4.3.5_2/lib
+ZMQ_LIBRARIES:INTERNAL=zmq
+ZMQ_LIBRARY_DIRS:INTERNAL=/opt/homebrew/Cellar/zeromq/4.3.5_2/lib
+ZMQ_LIBS:INTERNAL=
+ZMQ_LIBS_L:INTERNAL=
+ZMQ_LIBS_OTHER:INTERNAL=
+ZMQ_LIBS_PATHS:INTERNAL=
+ZMQ_MODULE_NAME:INTERNAL=libzmq
+ZMQ_PREFIX:INTERNAL=/opt/homebrew/Cellar/zeromq/4.3.5_2
+ZMQ_STATIC_CFLAGS:INTERNAL=-I/opt/homebrew/Cellar/zeromq/4.3.5_2/include;-DZMQ_BUILD_DRAFT_API=1;-I/opt/homebrew/Cellar/libsodium/1.0.20/include
+ZMQ_STATIC_CFLAGS_I:INTERNAL=
+ZMQ_STATIC_CFLAGS_OTHER:INTERNAL=-DZMQ_BUILD_DRAFT_API=1
+ZMQ_STATIC_INCLUDE_DIRS:INTERNAL=/opt/homebrew/Cellar/zeromq/4.3.5_2/include;/opt/homebrew/Cellar/libsodium/1.0.20/include
+ZMQ_STATIC_LDFLAGS:INTERNAL=-L/opt/homebrew/Cellar/zeromq/4.3.5_2/lib;-lzmq;-lstdc++;-lpthread;-L/opt/homebrew/Cellar/libsodium/1.0.20/lib;-lsodium;-lpthread;-pthread
+ZMQ_STATIC_LDFLAGS_OTHER:INTERNAL=-pthread
+ZMQ_STATIC_LIBDIR:INTERNAL=
+ZMQ_STATIC_LIBRARIES:INTERNAL=zmq;stdc++;pthread;sodium;pthread
+ZMQ_STATIC_LIBRARY_DIRS:INTERNAL=/opt/homebrew/Cellar/zeromq/4.3.5_2/lib;/opt/homebrew/Cellar/libsodium/1.0.20/lib
+ZMQ_STATIC_LIBS:INTERNAL=
+ZMQ_STATIC_LIBS_L:INTERNAL=
+ZMQ_STATIC_LIBS_OTHER:INTERNAL=
+ZMQ_STATIC_LIBS_PATHS:INTERNAL=
+ZMQ_VERSION:INTERNAL=4.3.5
+ZMQ_libzmq_INCLUDEDIR:INTERNAL=
+ZMQ_libzmq_LIBDIR:INTERNAL=
+ZMQ_libzmq_PREFIX:INTERNAL=
+ZMQ_libzmq_VERSION:INTERNAL=
 //CMAKE_INSTALL_PREFIX during last run
 _GNUInstallDirs_LAST_CMAKE_INSTALL_PREFIX:INTERNAL=/usr/local
-_OPENSSL_CFLAGS:INTERNAL=-I/opt/homebrew/Cellar/openssl@3/3.5.2/include
+_OPENSSL_CFLAGS:INTERNAL=-I/opt/homebrew/Cellar/openssl@3/3.6.0/include
 _OPENSSL_CFLAGS_I:INTERNAL=
 _OPENSSL_CFLAGS_OTHER:INTERNAL=
 _OPENSSL_FOUND:INTERNAL=1
-_OPENSSL_INCLUDEDIR:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.5.2/include
-_OPENSSL_INCLUDE_DIRS:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.5.2/include
-_OPENSSL_LDFLAGS:INTERNAL=-L/opt/homebrew/Cellar/openssl@3/3.5.2/lib;-lssl;-lcrypto
+_OPENSSL_INCLUDEDIR:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.6.0/include
+_OPENSSL_INCLUDE_DIRS:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.6.0/include
+_OPENSSL_LDFLAGS:INTERNAL=-L/opt/homebrew/Cellar/openssl@3/3.6.0/lib;-lssl;-lcrypto
 _OPENSSL_LDFLAGS_OTHER:INTERNAL=
-_OPENSSL_LIBDIR:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.5.2/lib
+_OPENSSL_LIBDIR:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.6.0/lib
 _OPENSSL_LIBRARIES:INTERNAL=ssl;crypto
-_OPENSSL_LIBRARY_DIRS:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.5.2/lib
+_OPENSSL_LIBRARY_DIRS:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.6.0/lib
 _OPENSSL_LIBS:INTERNAL=
 _OPENSSL_LIBS_L:INTERNAL=
 _OPENSSL_LIBS_OTHER:INTERNAL=
 _OPENSSL_LIBS_PATHS:INTERNAL=
 _OPENSSL_MODULE_NAME:INTERNAL=openssl
-_OPENSSL_PREFIX:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.5.2
-_OPENSSL_STATIC_CFLAGS:INTERNAL=-I/opt/homebrew/Cellar/openssl@3/3.5.2/include
+_OPENSSL_PREFIX:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.6.0
+_OPENSSL_STATIC_CFLAGS:INTERNAL=-I/opt/homebrew/Cellar/openssl@3/3.6.0/include
 _OPENSSL_STATIC_CFLAGS_I:INTERNAL=
 _OPENSSL_STATIC_CFLAGS_OTHER:INTERNAL=
-_OPENSSL_STATIC_INCLUDE_DIRS:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.5.2/include
-_OPENSSL_STATIC_LDFLAGS:INTERNAL=-L/opt/homebrew/Cellar/openssl@3/3.5.2/lib;-lssl;-lcrypto
+_OPENSSL_STATIC_INCLUDE_DIRS:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.6.0/include
+_OPENSSL_STATIC_LDFLAGS:INTERNAL=-L/opt/homebrew/Cellar/openssl@3/3.6.0/lib;-lssl;-lcrypto
 _OPENSSL_STATIC_LDFLAGS_OTHER:INTERNAL=
 _OPENSSL_STATIC_LIBDIR:INTERNAL=
 _OPENSSL_STATIC_LIBRARIES:INTERNAL=ssl;crypto
-_OPENSSL_STATIC_LIBRARY_DIRS:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.5.2/lib
+_OPENSSL_STATIC_LIBRARY_DIRS:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.6.0/lib
 _OPENSSL_STATIC_LIBS:INTERNAL=
 _OPENSSL_STATIC_LIBS_L:INTERNAL=
 _OPENSSL_STATIC_LIBS_OTHER:INTERNAL=
 _OPENSSL_STATIC_LIBS_PATHS:INTERNAL=
-_OPENSSL_VERSION:INTERNAL=3.5.2
+_OPENSSL_VERSION:INTERNAL=3.6.0
 _OPENSSL_openssl_INCLUDEDIR:INTERNAL=
 _OPENSSL_openssl_LIBDIR:INTERNAL=
 _OPENSSL_openssl_PREFIX:INTERNAL=
@@ -1073,25 +1036,37 @@ _Python3_DEVELOPMENT_EMBED_SIGNATURE:INTERNAL=f7be4ddb80d39af4cab9e80aee3e2e24
 _Python3_DEVELOPMENT_MODULE_SIGNATURE:INTERNAL=f6dd08e312da72105b15e396ed2e273a
 //Development reason failure
 _Python3_Development_REASON_FAILURE:INTERNAL=
+//Path to a program.
+_Python3_EXECUTABLE:INTERNAL=/opt/homebrew/Frameworks/Python.framework/Versions/3.13/bin/python3.13
 //Path to a file.
 _Python3_INCLUDE_DIR:INTERNAL=/opt/homebrew/opt/python@3.13/Frameworks/Python.framework/Versions/3.13/include/python3.13
-//Interpreter reason failure
-_Python3_Interpreter_REASON_FAILURE:INTERNAL=
+//Python3 Properties
+_Python3_INTERPRETER_PROPERTIES:INTERNAL=Python;3;13;7;64;32;<none>;cpython-313-darwin;abi3;/opt/homebrew/opt/python@3.13/Frameworks/Python.framework/Versions/3.13/lib/python3.13;/opt/homebrew/opt/python@3.13/Frameworks/Python.framework/Versions/3.13/lib/python3.13;/opt/homebrew/lib/python3.13/site-packages;/opt/homebrew/lib/python3.13/site-packages
+_Python3_INTERPRETER_SIGNATURE:INTERNAL=7a1f714cc7198cb3c0d06752fabdd0bf
 //Path to a library.
 _Python3_LIBRARY_RELEASE:INTERNAL=/opt/homebrew/opt/python@3.13/Frameworks/Python.framework/Versions/3.13/lib/libpython3.13.dylib
 //NumPy reason failure
 _Python3_NumPy_REASON_FAILURE:INTERNAL=
+__pkg_config_arguments_ZMQ:INTERNAL=libzmq
 __pkg_config_arguments__OPENSSL:INTERNAL=QUIET;openssl
+__pkg_config_checked_ZMQ:INTERNAL=1
 __pkg_config_checked__OPENSSL:INTERNAL=1
-//Test mi_has_libatomic
-mi_has_libatomic:INTERNAL=
-//Test mi_has_libpthread
-mi_has_libpthread:INTERNAL=1
-//Test mi_has_librt
-mi_has_librt:INTERNAL=
+cmake_package_name:INTERNAL=GTest
+//ADVANCED property for variable: gmock_build_tests
+gmock_build_tests-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: gtest_build_samples
+gtest_build_samples-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: gtest_build_tests
+gtest_build_tests-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: gtest_disable_pthreads
+gtest_disable_pthreads-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: gtest_hide_internal_symbols
+gtest_hide_internal_symbols-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: pkgcfg_lib_ZMQ_zmq
+pkgcfg_lib_ZMQ_zmq-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: pkgcfg_lib__OPENSSL_crypto
 pkgcfg_lib__OPENSSL_crypto-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: pkgcfg_lib__OPENSSL_ssl
 pkgcfg_lib__OPENSSL_ssl-ADVANCED:INTERNAL=1
-prefix_result:INTERNAL=/opt/homebrew/Cellar/openssl@3/3.5.2/lib
+prefix_result:INTERNAL=/opt/homebrew/Cellar/zeromq/4.3.5_2/lib
 

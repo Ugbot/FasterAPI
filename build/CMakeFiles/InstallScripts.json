@@ -2,9 +2,12 @@
 	"InstallScripts" : 
 	[
 		"/Users/bengamble/FasterAPI/build/cmake_install.cmake",
-		"/Users/bengamble/FasterAPI/build/_deps/mimalloc-build/cmake_install.cmake",
-		"/Users/bengamble/FasterAPI/build/_deps/libuv-build/cmake_install.cmake",
-		"/Users/bengamble/FasterAPI/build/_deps/simdjson-build/cmake_install.cmake"
+		"/Users/bengamble/FasterAPI/build/_deps/simdjson-build/cmake_install.cmake",
+		"/Users/bengamble/FasterAPI/build/_deps/googletest-build/cmake_install.cmake",
+		"/Users/bengamble/FasterAPI/build/_deps/googletest-build/googlemock/cmake_install.cmake",
+		"/Users/bengamble/FasterAPI/build/_deps/googletest-build/googletest/cmake_install.cmake",
+		"/Users/bengamble/FasterAPI/build/_deps/benchmark-build/cmake_install.cmake",
+		"/Users/bengamble/FasterAPI/build/_deps/benchmark-build/src/cmake_install.cmake"
 	],
 	"Parallel" : false
 }

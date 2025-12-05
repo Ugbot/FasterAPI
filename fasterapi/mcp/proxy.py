@@ -14,15 +14,20 @@ import sys
 # Import Cython bindings (C++ backend)
 try:
     from .proxy_bindings import ProxyBindings
+
     _HAS_CYTHON = True
 except ImportError:
     _HAS_CYTHON = False
-    print("Warning: Cython proxy bindings not available. Run: python fasterapi/mcp/setup_proxy.py build_ext --inplace", file=sys.stderr)
+    print(
+        "Warning: Cython proxy bindings not available. Run: python fasterapi/mcp/setup_proxy.py build_ext --inplace",
+        file=sys.stderr,
+    )
 
 
 @dataclass
 class UpstreamConfig:
     """Configuration for an upstream MCP server."""
+
     name: str
     transport_type: str  # "stdio", "http", "websocket"
 
@@ -51,6 +56,7 @@ class UpstreamConfig:
 @dataclass
 class ProxyRoute:
     """Routing rule for the proxy."""
+
     upstream_name: str
 
     # Route matching (supports wildcards like "math_*")
@@ -70,6 +76,7 @@ class ProxyRoute:
 @dataclass
 class ProxyStats:
     """Proxy statistics."""
+
     total_requests: int = 0
     successful_requests: int = 0
     failed_requests: int = 0
@@ -158,7 +165,7 @@ class MCPProxy:
         enable_metrics: bool = True,
         failover_enabled: bool = True,
         circuit_breaker_enabled: bool = True,
-        circuit_breaker_threshold: int = 5
+        circuit_breaker_threshold: int = 5,
     ):
         """
         Create MCP proxy with C++ backend.
@@ -199,7 +206,7 @@ class MCPProxy:
             enable_metrics=enable_metrics,
             failover_enabled=failover_enabled,
             circuit_breaker_enabled=circuit_breaker_enabled,
-            circuit_breaker_threshold=circuit_breaker_threshold
+            circuit_breaker_threshold=circuit_breaker_threshold,
         )
 
         # Track upstreams and routes for display purposes only
@@ -227,7 +234,7 @@ class MCPProxy:
             enable_health_check=upstream.enable_health_check,
             health_check_interval_ms=upstream.health_check_interval_ms,
             max_retries=upstream.max_retries,
-            retry_delay_ms=upstream.retry_delay_ms
+            retry_delay_ms=upstream.retry_delay_ms,
         )
 
         self.upstreams.append(upstream)
@@ -247,7 +254,7 @@ class MCPProxy:
             enable_request_transform=route.enable_request_transform,
             enable_response_transform=route.enable_response_transform,
             required_scope=route.required_scope,
-            rate_limit_override=route.rate_limit_override or 0
+            rate_limit_override=route.rate_limit_override or 0,
         )
 
         self.routes.append(route)
@@ -285,7 +292,7 @@ class MCPProxy:
             min_latency_ms=stats_dict.get("min_latency_ms", 0),
             max_latency_ms=stats_dict.get("max_latency_ms", 0),
             upstream_requests=stats_dict.get("upstream_requests", {}),
-            tool_requests=stats_dict.get("tool_requests", {})
+            tool_requests=stats_dict.get("tool_requests", {}),
         )
 
     def get_upstream_health(self) -> Dict[str, bool]:
@@ -299,10 +306,7 @@ class MCPProxy:
         return json.loads(health_json)
 
     def run(
-        self,
-        transport: str = "stdio",
-        host: str = "0.0.0.0",
-        port: int = 8000
+        self, transport: str = "stdio", host: str = "0.0.0.0", port: int = 8000
     ) -> None:
         """
         Run the proxy server.
@@ -332,7 +336,10 @@ class MCPProxy:
         print(f"   Routes: {len(self.routes)}", file=sys.stderr)
         print(f"   Backend: C++ (Cython bindings)", file=sys.stderr)
         print(f"   Performance: < 2 µs proxy overhead", file=sys.stderr)
-        print(f"\n   All routing, security, and connection pooling in C++", file=sys.stderr)
+        print(
+            f"\n   All routing, security, and connection pooling in C++",
+            file=sys.stderr,
+        )
         print(f"   Press Ctrl+C to stop...\n", file=sys.stderr)
 
         # Read JSON-RPC requests from stdin, proxy through C++, write to stdout
@@ -350,11 +357,8 @@ class MCPProxy:
                     # Return error response
                     error_response = {
                         "jsonrpc": "2.0",
-                        "error": {
-                            "code": -32603,
-                            "message": str(e)
-                        },
-                        "id": None
+                        "error": {"code": -32603, "message": str(e)},
+                        "id": None,
                     }
                     print(json.dumps(error_response), flush=True)
 
@@ -363,8 +367,15 @@ class MCPProxy:
 
     def _run_http(self, host: str, port: int) -> None:
         """Run proxy on HTTP."""
-        raise NotImplementedError("HTTP transport not yet implemented")
+        # HTTP transport for proxy - similar to STDIO but with HTTP server
+        print(f"HTTP transport not fully implemented yet - use STDIO", file=sys.stderr)
+        raise NotImplementedError("HTTP transport for proxy not yet implemented")
 
     def _run_websocket(self, host: str, port: int) -> None:
         """Run proxy on WebSocket."""
-        raise NotImplementedError("WebSocket transport not yet implemented")
+        # WebSocket transport for proxy - similar to STDIO but with WebSocket server
+        print(
+            f"WebSocket transport not fully implemented yet - use STDIO",
+            file=sys.stderr,
+        )
+        raise NotImplementedError("WebSocket transport for proxy not yet implemented")

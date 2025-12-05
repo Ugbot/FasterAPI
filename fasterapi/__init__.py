@@ -17,7 +17,7 @@ Features:
 from typing import Any, Callable, Dict, List, Optional, Union
 from .http import Server as HttpServer
 from .http import Request, Response, WebSocket
-from .http.sse import SSEConnection, SSEResponse
+from .http.sse import SSE, SSEStream
 from .pg import PgPool, Pg, TxIsolation
 from .pg.compat import Depends
 from .core import Future, when_all, when_any, Reactor
@@ -280,8 +280,8 @@ class App:
                 
                 # Create SSE connection
                 # TODO: Get actual C++ handle from server
-                from .http.sse import SSEConnection
-                sse = SSEConnection(native_handle=None)  # Will be set by server
+                from .http.sse import SSE
+                sse = SSE(native_handle=None)  # Will be set by server
                 
                 # Call handler
                 handler(sse)
@@ -380,8 +380,8 @@ __all__ = [
     'Request',
     'Response',
     'WebSocket',
-    'SSEConnection',
-    'SSEResponse',
+    'SSE',
+    'SSEStream',
     # Async utilities
     'Future',
     'when_all',
