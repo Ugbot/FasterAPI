@@ -149,6 +149,26 @@ public:
     )>;
 
     /**
+     * WebTransport upgrade callback - called when CONNECT with :protocol=webtransport is received.
+     *
+     * Parameters:
+     * - stream_id: The QUIC stream ID for the session
+     * - path: The WebTransport path (from :path pseudo-header)
+     * - headers: Request headers
+     * - accept: Callback to accept the connection (sends 200 response)
+     * - reject: Callback to reject the connection (sends error response)
+     *
+     * The handler should call accept() or reject() synchronously.
+     */
+    using WebTransportUpgradeCallback = std::function<void(
+        uint64_t stream_id,
+        const std::string& path,
+        const std::unordered_map<std::string, std::string>& headers,
+        std::function<void()> accept,
+        std::function<void(uint16_t status, const char* reason)> reject
+    )>;
+
+    /**
      * Create HTTP/3 connection.
      *
      * @param is_server True if server-side, false if client-side
@@ -207,6 +227,17 @@ public:
     }
 
     /**
+     * Set WebTransport upgrade callback.
+     *
+     * Called when a CONNECT request with :protocol=webtransport is received.
+     *
+     * @param callback WebTransport upgrade callback function
+     */
+    void set_webtransport_upgrade_callback(WebTransportUpgradeCallback callback) {
+        webtransport_upgrade_callback_ = std::move(callback);
+    }
+
+    /**
      * Check if connection is closed.
      */
     bool is_closed() const noexcept {
@@ -262,6 +293,15 @@ public:
     }
 
     /**
+     * Get underlying QUIC connection (for WebTransport integration).
+     *
+     * Note: Caller must not take ownership - Http3Connection manages the lifetime.
+     */
+    quic::QUICConnection* quic_connection() noexcept {
+        return quic_conn_.get();
+    }
+
+    /**
      * Initialize connection (call after construction).
      *
      * @return 0 on success, -1 on error
@@ -295,6 +335,9 @@ private:
 
     // Request callback
     RequestCallback request_callback_;
+
+    // WebTransport upgrade callback
+    WebTransportUpgradeCallback webtransport_upgrade_callback_;
 
     // Control streams
     uint64_t control_stream_id_{0};

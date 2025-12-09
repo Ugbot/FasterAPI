@@ -1,9 +1,12 @@
 #include "webtransport_connection.h"
 #include "qpack/qpack_encoder.h"
 #include "qpack/qpack_decoder.h"
+#include "quic/quic_varint.h"
 #include "http3_parser.h"
 #include <cstring>
 #include <algorithm>
+#include <vector>
+#include <cstdio>
 
 namespace fasterapi {
 namespace http {
@@ -41,14 +44,26 @@ WebTransportConnection::WebTransportConnection(
     std::unique_ptr<quic::QUICConnection> quic_conn
 ) noexcept
     : state_(State::CONNECTING),
-      is_server_(false),
+      is_server_(true),
+      owns_quic_conn_(true),
       quic_conn_(std::move(quic_conn)),
+      quic_conn_ptr_(quic_conn_.get()),
       session_stream_id_(0)
 {
-    // Determine if we're server or client based on QUIC connection
-    // (This is a simplification - in reality we'd pass this explicitly)
-    is_server_ = true;  // TODO: Get from quic_conn
+    pending_datagrams_.reserve(max_pending_datagrams_);
+}
 
+WebTransportConnection::WebTransportConnection(
+    quic::QUICConnection* quic_conn,
+    bool is_server
+) noexcept
+    : state_(State::CONNECTING),
+      is_server_(is_server),
+      owns_quic_conn_(false),
+      quic_conn_(nullptr),
+      quic_conn_ptr_(quic_conn),
+      session_stream_id_(0)
+{
     pending_datagrams_.reserve(max_pending_datagrams_);
 }
 
@@ -56,16 +71,17 @@ WebTransportConnection::~WebTransportConnection() noexcept {
     if (!is_closed()) {
         close(WT_ERROR_NO_ERROR, "Connection destroyed");
     }
+    // Note: quic_conn_ will be automatically cleaned up only if we own it
 }
 
 int WebTransportConnection::initialize() noexcept {
-    if (!quic_conn_) {
+    if (!quic_conn_ptr_) {
         return -1;
     }
 
     // Initialize QUIC connection if needed
-    if (!quic_conn_->is_established()) {
-        quic_conn_->initialize();
+    if (!quic_conn_ptr_->is_established()) {
+        quic_conn_ptr_->initialize();
     }
 
     return 0;
@@ -110,7 +126,7 @@ uint64_t WebTransportConnection::open_stream() noexcept {
     }
 
     // Create bidirectional QUIC stream
-    uint64_t stream_id = quic_conn_->create_stream(true);
+    uint64_t stream_id = quic_conn_ptr_->create_stream(true);
     if (stream_id == 0) {
         return 0;
     }
@@ -138,7 +154,7 @@ ssize_t WebTransportConnection::send_stream(
     }
 
     // Write to QUIC stream
-    ssize_t written = quic_conn_->write_stream(stream_id, data, length);
+    ssize_t written = quic_conn_ptr_->write_stream(stream_id, data, length);
     if (written > 0) {
         total_bytes_sent_.fetch_add(written, std::memory_order_relaxed);
     }
@@ -152,7 +168,7 @@ int WebTransportConnection::close_stream(uint64_t stream_id) noexcept {
     }
 
     // Close QUIC stream
-    quic_conn_->close_stream(stream_id);
+    quic_conn_ptr_->close_stream(stream_id);
 
     // Remove from active streams
     active_streams_.erase(stream_id);
@@ -171,7 +187,7 @@ uint64_t WebTransportConnection::open_unidirectional_stream() noexcept {
     }
 
     // Create unidirectional QUIC stream
-    uint64_t stream_id = quic_conn_->create_stream(false);
+    uint64_t stream_id = quic_conn_ptr_->create_stream(false);
     if (stream_id == 0) {
         return 0;
     }
@@ -199,7 +215,7 @@ ssize_t WebTransportConnection::send_unidirectional(
     }
 
     // Write to QUIC stream
-    ssize_t written = quic_conn_->write_stream(stream_id, data, length);
+    ssize_t written = quic_conn_ptr_->write_stream(stream_id, data, length);
     if (written > 0) {
         total_bytes_sent_.fetch_add(written, std::memory_order_relaxed);
     }
@@ -258,7 +274,7 @@ int WebTransportConnection::process_datagram(
     }
 
     // Process through QUIC connection
-    int result = quic_conn_->process_packet(data, length, now_us);
+    int result = quic_conn_ptr_->process_packet(data, length, now_us);
     if (result != 0) {
         return result;
     }
@@ -268,12 +284,12 @@ int WebTransportConnection::process_datagram(
     // that have pending data and dispatch callbacks
 
     // Check if connection is now established
-    if (state_ == State::CONNECTING && quic_conn_->is_established()) {
+    if (state_ == State::CONNECTING && quic_conn_ptr_->is_established()) {
         state_ = State::CONNECTED;
     }
 
     // Check if connection is closed
-    if (quic_conn_->is_closed() && state_ != State::CLOSED) {
+    if (quic_conn_ptr_->is_closed() && state_ != State::CLOSED) {
         state_ = State::CLOSED;
         if (connection_closed_callback_) {
             connection_closed_callback_(WT_ERROR_SESSION_CLOSED, "QUIC connection closed");
@@ -322,7 +338,7 @@ size_t WebTransportConnection::generate_datagrams(
 
     // Generate QUIC packets for streams
     if (total_written < capacity) {
-        size_t quic_written = quic_conn_->generate_packets(
+        size_t quic_written = quic_conn_ptr_->generate_packets(
             output + total_written,
             capacity - total_written,
             now_us
@@ -342,13 +358,13 @@ void WebTransportConnection::close(uint64_t error_code, const char* reason) noex
 
     // Close all active streams
     for (const auto& [stream_id, _] : active_streams_) {
-        quic_conn_->close_stream(stream_id);
+        quic_conn_ptr_->close_stream(stream_id);
     }
     active_streams_.clear();
 
     // Close QUIC connection
     if (quic_conn_) {
-        quic_conn_->close(error_code, reason);
+        quic_conn_ptr_->close(error_code, reason);
     }
 
     state_ = State::CLOSED;
@@ -436,46 +452,67 @@ void WebTransportConnection::handle_stream_closed(uint64_t stream_id) noexcept {
 
 int WebTransportConnection::send_connect_request(const char* url) noexcept {
     // Create control stream (stream 0 or 2 for client)
-    session_stream_id_ = quic_conn_->create_stream(true);
+    session_stream_id_ = quic_conn_ptr_->create_stream(true);
     if (session_stream_id_ == 0) {
         return -1;
     }
 
-    // Build HTTP/3 CONNECT request
-    // :method = CONNECT
-    // :protocol = webtransport
-    // :scheme = https
-    // :path = <url path>
-    // :authority = <url host>
+    // Parse URL to extract path and authority
+    std::string url_str(url);
+    std::string scheme = "https";
+    std::string authority;
+    std::string path = "/";
 
-    // Simplified: just send headers frame
-    // In reality, we'd use QPACK encoder here
+    // Simple URL parsing
+    size_t scheme_end = url_str.find("://");
+    size_t path_start = std::string::npos;
+    if (scheme_end != std::string::npos) {
+        scheme = url_str.substr(0, scheme_end);
+        size_t auth_start = scheme_end + 3;
+        path_start = url_str.find('/', auth_start);
+        if (path_start != std::string::npos) {
+            authority = url_str.substr(auth_start, path_start - auth_start);
+            path = url_str.substr(path_start);
+        } else {
+            authority = url_str.substr(auth_start);
+        }
+    }
 
-    uint8_t headers_frame[512];
+    // Build HTTP/3 CONNECT request headers using QPACK
+    std::vector<std::pair<std::string_view, std::string_view>> headers = {
+        {":method", "CONNECT"},
+        {":protocol", "webtransport"},
+        {":scheme", scheme},
+        {":path", path},
+        {":authority", authority}
+    };
+
+    // QPACK encode the headers
+    qpack::QPACKEncoder encoder{4096, 100};
+    uint8_t qpack_buffer[4096];
+    size_t qpack_len = 0;
+
+    if (encoder.encode_field_section(headers.data(), headers.size(),
+                                     qpack_buffer, sizeof(qpack_buffer), qpack_len) != 0) {
+        return -1;
+    }
+
+    // Build HTTP/3 HEADERS frame
+    uint8_t frame_buffer[8192];
     size_t pos = 0;
 
-    // Frame type (HEADERS)
-    headers_frame[pos++] = H3_FRAME_HEADERS;
+    // Frame type (HEADERS = 0x01)
+    pos += quic::VarInt::encode(H3_FRAME_HEADERS, frame_buffer + pos);
 
-    // Frame length (placeholder)
-    size_t length_pos = pos;
-    pos += 4;  // Reserve space for varint length
+    // Frame length
+    pos += quic::VarInt::encode(qpack_len, frame_buffer + pos);
 
-    // Pseudo-headers (simplified encoding)
-    const char* method = "CONNECT";
-    const char* protocol = "webtransport";
-    const char* scheme = "https";
-
-    // TODO: Proper QPACK encoding
-    // For now, just placeholder
-    pos += 100;  // Placeholder size
-
-    // Update frame length
-    size_t frame_length = pos - length_pos - 4;
-    // TODO: Encode varint length properly
+    // Frame payload (QPACK encoded headers)
+    std::memcpy(frame_buffer + pos, qpack_buffer, qpack_len);
+    pos += qpack_len;
 
     // Send on session stream
-    ssize_t written = quic_conn_->write_stream(session_stream_id_, headers_frame, pos);
+    ssize_t written = quic_conn_ptr_->write_stream(session_stream_id_, frame_buffer, pos);
     if (written <= 0) {
         return -1;
     }
@@ -487,31 +524,53 @@ int WebTransportConnection::send_connect_response(
     uint64_t stream_id,
     int status_code
 ) noexcept {
-    // Build HTTP/3 response
-    // :status = 200 (or error code)
+    // Build HTTP/3 response with :status pseudo-header
+    char status_str[8];
+    snprintf(status_str, sizeof(status_str), "%d", status_code);
 
-    uint8_t headers_frame[256];
+    std::vector<std::pair<std::string_view, std::string_view>> headers = {
+        {":status", status_str}
+    };
+
+    // Add sec-webtransport-http3-draft header for WebTransport capability
+    if (status_code == 200) {
+        headers.push_back({"sec-webtransport-http3-draft", "draft02"});
+    }
+
+    // QPACK encode the headers
+    qpack::QPACKEncoder encoder{4096, 100};
+    uint8_t qpack_buffer[1024];
+    size_t qpack_len = 0;
+
+    if (encoder.encode_field_section(headers.data(), headers.size(),
+                                     qpack_buffer, sizeof(qpack_buffer), qpack_len) != 0) {
+        return -1;
+    }
+
+    // Build HTTP/3 HEADERS frame
+    uint8_t frame_buffer[2048];
     size_t pos = 0;
 
-    // Frame type (HEADERS)
-    headers_frame[pos++] = H3_FRAME_HEADERS;
+    // Frame type (HEADERS = 0x01)
+    pos += quic::VarInt::encode(H3_FRAME_HEADERS, frame_buffer + pos);
 
-    // Frame length (placeholder)
-    size_t length_pos = pos;
-    pos += 4;
+    // Frame length
+    pos += quic::VarInt::encode(qpack_len, frame_buffer + pos);
 
-    // :status pseudo-header
-    // TODO: Proper QPACK encoding
-    pos += 50;  // Placeholder
-
-    // Update frame length
-    size_t frame_length = pos - length_pos - 4;
-    // TODO: Encode varint length properly
+    // Frame payload (QPACK encoded headers)
+    std::memcpy(frame_buffer + pos, qpack_buffer, qpack_len);
+    pos += qpack_len;
 
     // Send on stream
-    ssize_t written = quic_conn_->write_stream(stream_id, headers_frame, pos);
+    ssize_t written = quic_conn_ptr_->write_stream(stream_id, frame_buffer, pos);
     if (written <= 0) {
         return -1;
+    }
+
+    // Transition to connected state on successful 200 response
+    if (status_code == 200) {
+        state_ = State::CONNECTED;
+        session_stream_id_ = stream_id;
     }
 
     return 0;

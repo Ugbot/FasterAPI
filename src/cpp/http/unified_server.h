@@ -143,6 +143,28 @@ class WebSocketConnection;
 using WebSocketHandler = std::function<void(WebSocketConnection&)>;
 
 /**
+ * WebTransport Handler Callback
+ *
+ * Pure C++ WebTransport handler - for high-performance real-time communication.
+ * WebTransport provides bidirectional streams and unreliable datagrams over HTTP/3.
+ *
+ * The handler is invoked when a WebTransport session is established (after CONNECT).
+ * Set up callbacks for streams and datagrams:
+ *
+ *   wt.on_stream_data([&wt](uint64_t stream_id, const uint8_t* data, size_t len) {
+ *       // Handle bidirectional stream data
+ *       wt.send_stream(stream_id, response_data, response_len);
+ *   });
+ *   wt.on_datagram([&wt](const uint8_t* data, size_t len) {
+ *       // Handle unreliable datagram
+ *       wt.send_datagram(response_data, response_len);
+ *   });
+ *   wt.on_stream_opened([](uint64_t stream_id, bool is_bidi) { ... });
+ *   wt.on_connection_closed([](uint64_t error, const char* reason) { ... });
+ */
+using WebTransportHandler = std::function<void(WebTransportConnection&)>;
+
+/**
  * Unified HTTP Server
  *
  * Production-grade multi-protocol HTTP server.
@@ -204,6 +226,17 @@ public:
      * @param handler Callback invoked when WebSocket connection established
      */
     void add_websocket_handler(const std::string& path, WebSocketHandler handler);
+
+    /**
+     * Register a pure C++ WebTransport handler
+     *
+     * This handler runs entirely in C++, for high-performance real-time communication.
+     * WebTransport provides bidirectional streams and unreliable datagrams over HTTP/3.
+     *
+     * @param path WebTransport path (e.g., "/wt/game")
+     * @param handler Callback invoked when WebTransport session established
+     */
+    void add_webtransport_handler(const std::string& path, WebTransportHandler handler);
 
     /**
      * Set App instance for direct HTTP/1.1 handling (simplified path).
@@ -418,8 +451,14 @@ private:
     // Pure C++ WebSocket handlers (path → handler mapping)
     static std::unordered_map<std::string, WebSocketHandler> s_websocket_handlers_;
 
+    // Pure C++ WebTransport handlers (path → handler mapping)
+    static std::unordered_map<std::string, WebTransportHandler> s_webtransport_handlers_;
+
     // Helper to look up a C++ WebSocket handler
     static WebSocketHandler* get_websocket_handler(const std::string& path);
+
+    // Helper to look up a C++ WebTransport handler
+    static WebTransportHandler* get_webtransport_handler(const std::string& path);
 };
 
 } // namespace http

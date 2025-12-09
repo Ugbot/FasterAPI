@@ -342,6 +342,7 @@ int Http3Connection::handle_headers_frame(uint64_t stream_id, const uint8_t* dat
     std::cout << "[HTTP/3] Decoded " << header_count << " headers on stream " << stream_id << std::endl;
 
     // Extract pseudo-headers and regular headers
+    std::string protocol;  // For WebTransport detection
     for (size_t i = 0; i < header_count; ++i) {
         const auto& [name, value] = headers[i];
 
@@ -353,6 +354,8 @@ int Http3Connection::handle_headers_frame(uint64_t stream_id, const uint8_t* dat
             state.scheme = value;
         } else if (name == ":authority") {
             state.authority = value;
+        } else if (name == ":protocol") {
+            protocol = value;
         } else if (name[0] != ':') {
             // Regular header
             state.headers[name] = value;
@@ -360,6 +363,37 @@ int Http3Connection::handle_headers_frame(uint64_t stream_id, const uint8_t* dat
     }
 
     std::cout << "[HTTP/3] Request: " << state.method << " " << state.path << std::endl;
+
+    // Check for WebTransport CONNECT request
+    if (state.method == "CONNECT" && protocol == "webtransport") {
+        std::cout << "[HTTP/3] WebTransport CONNECT request to " << state.path << std::endl;
+
+        if (webtransport_upgrade_callback_) {
+            // Create accept/reject callbacks that will send the appropriate response
+            auto accept = [this, stream_id]() {
+                // Send 200 OK response with WebTransport headers
+                std::unordered_map<std::string, std::string> response_headers;
+                response_headers["sec-webtransport-http3-draft"] = "draft02";
+                send_response_internal(stream_id, 200, response_headers, "");
+            };
+
+            auto reject = [this, stream_id](uint16_t status, const char* reason) {
+                std::unordered_map<std::string, std::string> response_headers;
+                std::string body = reason ? reason : "";
+                send_response_internal(stream_id, status, response_headers, body);
+            };
+
+            // Invoke the callback
+            webtransport_upgrade_callback_(stream_id, state.path, state.headers, accept, reject);
+
+            // Mark the stream as WebTransport (don't process as regular HTTP)
+            state.request_complete = true;
+        } else {
+            // No WebTransport handler - reject with 501 Not Implemented
+            std::unordered_map<std::string, std::string> response_headers;
+            send_response_internal(stream_id, 501, response_headers, "WebTransport not supported");
+        }
+    }
 
     return 0;
 }

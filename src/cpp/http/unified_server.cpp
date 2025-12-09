@@ -212,6 +212,22 @@ WebSocketHandler* UnifiedServer::get_websocket_handler(const std::string& path) 
     return nullptr;
 }
 
+// Pure C++ WebTransport handlers (path → handler mapping)
+std::unordered_map<std::string, WebTransportHandler> UnifiedServer::s_webtransport_handlers_;
+
+void UnifiedServer::add_webtransport_handler(const std::string& path, WebTransportHandler handler) {
+    s_webtransport_handlers_[path] = std::move(handler);
+    LOG_INFO("WebTransport", "Registered handler for path: %s", path.c_str());
+}
+
+WebTransportHandler* UnifiedServer::get_webtransport_handler(const std::string& path) {
+    auto it = s_webtransport_handlers_.find(path);
+    if (it != s_webtransport_handlers_.end()) {
+        return &it->second;
+    }
+    return nullptr;
+}
+
 // Set App instance for direct HTTP/1.1 handling
 void UnifiedServer::set_app_instance(void* app) {
     s_app_instance_ = static_cast<::fasterapi::App*>(app);
@@ -581,6 +597,55 @@ void UnifiedServer::on_quic_datagram(
         if (s_request_handler_) {
             new_conn->set_request_callback(s_request_handler_);
         }
+
+        // Set WebTransport upgrade callback
+        std::string wt_conn_id = conn_id_str;  // Capture for lambda
+        new_conn->set_webtransport_upgrade_callback(
+            [wt_conn_id](
+                uint64_t stream_id,
+                const std::string& path,
+                const std::unordered_map<std::string, std::string>& headers,
+                std::function<void()> accept,
+                std::function<void(uint16_t, const char*)> reject
+            ) {
+                // Look up WebTransport handler for this path
+                WebTransportHandler* handler = get_webtransport_handler(path);
+                if (!handler) {
+                    LOG_WARN("WebTransport", "No handler for path: %s", path.c_str());
+                    reject(404, "WebTransport endpoint not found");
+                    return;
+                }
+
+                LOG_INFO("WebTransport", "Upgrading connection %s to WebTransport at %s",
+                         wt_conn_id.c_str(), path.c_str());
+
+                // Accept the connection (sends 200 OK)
+                accept();
+
+                // Get the HTTP/3 connection to extract its QUIC connection
+                auto http3_it = t_http3_connections.find(wt_conn_id);
+                if (http3_it == t_http3_connections.end()) {
+                    LOG_ERROR("WebTransport", "HTTP/3 connection not found: %s", wt_conn_id.c_str());
+                    return;
+                }
+
+                // Create WebTransportConnection using the shared QUIC connection
+                // Http3Connection owns the QUICConnection, WebTransport borrows it
+                quic::QUICConnection* quic_ptr = http3_it->second->quic_connection();
+                auto wt_conn = std::make_unique<WebTransportConnection>(quic_ptr, true);
+
+                // Store the WebTransport connection
+                t_webtransport_connections[wt_conn_id] = std::move(wt_conn);
+
+                // Invoke the handler
+                WebTransportConnection& wt = *t_webtransport_connections[wt_conn_id];
+                wt.initialize();
+                wt.accept();  // Transition to CONNECTED state
+                (*handler)(wt);
+
+                LOG_INFO("WebTransport", "Session established for %s", wt_conn_id.c_str());
+            }
+        );
 
         http3_conn = new_conn.get();
         t_http3_connections[conn_id_str] = std::move(new_conn);

@@ -101,11 +101,22 @@ public:
     };
 
     /**
-     * Constructor.
+     * Constructor (owning mode).
      *
      * @param quic_conn Underlying QUIC connection (ownership transferred)
      */
     explicit WebTransportConnection(std::unique_ptr<quic::QUICConnection> quic_conn) noexcept;
+
+    /**
+     * Constructor (non-owning mode for use with Http3Connection).
+     *
+     * Use this when the QUIC connection is managed by Http3Connection.
+     * The WebTransportConnection will use the QUIC connection but not own it.
+     *
+     * @param quic_conn Raw pointer to QUIC connection (not owned)
+     * @param is_server True if server-side, false if client-side
+     */
+    WebTransportConnection(quic::QUICConnection* quic_conn, bool is_server) noexcept;
 
     /**
      * Destructor.
@@ -389,9 +400,11 @@ private:
     // State
     State state_;
     bool is_server_;
+    bool owns_quic_conn_;  // True if we own quic_conn_, false if borrowed
 
-    // Underlying QUIC connection
-    std::unique_ptr<quic::QUICConnection> quic_conn_;
+    // Underlying QUIC connection (either owned or borrowed)
+    std::unique_ptr<quic::QUICConnection> quic_conn_;  // Used when owning
+    quic::QUICConnection* quic_conn_ptr_;              // Raw pointer (always valid)
 
     // Session stream (HTTP/3 CONNECT stream)
     uint64_t session_stream_id_;
