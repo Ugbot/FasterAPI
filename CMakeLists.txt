@@ -1603,6 +1603,30 @@ if(FA_BUILD_GTEST AND TARGET gtest)
     )
     target_link_libraries(gtest_webtransport PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
 
+    # WebTransport E2E tests
+    add_gtest_test(gtest_webtransport_e2e
+        tests/gtest/gtest_webtransport_e2e.cpp
+    )
+    target_sources(gtest_webtransport_e2e PRIVATE
+        src/cpp/http/webtransport_connection.cpp
+        src/cpp/http/http3_connection.cpp
+        src/cpp/http/quic/quic_connection.cpp
+        src/cpp/http/quic/quic_stream.cpp
+        src/cpp/http/quic/quic_packet.cpp
+        src/cpp/http/quic/quic_flow_control.cpp
+        src/cpp/http/quic/quic_congestion.cpp
+        src/cpp/http/quic/quic_ack_tracker.cpp
+        src/cpp/http/qpack/qpack_encoder.cpp
+        src/cpp/http/qpack/qpack_decoder.cpp
+        src/cpp/http/qpack/qpack_static_table.cpp
+        src/cpp/http/qpack/qpack_dynamic_table.cpp
+        src/cpp/http/huffman.cpp
+        src/cpp/http/huffman_table_data.cpp
+        src/cpp/core/ring_buffer.cpp
+        src/cpp/core/logger.cpp
+    )
+    target_link_libraries(gtest_webtransport_e2e PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
     # Static files tests
     add_gtest_test(gtest_static_files
         tests/gtest/gtest_static_files.cpp
