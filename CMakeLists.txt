@@ -1513,7 +1513,7 @@ if (FA_BUILD_CYTHON AND FA_BUILD_HTTP AND CYTHON_EXECUTABLE)
             PREFIX ""
             OUTPUT_NAME ${name}
             LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/fasterapi/_native"
-            SUFFIX ".${Python3_SOABI}${CMAKE_SHARED_LIBRARY_SUFFIX}"
+            SUFFIX ".${Python3_SOABI}.so"
         )
 
         # Add to install target
@@ -1527,6 +1527,31 @@ if (FA_BUILD_CYTHON AND FA_BUILD_HTTP AND CYTHON_EXECUTABLE)
         add_cython_extension(http2 "${CMAKE_SOURCE_DIR}/fasterapi/_cython/http2.pyx")
         message(STATUS "HTTP/2 Cython extension will be built at: ${CMAKE_SOURCE_DIR}/fasterapi/_native/http2.*.so")
     endif()
+
+    # Add WebTransport Cython extension
+    add_cython_extension(webtransport "${CMAKE_SOURCE_DIR}/fasterapi/_cython/webtransport.pyx")
+    target_sources(webtransport PRIVATE
+        src/cpp/http/webtransport_connection.cpp
+        src/cpp/http/http3_connection.cpp
+        src/cpp/http/quic/quic_connection.cpp
+        src/cpp/http/quic/quic_stream.cpp
+        src/cpp/http/quic/quic_packet.cpp
+        src/cpp/http/quic/quic_flow_control.cpp
+        src/cpp/http/quic/quic_congestion.cpp
+        src/cpp/http/quic/quic_ack_tracker.cpp
+        src/cpp/http/qpack/qpack_encoder.cpp
+        src/cpp/http/qpack/qpack_decoder.cpp
+        src/cpp/http/qpack/qpack_static_table.cpp
+        src/cpp/http/qpack/qpack_dynamic_table.cpp
+        src/cpp/http/huffman.cpp
+        src/cpp/http/huffman_table_data.cpp
+        src/cpp/core/ring_buffer.cpp
+        src/cpp/core/logger.cpp
+    )
+    target_link_libraries(webtransport PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+    # Cython needs exceptions enabled for except+ to work (converts C++ exceptions to Python)
+    target_compile_options(webtransport PRIVATE -fexceptions -frtti)
+    message(STATUS "WebTransport Cython extension will be built at: ${CMAKE_SOURCE_DIR}/fasterapi/_native/webtransport.*.so")
 
     message(STATUS "Cython extensions will be built to: ${CMAKE_SOURCE_DIR}/fasterapi/_native/")
 endif()
