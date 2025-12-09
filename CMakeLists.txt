@@ -914,6 +914,32 @@ if (FA_BUILD_HTTP)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks"
     )
 
+    # HTTP/3 and WebTransport benchmarks
+    add_executable(bench_http3
+        benchmarks/fasterapi/bench_http3.cpp
+        src/cpp/http/webtransport_connection.cpp
+        src/cpp/http/http3_connection.cpp
+        src/cpp/http/quic/quic_connection.cpp
+        src/cpp/http/quic/quic_stream.cpp
+        src/cpp/http/quic/quic_packet.cpp
+        src/cpp/http/quic/quic_flow_control.cpp
+        src/cpp/http/quic/quic_congestion.cpp
+        src/cpp/http/quic/quic_ack_tracker.cpp
+        src/cpp/http/qpack/qpack_encoder.cpp
+        src/cpp/http/qpack/qpack_decoder.cpp
+        src/cpp/http/qpack/qpack_static_table.cpp
+        src/cpp/http/qpack/qpack_dynamic_table.cpp
+        src/cpp/http/huffman.cpp
+        src/cpp/http/huffman_table_data.cpp
+        src/cpp/core/ring_buffer.cpp
+        src/cpp/core/logger.cpp
+    )
+    target_include_directories(bench_http3 PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(bench_http3 PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+    set_target_properties(bench_http3 PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks"
+    )
+
     add_executable(test_http1_parser tests/test_http1_parser.cpp src/cpp/http/http1_parser.cpp)
     target_include_directories(test_http1_parser PRIVATE ${CMAKE_SOURCE_DIR})
     set_target_properties(test_http1_parser PROPERTIES
