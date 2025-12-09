@@ -24,6 +24,8 @@
 #include <iomanip>
 #include <atomic>
 #include <unistd.h>
+#include <sys/socket.h>
+#include <cstring>
 
 namespace fasterapi {
 namespace http {
@@ -36,6 +38,9 @@ HttpRequestHandler UnifiedServer::s_request_handler_;
 
 // Pure C++ WebSocket handlers (path → handler mapping)
 std::unordered_map<std::string, WebSocketHandler> UnifiedServer::s_websocket_handlers_;
+
+// Global server instance for signal handlers
+UnifiedServer* UnifiedServer::s_instance_ = nullptr;
 
 // Direct App pointer for simplified Http1 handling
 static ::fasterapi::App* s_app_instance_ = nullptr;
@@ -160,6 +165,27 @@ static uint64_t get_time_us() noexcept {
     return std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
 }
 
+// Connection tracking helpers for graceful shutdown (delegate to server instance)
+static bool do_track_connection_open() {
+    auto* server = UnifiedServer::get_instance();
+    if (!server) return true;  // No server instance, allow connection
+    bool accepted = server->track_connection_open();
+    if (!accepted) {
+        LOG_DEBUG("Shutdown", "Rejecting new connection - server is draining");
+    } else {
+        LOG_DEBUG("Shutdown", "Connection opened, active=%u", server->get_active_connections());
+    }
+    return accepted;
+}
+
+static void do_track_connection_close() {
+    auto* server = UnifiedServer::get_instance();
+    if (!server) return;
+    uint32_t before = server->get_active_connections();
+    server->track_connection_close();
+    LOG_DEBUG("Shutdown", "Connection closed, active=%u -> %u", before, server->get_active_connections());
+}
+
 UnifiedServer::UnifiedServer(const UnifiedServerConfig& config)
     : config_(config)
 {
@@ -191,7 +217,126 @@ void UnifiedServer::set_app_instance(void* app) {
     s_app_instance_ = static_cast<::fasterapi::App*>(app);
 }
 
+// Signal handler for graceful shutdown
+void UnifiedServer::signal_handler(int signum) {
+    LOG_INFO("Server", "Received signal %d (%s), initiating graceful shutdown...",
+             signum, signum == SIGTERM ? "SIGTERM" : signum == SIGINT ? "SIGINT" : "unknown");
+
+    if (s_instance_) {
+        // Don't block in signal handler - just set state and wake up condition variable
+        ShutdownState expected = ShutdownState::RUNNING;
+        if (s_instance_->shutdown_state_.compare_exchange_strong(
+                expected, ShutdownState::DRAINING, std::memory_order_acq_rel)) {
+            // Notify any waiting threads
+            s_instance_->shutdown_cv_.notify_all();
+        }
+    }
+}
+
+// Install signal handlers for graceful shutdown
+void UnifiedServer::install_signal_handlers() {
+    if (!config_.enable_signal_handlers) {
+        LOG_DEBUG("Server", "Signal handlers disabled by configuration");
+        return;
+    }
+
+    s_instance_ = this;
+
+    struct sigaction sa;
+    sa.sa_handler = signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;  // Don't use SA_RESTART - we want syscalls to be interrupted
+
+    if (sigaction(SIGTERM, &sa, nullptr) < 0) {
+        LOG_WARN("Server", "Failed to install SIGTERM handler: %s", strerror(errno));
+    } else {
+        LOG_DEBUG("Server", "Installed SIGTERM handler");
+    }
+
+    if (sigaction(SIGINT, &sa, nullptr) < 0) {
+        LOG_WARN("Server", "Failed to install SIGINT handler: %s", strerror(errno));
+    } else {
+        LOG_DEBUG("Server", "Installed SIGINT handler");
+    }
+}
+
+// Graceful shutdown with connection draining
+bool UnifiedServer::shutdown_gracefully() {
+    LOG_INFO("Server", "Initiating graceful shutdown...");
+
+    // Transition to DRAINING state
+    ShutdownState expected = ShutdownState::RUNNING;
+    if (!shutdown_state_.compare_exchange_strong(
+            expected, ShutdownState::DRAINING, std::memory_order_acq_rel)) {
+        // Already draining or stopped
+        if (expected == ShutdownState::STOPPED) {
+            LOG_DEBUG("Server", "Server already stopped");
+            return true;
+        }
+        LOG_DEBUG("Server", "Server already draining");
+    }
+
+    // Set shutdown flag for backwards compatibility
+    shutdown_flag_.store(true, std::memory_order_relaxed);
+
+    // Stop accepting new connections
+    if (tls_listener_) {
+        tls_listener_->stop();
+        LOG_DEBUG("Server", "Stopped TLS listener");
+    }
+    if (cleartext_listener_) {
+        cleartext_listener_->stop();
+        LOG_DEBUG("Server", "Stopped cleartext listener");
+    }
+    if (quic_listener_) {
+        quic_listener_->stop();
+        LOG_DEBUG("Server", "Stopped QUIC listener");
+    }
+
+    // Wait for active connections to drain with timeout
+    auto deadline = std::chrono::steady_clock::now() +
+                    std::chrono::milliseconds(config_.shutdown_timeout_ms);
+
+    uint32_t active = active_connections_.load(std::memory_order_relaxed);
+    LOG_INFO("Server", "Waiting for %u active connections to drain (timeout: %ums)...",
+             active, config_.shutdown_timeout_ms);
+
+    std::unique_lock<std::mutex> lock(shutdown_mutex_);
+    bool drained = shutdown_cv_.wait_until(lock, deadline, [this]() {
+        return active_connections_.load(std::memory_order_relaxed) == 0;
+    });
+
+    if (drained) {
+        LOG_INFO("Server", "All connections drained successfully");
+    } else {
+        active = active_connections_.load(std::memory_order_relaxed);
+        LOG_WARN("Server", "Shutdown timeout reached with %u connections still active, forcing close",
+                 active);
+    }
+
+    // Transition to STOPPED state
+    shutdown_state_.store(ShutdownState::STOPPED, std::memory_order_release);
+
+    // Join background threads
+    if (tls_thread_.joinable()) {
+        tls_thread_.join();
+    }
+    if (quic_thread_.joinable()) {
+        quic_thread_.join();
+    }
+
+    LOG_INFO("Server", "Graceful shutdown complete");
+    return drained;
+}
+
 int UnifiedServer::start() {
+    // Set state to RUNNING
+    shutdown_state_.store(ShutdownState::RUNNING, std::memory_order_release);
+    shutdown_flag_.store(false, std::memory_order_relaxed);
+
+    // Install signal handlers for graceful shutdown
+    install_signal_handlers();
+
     // Create TLS context if enabled
     if (config_.enable_tls) {
         net::TlsContextConfig tls_config;
@@ -337,25 +482,12 @@ int UnifiedServer::start() {
 }
 
 void UnifiedServer::stop() {
-    shutdown_flag_.store(true, std::memory_order_relaxed);
+    // Use graceful shutdown
+    shutdown_gracefully();
 
-    if (tls_listener_) {
-        tls_listener_->stop();
-    }
-    if (cleartext_listener_) {
-        cleartext_listener_->stop();
-    }
-    if (quic_listener_) {
-        quic_listener_->stop();
-    }
-
-    // Join TLS thread if running in background
-    if (tls_thread_.joinable()) {
-        tls_thread_.join();
-    }
-    // Join QUIC thread if running in background
-    if (quic_thread_.joinable()) {
-        quic_thread_.join();
+    // Clear instance pointer
+    if (s_instance_ == this) {
+        s_instance_ = nullptr;
     }
 }
 
@@ -371,7 +503,8 @@ void UnifiedServer::on_quic_datagram(
     size_t length,
     const struct sockaddr* addr,
     socklen_t addrlen,
-    net::EventLoop* event_loop
+    net::EventLoop* event_loop,
+    int socket_fd
 ) {
     if (length < 5) {
         // Too short to be valid QUIC packet
@@ -476,15 +609,12 @@ void UnifiedServer::on_quic_datagram(
 
     if (output_len > 0) {
         // Send response datagram(s) back to client
-        // Note: We need a UdpSocket to send - get it from event_loop user_data or similar
-        // For now, we'll use recvfrom's fd which should be available in the event loop context
-
-        // TODO: This needs access to the UDP socket FD
-        // For now, log that we would send
-        LOG_DEBUG("HTTP3", "Generated %zu bytes to send for connection %s", output_len, conn_id_str.c_str());
-
-        // In production: event_loop->get_udp_socket()->sendto(output_buffer, output_len, addr, addrlen);
-        // We'll need to modify UdpListener to expose the socket or pass it via user_data
+        ssize_t sent = ::sendto(socket_fd, output_buffer, output_len, 0, addr, addrlen);
+        if (sent < 0) {
+            LOG_ERROR("HTTP3", "Failed to send response datagram: %s", strerror(errno));
+        } else {
+            LOG_DEBUG("HTTP3", "Sent %zd bytes to connection %s", sent, conn_id_str.c_str());
+        }
     }
 
     // Clean up closed connections
@@ -696,9 +826,16 @@ void UnifiedServer::on_cleartext_connection(net::TcpSocket socket, net::EventLoo
     int fd = socket.fd();
     LOG_DEBUG("HTTP1", "Cleartext connection accepted on fd=%d", fd);
 
+    // Track connection for graceful shutdown - reject if draining
+    if (!do_track_connection_open()) {
+        LOG_DEBUG("HTTP1", "Rejecting connection fd=%d - server draining", fd);
+        return;  // Socket will be closed by TcpSocket destructor
+    }
+
     // Set non-blocking
     if (socket.set_nonblocking() < 0) {
         LOG_ERROR("HTTP1", "Failed to set non-blocking on fd=%d", fd);
+        do_track_connection_close();  // Decrement counter
         return;
     }
 
@@ -799,6 +936,7 @@ void UnifiedServer::on_cleartext_connection(net::TcpSocket socket, net::EventLoo
                           }, event_loop) < 0) {
         LOG_ERROR("HTTP1", "Failed to add cleartext socket fd=%d to event loop", fd);
         t_http1_connections.erase(fd);
+        do_track_connection_close();
     }
 }
 
@@ -970,6 +1108,34 @@ void UnifiedServer::handle_http1_connection(
 
     LOG_DEBUG("HTTP1", "fd=%d State: %d TLS: %d", fd, static_cast<int>(http1_conn->get_state()), using_tls);
 
+    // Get timeout configuration from server instance
+    auto* server = UnifiedServer::get_instance();
+    uint32_t request_timeout_ms = server ? server->get_request_timeout_ms() : 30000;
+    uint32_t idle_timeout_ms = server ? server->get_idle_timeout_ms() : 60000;
+
+    // Check for request timeout (while reading request headers or body)
+    if (http1_conn->get_state() == Http1State::READING_REQUEST ||
+        http1_conn->get_state() == Http1State::READING_BODY) {
+        if (http1_conn->is_request_timed_out(request_timeout_ms)) {
+            LOG_INFO("HTTP1", "fd=%d request timeout after %llu ms", fd, static_cast<unsigned long long>(http1_conn->get_request_elapsed_ms()));
+            http1_conn->send_timeout_response();
+            // Response is now queued - fall through to send it
+        }
+    }
+
+    // Check for idle timeout (keep-alive connection waiting for next request)
+    if (http1_conn->get_state() == Http1State::KEEPALIVE) {
+        if (http1_conn->is_idle_timed_out(idle_timeout_ms)) {
+            LOG_INFO("HTTP1", "fd=%d idle timeout after %llu ms", fd, static_cast<unsigned long long>(http1_conn->get_idle_time_ms()));
+            // Just close the connection - no response needed for idle timeout
+            event_loop->remove_fd(fd);
+            t_http1_connections.erase(it);
+            if (using_tls) t_tls_sockets.erase(tls_it);
+            do_track_connection_close();
+            return;
+        }
+    }
+
     // Handle readable event
     if (http1_conn->get_state() == Http1State::READING_REQUEST ||
         http1_conn->get_state() == Http1State::READING_BODY ||
@@ -995,6 +1161,7 @@ void UnifiedServer::handle_http1_connection(
                 event_loop->remove_fd(fd);
                 t_http1_connections.erase(it);
                 if (using_tls) t_tls_sockets.erase(tls_it);
+                do_track_connection_close();
             }
             return;
         }
@@ -1005,6 +1172,7 @@ void UnifiedServer::handle_http1_connection(
             event_loop->remove_fd(fd);
             t_http1_connections.erase(it);
             if (using_tls) t_tls_sockets.erase(tls_it);
+            do_track_connection_close();
             return;
         }
 
@@ -1016,9 +1184,22 @@ void UnifiedServer::handle_http1_connection(
             event_loop->remove_fd(fd);
             t_http1_connections.erase(it);
             if (using_tls) t_tls_sockets.erase(tls_it);
+            do_track_connection_close();
             return;
         }
         LOG_DEBUG("HTTP1", "fd=%d Processed successfully, new state: %d", fd, static_cast<int>(http1_conn->get_state()));
+
+        // Check body size after headers are parsed (READING_BODY or PROCESSING state)
+        size_t max_body_size = server ? server->get_max_body_size() : 10 * 1024 * 1024;
+        if ((http1_conn->get_state() == Http1State::READING_BODY ||
+             http1_conn->get_state() == Http1State::PROCESSING ||
+             http1_conn->get_state() == Http1State::WRITING_RESPONSE) &&
+            http1_conn->is_body_too_large(max_body_size)) {
+            LOG_INFO("HTTP1", "fd=%d body too large: %zu > %zu",
+                     fd, http1_conn->get_content_length(), max_body_size);
+            http1_conn->send_payload_too_large_response();
+            // Response queued - fall through to send it
+        }
     }
 
     // Handle writable event / send response
@@ -1068,6 +1249,7 @@ void UnifiedServer::handle_http1_connection(
                                 event_loop->remove_fd(fd);
                                 t_http1_connections.erase(it);
                                 t_tls_sockets.erase(tls_it);
+                                do_track_connection_close();
                                 return;
                             }
                             LOG_DEBUG("HTTP1", "fd=%d TLS: Pipelined request processed, new state: %d", fd, static_cast<int>(http1_conn->get_state()));
@@ -1111,6 +1293,7 @@ void UnifiedServer::handle_http1_connection(
                     event_loop->remove_fd(fd);
                     t_http1_connections.erase(it);
                     if (using_tls) t_tls_sockets.erase(tls_it);
+                    do_track_connection_close();
                 }
                 return;
             }
@@ -1272,6 +1455,7 @@ void UnifiedServer::handle_http1_connection(
                             LOG_ERROR("HTTP1", "fd=%d pipelined request process error", fd);
                             event_loop->remove_fd(fd);
                             t_http1_connections.erase(it);
+                            do_track_connection_close();
                             return;
                         }
                         LOG_DEBUG("HTTP1", "fd=%d Pipelined request processed, new state: %d", fd, static_cast<int>(http1_conn->get_state()));
@@ -1291,6 +1475,7 @@ void UnifiedServer::handle_http1_connection(
                         // Read error
                         event_loop->remove_fd(fd);
                         t_http1_connections.erase(it);
+                        do_track_connection_close();
                         return;
                     }
                     // n == 0 or EAGAIN: no pipelined data, which is normal
@@ -1317,6 +1502,7 @@ void UnifiedServer::handle_http1_connection(
         event_loop->remove_fd(fd);
         t_http1_connections.erase(it);
         if (using_tls) t_tls_sockets.erase(tls_it);
+        do_track_connection_close();
     }
 }
 

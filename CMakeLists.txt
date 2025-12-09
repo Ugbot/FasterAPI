@@ -145,6 +145,7 @@ set(PYTHON_SOURCES
     src/cpp/python/shared_memory_ipc.cpp
     src/cpp/python/process_pool_executor.cpp
     src/cpp/python/zmq_ipc.cpp
+    src/cpp/python/binary_kwargs.cpp
 )
 
 set(PYTHON_HEADERS
@@ -155,6 +156,7 @@ set(PYTHON_HEADERS
     src/cpp/python/shared_memory_ipc.h
     src/cpp/python/process_pool_executor.h
     src/cpp/python/zmq_ipc.h
+    src/cpp/python/binary_kwargs.h
 )
 
 # Native types (NumPy-style for web)
@@ -246,10 +248,40 @@ if (FA_BUILD_HTTP)
             NAME zstd
             GITHUB_REPOSITORY facebook/zstd
             GIT_TAG v1.5.6
+            SOURCE_SUBDIR "build/cmake"
             OPTIONS
                 "ZSTD_BUILD_PROGRAMS OFF"
                 "ZSTD_BUILD_TESTS OFF"
         )
+
+        # brotli (compression - Google's algorithm, excellent for web)
+        CPMAddPackage(
+            NAME brotli
+            GITHUB_REPOSITORY google/brotli
+            GIT_TAG v1.1.0
+            OPTIONS
+                "BROTLI_DISABLE_TESTS ON"
+                "BROTLI_BUNDLED_MODE ON"
+        )
+
+        # zlib (gzip compression - universal compatibility)
+        CPMAddPackage(
+            NAME zlib
+            GITHUB_REPOSITORY madler/zlib
+            GIT_TAG v1.3.1
+        )
+        if(zlib_ADDED)
+            # zlib doesn't export targets properly, create aliases
+            add_library(ZLIB::ZLIB ALIAS zlibstatic)
+        endif()
+
+        # Set up include directories for compression libraries (used by tests)
+        # Note: zstd_SOURCE_DIR points to build/cmake, so we go up two levels for lib/
+        get_filename_component(ZSTD_ROOT_DIR "${zstd_SOURCE_DIR}/../.." ABSOLUTE)
+        set(ZSTD_INCLUDE_DIR "${ZSTD_ROOT_DIR}/lib" CACHE PATH "Zstd include directory" FORCE)
+        set(BROTLI_INCLUDE_DIR "${brotli_SOURCE_DIR}/c/include" CACHE PATH "Brotli include directory")
+        set(ZLIB_INCLUDE_DIR "${zlib_SOURCE_DIR}" CACHE PATH "Zlib source include directory")
+        set(ZLIB_BINARY_INCLUDE_DIR "${zlib_BINARY_DIR}" CACHE PATH "Zlib binary include directory")
     endif()
 
     # HTTP/3 Support:
@@ -641,13 +673,27 @@ if (FA_BUILD_HTTP)
     target_include_directories(fasterapi_http PRIVATE ${Python3_INCLUDE_DIRS})
     target_link_libraries(fasterapi_http PRIVATE ${Python3_LIBRARIES})
 
-    # Link zstd if compression enabled
+    # Link compression libraries if enabled
     if (FA_ENABLE_COMPRESSION)
+        # zstd
         if (TARGET libzstd_static)
             target_link_libraries(fasterapi_http PRIVATE libzstd_static)
         elseif (TARGET zstd)
             target_link_libraries(fasterapi_http PRIVATE zstd)
         endif()
+
+        # brotli (encoder, decoder, and common)
+        if (TARGET brotlienc)
+            target_link_libraries(fasterapi_http PRIVATE brotlienc brotlidec brotlicommon)
+        endif()
+
+        # zlib (gzip)
+        if (TARGET zlibstatic)
+            target_link_libraries(fasterapi_http PRIVATE zlibstatic)
+        elseif (TARGET ZLIB::ZLIB)
+            target_link_libraries(fasterapi_http PRIVATE ZLIB::ZLIB)
+        endif()
+
         target_compile_definitions(fasterapi_http PRIVATE FA_COMPRESSION_ENABLED)
     endif()
 
@@ -1556,6 +1602,225 @@ if(FA_BUILD_GTEST AND TARGET gtest)
         src/cpp/http/webtransport_connection.cpp
     )
     target_link_libraries(gtest_webtransport PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    # Static files tests
+    add_gtest_test(gtest_static_files
+        tests/gtest/gtest_static_files.cpp
+    )
+    target_sources(gtest_static_files PRIVATE
+        src/cpp/http/response.cpp
+    )
+    target_link_libraries(gtest_static_files PRIVATE)
+
+    # Graceful shutdown tests
+    add_gtest_test(gtest_graceful_shutdown
+        tests/gtest/gtest_graceful_shutdown.cpp
+    )
+    target_link_libraries(gtest_graceful_shutdown PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    # Request timeout tests
+    add_gtest_test(gtest_request_timeout
+        tests/gtest/gtest_request_timeout.cpp
+    )
+    target_link_libraries(gtest_request_timeout PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    # Body size limits tests
+    add_gtest_test(gtest_body_size_limits
+        tests/gtest/gtest_body_size_limits.cpp
+    )
+    target_link_libraries(gtest_body_size_limits PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    # SSE (Server-Sent Events) tests
+    add_gtest_test(gtest_sse
+        tests/gtest/gtest_sse.cpp
+    )
+    target_link_libraries(gtest_sse PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    # HPACK (HTTP/2 header compression) tests
+    add_gtest_test(gtest_hpack
+        tests/gtest/gtest_hpack.cpp
+    )
+    target_link_libraries(gtest_hpack PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    # QPACK (HTTP/3 header compression) tests
+    add_gtest_test(gtest_qpack
+        tests/gtest/gtest_qpack.cpp
+    )
+    target_link_libraries(gtest_qpack PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    # QUIC VarInt (variable-length integer encoding) tests
+    add_gtest_test(gtest_quic_varint
+        tests/gtest/gtest_quic_varint.cpp
+    )
+    target_link_libraries(gtest_quic_varint PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    # QUIC Flow Control tests
+    add_gtest_test(gtest_quic_flow_control
+        tests/gtest/gtest_quic_flow_control.cpp
+    )
+    target_link_libraries(gtest_quic_flow_control PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    # QUIC Congestion Control tests
+    add_gtest_test(gtest_quic_congestion
+        tests/gtest/gtest_quic_congestion.cpp
+    )
+    target_link_libraries(gtest_quic_congestion PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    # QUIC Frames (parsing/serialization) tests
+    add_gtest_test(gtest_quic_frames
+        tests/gtest/gtest_quic_frames.cpp
+    )
+    target_link_libraries(gtest_quic_frames PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    # QUIC ACK Tracker (loss detection and recovery) tests
+    add_gtest_test(gtest_quic_ack_tracker
+        tests/gtest/gtest_quic_ack_tracker.cpp
+    )
+    target_link_libraries(gtest_quic_ack_tracker PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    # HTTP/3 integration tests
+    add_gtest_test(gtest_http3_integration
+        tests/gtest/gtest_http3_integration.cpp
+    )
+    target_link_libraries(gtest_http3_integration PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    # Prometheus metrics system tests
+    add_gtest_test(gtest_metrics
+        tests/gtest/gtest_metrics.cpp
+    )
+    target_link_libraries(gtest_metrics PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    # Structured JSON logger tests
+    add_gtest_test(gtest_logger
+        tests/gtest/gtest_logger.cpp
+    )
+    target_link_libraries(gtest_logger PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    # Metrics endpoint tests
+    add_gtest_test(gtest_metrics_endpoint
+        tests/gtest/gtest_metrics_endpoint.cpp
+    )
+    target_link_libraries(gtest_metrics_endpoint PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    # Multipart form-data parser tests
+    add_gtest_test(gtest_multipart
+        tests/gtest/gtest_multipart.cpp
+    )
+    target_link_libraries(gtest_multipart PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    # HTTP caching and range request tests
+    add_gtest_test(gtest_http_caching
+        tests/gtest/gtest_http_caching.cpp
+    )
+    target_link_libraries(gtest_http_caching PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    # Compression tests (gzip, brotli, zstd)
+    add_gtest_test(gtest_compression
+        tests/gtest/gtest_compression.cpp
+    )
+    target_link_libraries(gtest_compression PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+    if (FA_ENABLE_COMPRESSION)
+        target_compile_definitions(gtest_compression PRIVATE FA_COMPRESSION_ENABLED)
+        target_include_directories(gtest_compression PRIVATE
+            ${ZSTD_INCLUDE_DIR}
+            ${BROTLI_INCLUDE_DIR}
+            ${ZLIB_INCLUDE_DIR}
+            ${ZLIB_BINARY_INCLUDE_DIR}
+        )
+        # Link compression libraries for direct testing
+        if (TARGET libzstd_static)
+            target_link_libraries(gtest_compression PRIVATE libzstd_static)
+        endif()
+        if (TARGET brotlienc)
+            target_link_libraries(gtest_compression PRIVATE brotlienc brotlidec brotlicommon)
+        endif()
+        if (TARGET zlibstatic)
+            target_link_libraries(gtest_compression PRIVATE zlibstatic)
+        endif()
+    endif()
+
+    # Compression middleware tests (auto-compression based on Accept-Encoding)
+    add_gtest_test(gtest_compression_middleware
+        tests/gtest/gtest_compression_middleware.cpp
+    )
+    target_link_libraries(gtest_compression_middleware PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+    if (FA_ENABLE_COMPRESSION)
+        target_compile_definitions(gtest_compression_middleware PRIVATE FA_COMPRESSION_ENABLED)
+        target_include_directories(gtest_compression_middleware PRIVATE
+            ${ZSTD_INCLUDE_DIR}
+            ${BROTLI_INCLUDE_DIR}
+            ${ZLIB_INCLUDE_DIR}
+            ${ZLIB_BINARY_INCLUDE_DIR}
+        )
+        # Link compression libraries for middleware testing
+        if (TARGET libzstd_static)
+            target_link_libraries(gtest_compression_middleware PRIVATE libzstd_static)
+        endif()
+        if (TARGET brotlienc)
+            target_link_libraries(gtest_compression_middleware PRIVATE brotlienc brotlidec brotlicommon)
+        endif()
+        if (TARGET zlibstatic)
+            target_link_libraries(gtest_compression_middleware PRIVATE zlibstatic)
+        endif()
+    endif()
+
+    # Rate limiter tests (token bucket, sliding window, fixed window)
+    add_gtest_test(gtest_rate_limiter
+        tests/gtest/gtest_rate_limiter.cpp
+    )
+    target_link_libraries(gtest_rate_limiter PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    # CORS middleware tests
+    add_gtest_test(gtest_cors
+        tests/gtest/gtest_cors.cpp
+    )
+    target_link_libraries(gtest_cors PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    # JWT authentication tests
+    add_gtest_test(gtest_jwt_auth
+        tests/gtest/gtest_jwt_auth.cpp
+    )
+    target_link_libraries(gtest_jwt_auth PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    # Middleware pipeline tests
+    add_gtest_test(gtest_middleware_pipeline
+        tests/gtest/gtest_middleware_pipeline.cpp
+    )
+    target_link_libraries(gtest_middleware_pipeline PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+    if (FA_ENABLE_COMPRESSION)
+        target_compile_definitions(gtest_middleware_pipeline PRIVATE FA_COMPRESSION_ENABLED)
+        target_include_directories(gtest_middleware_pipeline PRIVATE
+            ${ZSTD_INCLUDE_DIR}
+            ${BROTLI_INCLUDE_DIR}
+        )
+        if (TARGET libzstd_static)
+            target_link_libraries(gtest_middleware_pipeline PRIVATE libzstd_static)
+        endif()
+        if (TARGET brotlienc)
+            target_link_libraries(gtest_middleware_pipeline PRIVATE brotlienc brotlidec brotlicommon)
+        endif()
+        if (TARGET zlibstatic)
+            target_link_libraries(gtest_middleware_pipeline PRIVATE zlibstatic)
+        endif()
+    endif()
+
+    # Response cache tests
+    add_gtest_test(gtest_response_cache
+        tests/gtest/gtest_response_cache.cpp
+    )
+    target_link_libraries(gtest_response_cache PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    # Session management tests
+    add_gtest_test(gtest_session
+        tests/gtest/gtest_session.cpp
+    )
+    target_link_libraries(gtest_session PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    # OpenAPI generator tests
+    add_gtest_test(gtest_openapi
+        tests/gtest/gtest_openapi.cpp
+    )
+    target_link_libraries(gtest_openapi PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
 
     message(STATUS "Google Test tests will be built at: ${CMAKE_BINARY_DIR}/tests/gtest/")
 endif()

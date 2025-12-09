@@ -37,16 +37,21 @@ namespace net {
  * @param addr Source address
  * @param addrlen Length of address structure
  * @param event_loop The event loop for this worker thread
+ * @param socket_fd The UDP socket file descriptor (for sending responses)
  *
  * IMPORTANT: The data pointer is only valid during the callback.
  * Copy data if needed beyond callback scope.
+ *
+ * To send a response, use sendto() on socket_fd with the addr/addrlen:
+ *   sendto(socket_fd, response_data, response_len, 0, addr, addrlen);
  */
 using DatagramCallback = std::function<void(
     const uint8_t* data,
     size_t length,
     const struct sockaddr* addr,
     socklen_t addrlen,
-    EventLoop* event_loop
+    EventLoop* event_loop,
+    int socket_fd
 )>;
 
 /**

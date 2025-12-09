@@ -33,9 +33,21 @@
 #include <thread>
 #include <unordered_map>
 #include <string>
+#include <csignal>
+#include <mutex>
+#include <condition_variable>
 
 namespace fasterapi {
 namespace http {
+
+/**
+ * Server shutdown state for graceful shutdown support
+ */
+enum class ShutdownState {
+    RUNNING,    // Normal operation
+    DRAINING,   // Not accepting new connections, waiting for in-flight to complete
+    STOPPED     // Fully stopped
+};
 
 /**
  * Unified HTTP Server Configuration
@@ -77,6 +89,18 @@ struct UnifiedServerConfig {
     // - All handlers must be C++ (no Python callbacks)
     // - WebSocket handlers are looked up in s_websocket_handlers_ only
     bool pure_cpp_mode = false;
+
+    // Graceful shutdown configuration
+    uint32_t shutdown_timeout_ms = 30000;   // Max time to wait for connections to drain (30s)
+    bool enable_signal_handlers = true;     // Install SIGTERM/SIGINT handlers
+
+    // Request timeout configuration
+    uint32_t request_timeout_ms = 30000;    // Max time for request (headers + body) to be received (30s)
+    uint32_t idle_timeout_ms = 60000;       // Max time between requests on keep-alive connection (60s)
+
+    // Body size limits
+    size_t max_body_size = 10 * 1024 * 1024;  // Max request body size (10MB default)
+    size_t max_header_size = 8192;            // Max header size (8KB default)
 
     UnifiedServerConfig() = default;
 };
@@ -205,10 +229,71 @@ public:
     void stop();
 
     /**
-     * Check if server is running
+     * Initiate graceful shutdown
+     *
+     * Stops accepting new connections and waits for in-flight requests to complete.
+     * Times out after shutdown_timeout_ms if connections don't drain.
+     *
+     * @return true if shutdown completed within timeout, false if forced
+     */
+    bool shutdown_gracefully();
+
+    /**
+     * Check if server is running (not stopped or draining)
      */
     bool is_running() const noexcept {
-        return !shutdown_flag_.load(std::memory_order_relaxed);
+        ShutdownState state = shutdown_state_.load(std::memory_order_acquire);
+        return state == ShutdownState::RUNNING;
+    }
+
+    /**
+     * Check if server is accepting new connections
+     * Returns false during DRAINING or STOPPED states
+     */
+    bool is_accepting() const noexcept {
+        ShutdownState state = shutdown_state_.load(std::memory_order_acquire);
+        return state == ShutdownState::RUNNING;
+    }
+
+    /**
+     * Check if server is in shutdown/draining state
+     */
+    bool is_draining() const noexcept {
+        ShutdownState state = shutdown_state_.load(std::memory_order_acquire);
+        return state == ShutdownState::DRAINING;
+    }
+
+    /**
+     * Get current shutdown state
+     */
+    ShutdownState get_shutdown_state() const noexcept {
+        return shutdown_state_.load(std::memory_order_acquire);
+    }
+
+    /**
+     * Get number of active connections
+     */
+    uint32_t get_active_connections() const noexcept {
+        return active_connections_.load(std::memory_order_relaxed);
+    }
+
+    /**
+     * Track connection open - returns false if draining (reject connection)
+     */
+    bool track_connection_open() noexcept {
+        if (!is_accepting()) return false;
+        active_connections_.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    }
+
+    /**
+     * Track connection close - decrements counter and notifies shutdown if last connection
+     */
+    void track_connection_close() noexcept {
+        uint32_t prev = active_connections_.fetch_sub(1, std::memory_order_acq_rel);
+        if (prev == 1 && is_draining()) {
+            shutdown_cv_.notify_all();
+        }
     }
 
     /**
@@ -216,6 +301,41 @@ public:
      */
     const std::string& get_error() const noexcept {
         return error_message_;
+    }
+
+    /**
+     * Get global server instance (for signal handlers)
+     */
+    static UnifiedServer* get_instance() noexcept {
+        return s_instance_;
+    }
+
+    /**
+     * Get request timeout in milliseconds
+     */
+    uint32_t get_request_timeout_ms() const noexcept {
+        return config_.request_timeout_ms;
+    }
+
+    /**
+     * Get idle timeout in milliseconds
+     */
+    uint32_t get_idle_timeout_ms() const noexcept {
+        return config_.idle_timeout_ms;
+    }
+
+    /**
+     * Get max body size in bytes
+     */
+    size_t get_max_body_size() const noexcept {
+        return config_.max_body_size;
+    }
+
+    /**
+     * Get max header size in bytes
+     */
+    size_t get_max_header_size() const noexcept {
+        return config_.max_header_size;
     }
 
 private:
@@ -237,7 +357,8 @@ private:
         size_t length,
         const struct sockaddr* addr,
         socklen_t addrlen,
-        net::EventLoop* event_loop
+        net::EventLoop* event_loop,
+        int socket_fd
     );
 
     /**
@@ -277,6 +398,19 @@ private:
     std::thread quic_thread_;  // QUIC listener runs in background if needed
     std::atomic<bool> shutdown_flag_{false};
     std::string error_message_;
+
+    // Graceful shutdown support
+    std::atomic<ShutdownState> shutdown_state_{ShutdownState::STOPPED};
+    std::atomic<uint32_t> active_connections_{0};
+    std::mutex shutdown_mutex_;
+    std::condition_variable shutdown_cv_;
+
+    // Global instance for signal handlers
+    static UnifiedServer* s_instance_;
+
+    // Signal handler installation
+    void install_signal_handlers();
+    static void signal_handler(int signum);
 
     // Global request handler
     static HttpRequestHandler s_request_handler_;

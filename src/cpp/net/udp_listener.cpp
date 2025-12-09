@@ -142,9 +142,9 @@ void UdpListener::worker_thread(int worker_id) noexcept {
                 continue;
             }
 
-            // Call datagram callback
+            // Call datagram callback with socket fd for response sending
             datagram_cb_(recv_buffer.data(), static_cast<size_t>(n),
-                        (struct sockaddr*)&addr, addr_len, event_loop);
+                        (struct sockaddr*)&addr, addr_len, event_loop, fd);
         }
     };
 
