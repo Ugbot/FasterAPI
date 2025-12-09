@@ -1436,6 +1436,46 @@ if (FA_BUILD_EXAMPLES AND FA_BUILD_HTTP)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples"
     )
 
+    # REST API example - CRUD with proper error handling
+    add_executable(rest_api_example examples/rest_api_example.cpp)
+    target_include_directories(rest_api_example PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(rest_api_example PRIVATE fasterapi_http)
+    set_target_properties(rest_api_example PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples"
+    )
+
+    # Middleware example - logging, auth, rate limiting
+    add_executable(middleware_example examples/middleware_example.cpp)
+    target_include_directories(middleware_example PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(middleware_example PRIVATE fasterapi_http)
+    set_target_properties(middleware_example PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples"
+    )
+
+    # Streaming example - SSE, chunked responses
+    add_executable(streaming_example examples/streaming_example.cpp)
+    target_include_directories(streaming_example PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(streaming_example PRIVATE fasterapi_http)
+    set_target_properties(streaming_example PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples"
+    )
+
+    # File upload example - multipart handling
+    add_executable(file_upload_example examples/file_upload_example.cpp)
+    target_include_directories(file_upload_example PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(file_upload_example PRIVATE fasterapi_http)
+    set_target_properties(file_upload_example PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples"
+    )
+
+    # JSON API example - validation and response building
+    add_executable(json_api_example examples/json_api_example.cpp)
+    target_include_directories(json_api_example PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(json_api_example PRIVATE fasterapi_http)
+    set_target_properties(json_api_example PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples"
+    )
+
     # Pure C++ WebSocket test server - for E2E testing WebSocket in pure C++ mode
     add_executable(test_pure_cpp_websocket_server tests/test_pure_cpp_websocket_server.cpp)
     target_include_directories(test_pure_cpp_websocket_server PRIVATE ${CMAKE_SOURCE_DIR})
