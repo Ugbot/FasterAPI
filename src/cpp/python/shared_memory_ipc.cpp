@@ -227,7 +227,7 @@ bool SharedMemoryIPC::write_request(uint32_t request_id,
     header.request_id = request_id;
     header.module_name_len = module_name.length();
     header.function_name_len = function_name.length();
-    header.kwargs_json_len = kwargs_json.length();
+    header.kwargs_len = kwargs_json.length();
     header.total_length = sizeof(MessageHeader) +
                          module_name.length() +
                          function_name.length() +
@@ -288,7 +288,7 @@ bool SharedMemoryIPC::read_request(uint32_t& request_id,
     ptr += header.module_name_len;
     function_name.assign(reinterpret_cast<const char*>(ptr), header.function_name_len);
     ptr += header.function_name_len;
-    kwargs_json.assign(reinterpret_cast<const char*>(ptr), header.kwargs_json_len);
+    kwargs_json.assign(reinterpret_cast<const char*>(ptr), header.kwargs_len);
 
     return true;
 }
@@ -304,7 +304,7 @@ bool SharedMemoryIPC::write_response(uint32_t request_id,
     header.request_id = request_id;
     header.status_code = status_code;
     header.success = success ? 1 : 0;
-    header.body_json_len = body_json.length();
+    header.body_len = body_json.length();
     header.error_message_len = error_message.length();
     header.total_length = sizeof(ResponseHeader) +
                          body_json.length() +
@@ -357,8 +357,8 @@ bool SharedMemoryIPC::read_response(uint32_t& request_id,
     success = (header.success != 0);
 
     const uint8_t* ptr = buffer + sizeof(ResponseHeader);
-    body_json.assign(reinterpret_cast<const char*>(ptr), header.body_json_len);
-    ptr += header.body_json_len;
+    body_json.assign(reinterpret_cast<const char*>(ptr), header.body_len);
+    ptr += header.body_len;
     error_message.assign(reinterpret_cast<const char*>(ptr), header.error_message_len);
 
     return true;
@@ -374,7 +374,7 @@ void SharedMemoryIPC::signal_shutdown() {
     header.total_length = sizeof(MessageHeader);
     header.module_name_len = 0;
     header.function_name_len = 0;
-    header.kwargs_json_len = 0;
+    header.kwargs_len = 0;
 
     // Send one shutdown message per worker (queue capacity)
     for (size_t i = 0; i < request_queue_size_; ++i) {

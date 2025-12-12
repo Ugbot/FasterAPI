@@ -247,6 +247,77 @@ public:
         size_ = 0;
     }
 
+    /**
+     * Get read pointer for zero-copy access.
+     *
+     * @return Pointer to readable data (valid until next read/discard)
+     */
+    const uint8_t* read_ptr() const noexcept {
+        return buffer_ + tail_;
+    }
+
+    /**
+     * Get amount of contiguous data available from read_ptr.
+     * May be less than available() if data wraps around buffer end.
+     *
+     * @return Number of contiguous bytes available for reading
+     */
+    size_t contiguous_available() const noexcept {
+        if (size_ == 0) return 0;
+        // If data wraps around, only return up to buffer end
+        size_t to_end = capacity_ - tail_;
+        return (to_end < size_) ? to_end : size_;
+    }
+
+    /**
+     * Get write pointer for zero-copy writes.
+     *
+     * @return Pointer to writable area
+     */
+    uint8_t* write_ptr() noexcept {
+        return buffer_ + head_;
+    }
+
+    /**
+     * Get amount of contiguous space available for writing.
+     *
+     * @return Number of contiguous bytes available for writing
+     */
+    size_t contiguous_space() const noexcept {
+        size_t free = capacity_ - size_;
+        if (free == 0) return 0;
+        // If write position wraps, only return up to buffer end
+        size_t to_end = capacity_ - head_;
+        return (to_end < free) ? to_end : free;
+    }
+
+    /**
+     * Commit bytes written directly via write_ptr().
+     *
+     * @param bytes Number of bytes that were written
+     */
+    void commit_write(size_t bytes) noexcept {
+        size_t actual = bytes;
+        size_t free = capacity_ - size_;
+        if (actual > free) actual = free;
+
+        head_ = (head_ + actual) % capacity_;
+        size_ += actual;
+    }
+
+    /**
+     * Consume bytes without copying (after reading via read_ptr).
+     *
+     * @param bytes Number of bytes to consume
+     */
+    void consume(size_t bytes) noexcept {
+        size_t actual = bytes;
+        if (actual > size_) actual = size_;
+
+        tail_ = (tail_ + actual) % capacity_;
+        size_ -= actual;
+    }
+
 private:
     uint8_t* buffer_;   // Buffer storage
     size_t capacity_;   // Total capacity

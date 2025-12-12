@@ -7,10 +7,10 @@
  * This shows real-world performance under load!
  */
 
-#include "../src/cpp/http/router.h"
-#include "../src/cpp/http/http1_parser.h"
-#include "../src/cpp/core/reactor.h"
-#include "../src/cpp/core/ring_buffer.h"
+#include "src/cpp/http/router.h"
+#include "src/cpp/http/http1_parser.h"
+#include "src/cpp/core/reactor.h"
+#include "src/cpp/core/ring_buffer.h"
 #include <iostream>
 #include <thread>
 #include <vector>

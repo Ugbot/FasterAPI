@@ -256,11 +256,95 @@ public:
      * Get send buffer reference (for zero-copy reads).
      */
     core::RingBuffer& send_buffer() noexcept { return send_buffer_; }
-    
+
     /**
      * Get receive buffer reference (for zero-copy writes).
      */
     core::RingBuffer& recv_buffer() noexcept { return recv_buffer_; }
+
+    /**
+     * Check if there's data to send.
+     */
+    bool has_data_to_send() const noexcept {
+        return send_buffer_.available() > 0 || should_send_fin();
+    }
+
+    /**
+     * Peek at send data without removing from buffer.
+     *
+     * @param out_data Output: pointer to data
+     * @param out_len Output: length of contiguous data available
+     * @return true if data available, false if buffer empty
+     */
+    bool peek_send_data(const uint8_t** out_data, size_t* out_len) const noexcept {
+        size_t available = send_buffer_.available();
+        if (available == 0) {
+            *out_data = nullptr;
+            *out_len = 0;
+            return false;
+        }
+
+        // RingBuffer stores data - we need to get read pointer
+        *out_data = send_buffer_.read_ptr();
+        *out_len = send_buffer_.contiguous_available();
+        return true;
+    }
+
+    /**
+     * Peek at send data, copying to output buffer.
+     *
+     * @param out_buf Output buffer to copy data to
+     * @param max_len Maximum bytes to copy
+     * @return Number of bytes copied
+     */
+    size_t peek_send_data(uint8_t* out_buf, size_t max_len) const noexcept {
+        return send_buffer_.peek(out_buf, max_len);
+    }
+
+    /**
+     * Get current send offset (next byte to send).
+     */
+    uint64_t send_offset() const noexcept { return send_offset_; }
+
+    /**
+     * Get current receive offset.
+     */
+    uint64_t recv_offset() const noexcept { return recv_offset_; }
+
+    /**
+     * Advance send offset after data has been transmitted.
+     *
+     * @param bytes Number of bytes sent
+     */
+    void advance_send_offset(size_t bytes) noexcept {
+        // Consume from send buffer
+        uint8_t tmp[4096];
+        size_t remaining = bytes;
+        while (remaining > 0) {
+            size_t to_read = remaining < sizeof(tmp) ? remaining : sizeof(tmp);
+            ssize_t read = send_buffer_.read(tmp, to_read);
+            if (read <= 0) break;
+            remaining -= read;
+        }
+    }
+
+    /**
+     * Get maximum data that can be sent considering flow control.
+     */
+    size_t max_sendable() const noexcept {
+        if (send_offset_ >= max_send_offset_) return 0;
+        return static_cast<size_t>(max_send_offset_ - send_offset_);
+    }
+
+    /**
+     * Check if FIN has been sent.
+     */
+    bool fin_sent() const noexcept { return fin_sent_; }
+
+    /**
+     * Check if FIN has been received.
+     */
+    bool fin_received() const noexcept { return fin_received_; }
 
 private:
     uint64_t stream_id_;

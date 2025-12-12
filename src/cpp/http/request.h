@@ -5,6 +5,7 @@
 #include <vector>
 #include <memory>
 #include <cstdint>
+#include "multipart_parser.h"
 
 // Forward declarations for uWebSockets
 #ifdef FA_USE_UWEBSOCKETS
@@ -135,10 +136,44 @@ public:
 
     /**
      * Check if request has multipart body.
-     * 
+     *
      * @return true if content type is multipart/form-data
      */
     bool is_multipart() const noexcept;
+
+    /**
+     * Get all uploaded files from multipart request.
+     *
+     * Parses the multipart body on first call and caches the result.
+     *
+     * @return Vector of uploaded files
+     */
+    const std::vector<fasterapi::FileUpload>& files() noexcept;
+
+    /**
+     * Get all form fields from multipart request.
+     *
+     * Parses the multipart body on first call and caches the result.
+     *
+     * @return Vector of form fields
+     */
+    const std::vector<fasterapi::FormField>& form_fields() noexcept;
+
+    /**
+     * Get uploaded file by field name.
+     *
+     * @param name Field name
+     * @return Pointer to file upload, or nullptr if not found
+     */
+    const fasterapi::FileUpload* get_file(const std::string& name) noexcept;
+
+    /**
+     * Get form field value by name.
+     *
+     * @param name Field name
+     * @return Field value, or empty string if not found
+     */
+    std::string get_form_field(const std::string& name) noexcept;
 
     /**
      * Get client IP address.
@@ -229,9 +264,17 @@ private:
     uint64_t timestamp_;
     bool secure_;
 
+    // Multipart form data (lazy-parsed and cached)
+    mutable bool multipart_parsed_ = false;
+    mutable std::vector<fasterapi::FileUpload> files_;
+    mutable std::vector<fasterapi::FormField> form_fields_;
+
     // Parse query string into parameters
     void parse_query_params() noexcept;
 
     // Parse content type
     std::string parse_content_type() const noexcept;
+
+    // Parse multipart body (lazy)
+    void parse_multipart() const noexcept;
 };

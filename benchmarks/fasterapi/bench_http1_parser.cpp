@@ -2,7 +2,7 @@
  * HTTP/1.1 Parser Performance Benchmarks
  */
 
-#include "../src/cpp/http/http1_parser.h"
+#include "src/cpp/http/http1_parser.h"
 #include <iostream>
 #include <chrono>
 #include <cstring>

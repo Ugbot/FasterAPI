@@ -346,6 +346,8 @@ public:
 
 private:
     std::string proxy_name_;
+    
+    static uint64_t now_ms();
 };
 
 /**

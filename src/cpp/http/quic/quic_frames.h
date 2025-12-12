@@ -59,23 +59,22 @@ struct StreamFrame {
     
     /**
      * Parse STREAM frame.
-     * 
-     * @param data Input buffer
+     *
+     * @param frame_type The frame type byte (0x08-0x0f), already consumed by caller
+     * @param data Input buffer (starts after frame type)
      * @param len Buffer length
      * @param out_consumed Bytes consumed
      * @return 0 on success, -1 if need more data, 1 on error
      */
-    int parse(const uint8_t* data_buf, size_t len, size_t& out_consumed) noexcept {
-        if (len == 0) return -1;
-        
-        uint8_t type_byte = data_buf[0];
-        uint8_t flags = type_byte & 0x07;
-        
+    int parse(uint8_t frame_type, const uint8_t* data_buf, size_t len, size_t& out_consumed) noexcept {
+        // Note: Frame type byte is already consumed by caller (process_frames)
+        uint8_t flags = frame_type & 0x07;
+
         fin = (flags & FLAG_FIN) != 0;
         bool has_length = (flags & FLAG_LEN) != 0;
         bool has_offset = (flags & FLAG_OFF) != 0;
-        
-        size_t pos = 1;
+
+        size_t pos = 0;
         
         // Stream ID
         int consumed = VarInt::decode(data_buf + pos, len - pos, stream_id);
@@ -164,10 +163,12 @@ struct AckRange {
 };
 
 struct AckFrame {
+    static constexpr size_t MAX_ACK_RANGES = 64;
+
     uint64_t largest_acked;
     uint64_t ack_delay;
     uint64_t first_ack_range;
-    AckRange ranges[64];  // Max 64 ranges
+    AckRange ranges[MAX_ACK_RANGES];
     size_t range_count;
     
     /**
@@ -180,9 +181,10 @@ struct AckFrame {
      */
     int parse(const uint8_t* data, size_t len, size_t& out_consumed) noexcept {
         if (len == 0) return -1;
-        
-        size_t pos = 1;  // Skip type byte
-        
+
+        // Note: Frame type byte is already consumed by caller (process_frames)
+        size_t pos = 0;
+
         // Largest acknowledged
         int consumed = VarInt::decode(data + pos, len - pos, largest_acked);
         if (consumed < 0) return -1;
@@ -263,12 +265,13 @@ struct CryptoFrame {
     uint64_t offset;
     uint64_t length;
     const uint8_t* data;
-    
+
     int parse(const uint8_t* data_buf, size_t len, size_t& out_consumed) noexcept {
         if (len == 0) return -1;
-        
-        size_t pos = 1;  // Skip type byte
-        
+
+        // Note: Frame type byte is already consumed by caller (process_frames)
+        size_t pos = 0;
+
         // Offset
         int consumed = VarInt::decode(data_buf + pos, len - pos, offset);
         if (consumed < 0) return -1;
@@ -313,7 +316,8 @@ struct ConnectionCloseFrame {
     int parse(const uint8_t* data, size_t len, bool is_app_error, size_t& out_consumed) noexcept {
         if (len == 0) return -1;
 
-        size_t pos = 1;  // Skip type byte
+        // Note: Frame type byte is already consumed by caller (process_frames)
+        size_t pos = 0;
 
         // Error code
         int consumed = VarInt::decode(data + pos, len - pos, error_code);
@@ -360,18 +364,17 @@ struct DatagramFrame {
     /**
      * Parse DATAGRAM frame.
      *
-     * @param data_buf Input buffer
+     * @param frame_type The frame type byte (0x30 or 0x31), already consumed by caller
+     * @param data_buf Input buffer (starts after frame type)
      * @param len Buffer length
      * @param out_consumed Bytes consumed
      * @return 0 on success, -1 if need more data, 1 on error
      */
-    int parse(const uint8_t* data_buf, size_t len, size_t& out_consumed) noexcept {
-        if (len == 0) return -1;
+    int parse(uint8_t frame_type, const uint8_t* data_buf, size_t len, size_t& out_consumed) noexcept {
+        // Note: Frame type byte is already consumed by caller (process_frames)
+        bool has_length = (frame_type == 0x31);
 
-        uint8_t type_byte = data_buf[0];
-        bool has_length = (type_byte == 0x31);
-
-        size_t pos = 1;
+        size_t pos = 0;
 
         // Length (if present)
         if (has_length) {

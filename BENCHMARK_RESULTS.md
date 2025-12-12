@@ -1,9 +1,85 @@
 # FasterAPI C++ Lock-Free Optimization Benchmark Results
 
-**Date**: 2025-10-21
+**Date**: 2025-12-12 (Updated)
 **Platform**: macOS (Apple Silicon)
 **Python**: 3.13.7
 **Compiler**: Clang with -O3 -mcpu=native -flto
+
+## HTTP/1.1 Server Benchmark Results (December 2025)
+
+### Test Configuration
+- **Load Generator**: wrk (industry standard HTTP benchmark tool)
+- **Client Threads**: 8-16
+- **Connections**: 256-512 concurrent
+- **Duration**: 10 seconds per test
+- **Keep-Alive**: Enabled (HTTP/1.1 persistent connections)
+
+### Results Summary
+
+| Test | FasterAPI (C++) | Drogon (C++) | FastAPI (Python) | 
+|------|-----------------|--------------|------------------|
+| Plaintext (256 conn) | **182,856 req/s** | 197,456 req/s | 12,080 req/s |
+| High Concurrency (512 conn) | **175,454 req/s** | 192,009 req/s | 9,121 req/s |
+| HTTP Pipelining (16 req) | **193,056 req/s** | N/A | N/A |
+
+### Relative Performance
+
+| Comparison | Speedup |
+|------------|---------|
+| FasterAPI vs FastAPI | **15-19x faster** |
+| Drogon vs FastAPI | 16-21x faster |
+| FasterAPI vs Drogon | 93% (competitive) |
+
+### Latency Comparison
+
+| Metric | FasterAPI | Drogon | FastAPI |
+|--------|-----------|--------|---------|
+| Average Latency | 1.39ms | 1.31ms | 22.9ms |
+| p99 Latency | ~13ms | ~14ms | ~200ms |
+
+### Key Findings
+
+1. **FasterAPI is 15-19x faster than FastAPI** depending on workload
+2. **FasterAPI achieves 93% of Drogon's throughput** - competitive with best-in-class C++ frameworks
+3. **17x lower latency than FastAPI** - 1.39ms vs 22.9ms average
+4. Pure C++ implementation with kqueue event loops (10 workers)
+5. Scales well under high concurrency (512 connections)
+6. HTTP pipelining support pushes throughput to 193K req/s
+
+### Bugs Fixed During Benchmarking
+
+1. **LOG_DEBUG Mutex Contention** - Macros were calling log() unconditionally, acquiring mutex on every debug statement even when logging was disabled. Fixed by checking log level before calling.
+
+2. **File Descriptor Leak** - `remove_fd()` was being called without `::close(fd)`, causing "Too many open files" errors under load. Fixed by adding `::close(fd)` after every `remove_fd()` call.
+
+3. **50-Request Keep-Alive Limit** - `HTTP1Request.header_count` was never reset between requests on the same connection. After ~50 requests (100 headers), MAX_HEADERS limit was hit and connection was closed. Fixed by resetting `current_request_` in `reset_for_next_request()`.
+
+4. **Lock-Free Logger** - Replaced mutex-based logger with lock-free implementation using thread-local buffers and direct `write()` syscalls. This alone improved throughput from 34K to 154K req/s (4.5x improvement).
+
+### Profiling Analysis (December 2025)
+
+**Final throughput: 191,213 req/s** (with wrk, TechEmpower-style benchmark)
+
+CPU profiling with macOS `sample` tool shows:
+- **100% of sampled time in `kevent`** (I/O wait)
+- Request processing is so fast it doesn't appear in 1ms sampling
+- Server is completely **I/O bound**, not CPU bound
+- No userspace bottlenecks detected
+
+**Potential future optimizations** (diminishing returns):
+- Convert `std::string` to `std::string_view` in request callback to reduce allocations
+- Use object pools for header maps
+- Batch event processing in kqueue
+- io_uring on Linux (more efficient than kqueue)
+
+**Already optimized:**
+- TCP_NODELAY enabled (low latency)
+- SO_REUSEPORT for multi-worker load balancing
+- Edge-triggered kqueue events
+- Lock-free logging
+- HTTP/1.1 keep-alive with proper connection reuse
+
+---
 
 ## Build Status
 

@@ -53,8 +53,34 @@ public:
     HTTP3Parser();
     
     /**
+     * Parse a QUIC variable-length integer.
+     *
+     * Exposed for testing - internally uses quic::VarInt.
+     *
+     * @param data Input buffer
+     * @param len Buffer length
+     * @param out_value Parsed value
+     * @param out_consumed Bytes consumed
+     * @return 0 on success, -1 if need more data
+     */
+    static int parse_varint(
+        const uint8_t* data,
+        size_t len,
+        uint64_t& out_value,
+        size_t& out_consumed
+    ) noexcept {
+        int result = quic::VarInt::decode(data, len, out_value);
+        if (result < 0) {
+            out_consumed = 0;
+            return -1;
+        }
+        out_consumed = static_cast<size_t>(result);
+        return 0;
+    }
+
+    /**
      * Parse frame header.
-     * 
+     *
      * @param data Input buffer
      * @param len Buffer length
      * @param out_header Parsed frame header

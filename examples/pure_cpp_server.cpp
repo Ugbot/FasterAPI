@@ -31,8 +31,38 @@
 #include <iostream>
 #include <csignal>
 #include <atomic>
+#include <random>
+#include <array>
+#include <charconv>
 
 static std::atomic<bool> g_running{true};
+
+// TechEmpower World table simulation (10000 rows)
+// In production, this would be PostgreSQL
+static std::array<int, 10001> g_world_table;  // index 1-10000
+
+// Thread-local random number generator for high performance
+thread_local std::mt19937 t_rng{std::random_device{}()};
+thread_local std::uniform_int_distribution<int> t_id_dist{1, 10000};
+thread_local std::uniform_int_distribution<int> t_rand_dist{1, 10000};
+
+// Fast integer to string conversion
+inline void append_int(std::string& out, int val) {
+    char buf[16];
+    auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), val);
+    out.append(buf, ptr - buf);
+}
+
+// Parse queries parameter (clamp to 1-500)
+inline int parse_queries(std::string_view param) {
+    if (param.empty()) return 1;
+    int val = 0;
+    auto [ptr, ec] = std::from_chars(param.data(), param.data() + param.size(), val);
+    if (ec != std::errc()) return 1;
+    if (val < 1) return 1;
+    if (val > 500) return 500;
+    return val;
+}
 
 void signal_handler(int) {
     std::cout << "\nShutting down..." << std::endl;
@@ -46,6 +76,13 @@ int main() {
 
     // Configure logging (optional)
     fasterapi::core::Logger::instance().set_level(fasterapi::core::LogLevel::INFO);
+
+    // Initialize simulated World table (TechEmpower benchmark)
+    std::mt19937 init_rng{42};  // Deterministic seed for reproducibility
+    std::uniform_int_distribution<int> init_dist{1, 10000};
+    for (int i = 1; i <= 10000; i++) {
+        g_world_table[i] = init_dist(init_rng);
+    }
 
     std::cout << "=== Pure C++ FasterAPI Server ===" << std::endl;
     std::cout << "No Python, no ZMQ, just pure C++ performance." << std::endl;
@@ -72,6 +109,81 @@ int main() {
     app.get("/plaintext", [](fasterapi::Request& req, fasterapi::Response& res) {
         res.header("Content-Type", "text/plain");
         res.send("Hello, World!");
+    });
+
+    // TechEmpower DB test - single database query
+    // Returns: {"id":N,"randomNumber":M}
+    app.get("/db", [](fasterapi::Request& req, fasterapi::Response& res) {
+        int id = t_id_dist(t_rng);
+        int randomNumber = g_world_table[id];
+        
+        std::string json;
+        json.reserve(48);
+        json = R"({"id":)";
+        append_int(json, id);
+        json += R"(,"randomNumber":)";
+        append_int(json, randomNumber);
+        json += "}";
+        
+        res.header("Content-Type", "application/json");
+        res.send(json);
+    });
+
+    // TechEmpower Queries test - multiple database queries
+    // Returns: [{"id":N,"randomNumber":M}, ...]
+    app.get("/queries", [](fasterapi::Request& req, fasterapi::Response& res) {
+        auto queries_param = req.query_param_optional("queries");
+        int queries = parse_queries(queries_param.value_or("1"));
+        
+        std::string json;
+        json.reserve(32 * queries + 2);
+        json = "[";
+        
+        for (int i = 0; i < queries; i++) {
+            if (i > 0) json += ",";
+            int id = t_id_dist(t_rng);
+            int randomNumber = g_world_table[id];
+            
+            json += R"({"id":)";
+            append_int(json, id);
+            json += R"(,"randomNumber":)";
+            append_int(json, randomNumber);
+            json += "}";
+        }
+        json += "]";
+        
+        res.header("Content-Type", "application/json");
+        res.send(json);
+    });
+
+    // TechEmpower Updates test - multiple database updates
+    // Returns: [{"id":N,"randomNumber":M}, ...] where M is the new value
+    app.get("/updates", [](fasterapi::Request& req, fasterapi::Response& res) {
+        auto queries_param = req.query_param_optional("queries");
+        int queries = parse_queries(queries_param.value_or("1"));
+        
+        std::string json;
+        json.reserve(32 * queries + 2);
+        json = "[";
+        
+        for (int i = 0; i < queries; i++) {
+            if (i > 0) json += ",";
+            int id = t_id_dist(t_rng);
+            int newRandomNumber = t_rand_dist(t_rng);
+            
+            // Simulate update
+            g_world_table[id] = newRandomNumber;
+            
+            json += R"({"id":)";
+            append_int(json, id);
+            json += R"(,"randomNumber":)";
+            append_int(json, newRandomNumber);
+            json += "}";
+        }
+        json += "]";
+        
+        res.header("Content-Type", "application/json");
+        res.send(json);
     });
 
     // Health check endpoint

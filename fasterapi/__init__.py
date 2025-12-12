@@ -122,6 +122,8 @@ class App:
         port: int = 8000,
         host: str = "0.0.0.0",
         enable_h2: bool = False,
+        enable_h3: bool = False,
+        enable_compression: bool = True,
         **kwargs,
     ):
         """

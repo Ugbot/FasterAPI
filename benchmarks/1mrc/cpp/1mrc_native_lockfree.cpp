@@ -54,7 +54,8 @@ struct BufferPool {
         ));
 
         if (memory == MAP_FAILED) {
-            throw std::runtime_error("Failed to allocate memory-mapped buffer pool");
+            std::cerr << "ERROR: Failed to allocate memory-mapped buffer pool" << std::endl;
+            std::abort();
         }
 
         // Pre-fault pages to avoid page faults during serving
@@ -493,12 +494,8 @@ int main(int argc, char* argv[]) {
     std::cout << std::endl;
 
     // Allocate memory-mapped buffer pool
-    try {
-        g_buffer_pool = std::make_unique<BufferPool>();
-    } catch (const std::exception& e) {
-        std::cerr << "Failed to initialize buffer pool: " << e.what() << std::endl;
-        return 1;
-    }
+    g_buffer_pool = std::make_unique<BufferPool>();
+    // BufferPool constructor will abort on failure
 
     // Configure listener
     TcpListenerConfig config;

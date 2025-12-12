@@ -3,6 +3,7 @@
 #include "response.h"
 #include "router.h"
 #include "unified_server.h"
+#include "metrics.h"
 #include "core/logger.h"
 #include <thread>
 #include <chrono>
@@ -100,9 +101,24 @@ int HttpServer::add_websocket(const std::string& path, WebSocketHandler handler)
     if (running_.load()) {
         return 1;  // Cannot add routes while running
     }
-    
+
     websocket_handlers_[path] = std::move(handler);
     return 0;
+}
+
+int HttpServer::enable_metrics_endpoint(const std::string& path) noexcept {
+    // Register GET handler for metrics endpoint
+    return add_route("GET", path, [](HttpRequest* req, HttpResponse* res, const fasterapi::http::RouteParams& params) {
+        // Get Prometheus-formatted metrics from HttpMetrics
+        std::string metrics_output = fasterapi::HttpMetrics::instance().export_prometheus();
+
+        // Send response with Prometheus content type
+        // Note: .text() overwrites content-type, so we set it after
+        res->status(HttpResponse::Status::OK)
+           .text(metrics_output)
+           .content_type("text/plain; version=0.0.4; charset=utf-8")
+           .send();
+    });
 }
 
 int HttpServer::start() noexcept {

@@ -314,9 +314,9 @@ class TestUsersCRUD:
         response = client.post("/users", json=user)
         assert response.status_code == 422
 
-        # Invalid email
+        # Email too short (min_length=5)
         user = generate_user_data()
-        user["email"] = "not-an-email"
+        user["email"] = "a@b"  # too short
         response = client.post("/users", json=user)
         assert response.status_code == 422
 

@@ -50,7 +50,7 @@ const PythonCallbackBridge::HandlerMetadata* PythonCallbackBridge::get_websocket
 
 /**
  * Convert PyObject* response to HandlerResult.
- * Handles dicts (→JSON), strings, and other types.
+ * Handles dicts (→JSON), strings, FileResponse, and other types.
  * REQUIRES: GIL must be held by caller.
  */
 static PythonCallbackBridge::HandlerResult convert_python_to_handler_result(PyObject* py_response) {
@@ -62,6 +62,34 @@ static PythonCallbackBridge::HandlerResult convert_python_to_handler_result(PyOb
         result.body = "{\"error\":\"Handler returned null\"}";
         return result;
     }
+
+    // Check for FileResponse (has 'content' and 'media_type' attributes)
+    PyObject* content_attr = PyObject_GetAttrString(py_response, "content");
+    PyObject* media_type_attr = PyObject_GetAttrString(py_response, "media_type");
+
+    if (content_attr && media_type_attr && PyBytes_Check(content_attr)) {
+        // FileResponse - return binary content with media type
+        char* data;
+        Py_ssize_t len;
+        if (PyBytes_AsStringAndSize(content_attr, &data, &len) == 0) {
+            result.body = std::string(data, len);
+            const char* media_type = PyUnicode_AsUTF8(media_type_attr);
+            if (media_type) {
+                result.content_type = media_type;
+            } else {
+                result.content_type = "application/octet-stream";
+            }
+            result.status_code = 200;
+        }
+        Py_DECREF(content_attr);
+        Py_DECREF(media_type_attr);
+        return result;
+    }
+
+    // Clean up if we got one but not both
+    Py_XDECREF(content_attr);
+    Py_XDECREF(media_type_attr);
+    PyErr_Clear();  // Clear any attribute errors
 
     if (PyDict_Check(py_response)) {
         // Dict response - serialize to JSON
@@ -89,6 +117,15 @@ static PythonCallbackBridge::HandlerResult convert_python_to_handler_result(PyOb
         if (str) {
             result.body = str;
             result.content_type = "text/plain";
+            result.status_code = 200;
+        }
+    } else if (PyBytes_Check(py_response)) {
+        // Raw bytes response
+        char* data;
+        Py_ssize_t len;
+        if (PyBytes_AsStringAndSize(py_response, &data, &len) == 0) {
+            result.body = std::string(data, len);
+            result.content_type = "application/octet-stream";
             result.status_code = 200;
         }
     } else {
@@ -737,8 +774,14 @@ PythonCallbackBridge::invoke_handler_async(
                     py_value = Py_None;
                 }
             } else if (param_info.location == fasterapi::http::BODY) {
-                // Extract individual field from parsed JSON body
-                if (parsed_body && PyDict_Check(parsed_body)) {
+                // Handle body parameters
+                if (param_info.type == fasterapi::http::OBJECT && parsed_body) {
+                    // For Pydantic models (type=OBJECT), pass the entire body dict
+                    // The Python handler wrapper will validate and convert to model instance
+                    Py_INCREF(parsed_body);
+                    py_value = parsed_body;
+                } else if (parsed_body && PyDict_Check(parsed_body)) {
+                    // Extract individual field from parsed JSON body
                     PyObject* field_value = PyDict_GetItemString(parsed_body, param_info.name.c_str());
                     if (field_value) {
                         Py_INCREF(field_value);

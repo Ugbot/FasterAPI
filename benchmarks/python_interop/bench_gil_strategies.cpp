@@ -18,9 +18,9 @@
  * - For I/O-bound: All strategies perform similarly
  */
 
-#include "../../src/cpp/python/subinterpreter_pool.h"
-#include "../../src/cpp/python/free_threading.h"
-#include "../../src/cpp/python/gil_guard.h"
+#include "src/cpp/python/subinterpreter_pool.h"
+#include "src/cpp/python/free_threading.h"
+#include "src/cpp/python/gil_guard.h"
 #include <Python.h>
 #include <chrono>
 #include <iostream>

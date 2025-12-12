@@ -46,6 +46,9 @@ UnifiedServer* UnifiedServer::s_instance_ = nullptr;
 // Direct App pointer for simplified Http1 handling
 static ::fasterapi::App* s_app_instance_ = nullptr;
 
+// Ultra-fast callback for maximum performance (zero allocation)
+static Http1Connection::UltraFastCallback s_ultra_fast_callback_ = nullptr;
+
 // Per-thread connection storage
 thread_local std::unordered_map<int, std::unique_ptr<net::TlsSocket>> t_tls_sockets;
 thread_local std::unordered_map<int, std::unique_ptr<http2::Http2Connection>> t_http2_connections;
@@ -235,6 +238,11 @@ WebTransportHandler* UnifiedServer::get_webtransport_handler(const std::string& 
 // Set App instance for direct HTTP/1.1 handling
 void UnifiedServer::set_app_instance(void* app) {
     s_app_instance_ = static_cast<::fasterapi::App*>(app);
+}
+
+// Set ultra-fast callback for maximum performance benchmarks
+void UnifiedServer::set_ultra_fast_callback(Http1Connection::UltraFastCallback callback) {
+    s_ultra_fast_callback_ = callback;
 }
 
 // Signal handler for graceful shutdown
@@ -916,8 +924,12 @@ void UnifiedServer::on_cleartext_connection(net::TcpSocket socket, net::EventLoo
     // Create HTTP/1.1 connection
     auto http1_conn = new Http1Connection(fd);
     
-    // Use fast zero-copy callback for better performance
-    http1_conn->set_fast_request_callback([](const Http1RequestView& view) -> Http1Response {
+    // Use ultra-fast callback if available (zero allocation path)
+    if (s_ultra_fast_callback_) {
+        http1_conn->set_ultra_fast_callback(s_ultra_fast_callback_);
+    } else {
+        // Use fast zero-copy callback for better performance
+        http1_conn->set_fast_request_callback([](const Http1RequestView& view) -> Http1Response {
         Http1Response response;
 
         // Check for WebSocket upgrade request first
@@ -998,7 +1010,8 @@ void UnifiedServer::on_cleartext_connection(net::TcpSocket socket, net::EventLoo
         }
 
         return response;
-    });
+        });
+    }
 
     t_http1_connections[fd] = std::unique_ptr<Http1Connection>(http1_conn);
 

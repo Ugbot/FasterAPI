@@ -22,6 +22,8 @@
 #include <vector>
 #include <array>
 #include <chrono>
+#include <charconv>
+#include <cstring>
 
 namespace fasterapi {
 namespace http {
@@ -100,14 +102,91 @@ struct PipelinedRequest {
  * 
  * Holds a serialized HTTP response waiting to be sent.
  * Responses must be sent in order (FIFO).
+ * 
+ * Uses a pointer to a pooled buffer to avoid per-response allocation.
  */
 struct PipelinedResponse {
-    std::vector<uint8_t> data;    // Serialized HTTP response
+    uint8_t* data = nullptr;      // Pointer to pooled buffer
+    size_t size = 0;              // Bytes written to buffer
+    size_t capacity = 0;          // Buffer capacity
     bool ready = false;           // Response is complete and ready to send
+    bool owns_buffer = false;     // True if we need to release to pool
     
     void clear() noexcept {
-        data.clear();
+        // Note: buffer release handled by Http1Connection
+        data = nullptr;
+        size = 0;
+        capacity = 0;
         ready = false;
+        owns_buffer = false;
+    }
+};
+
+/**
+ * Ultra-fast response writer (zero allocation)
+ * 
+ * Writes HTTP response directly to a pre-allocated buffer.
+ * Used by UltraFastCallback for maximum performance.
+ */
+struct FastResponseWriter {
+    uint8_t* buffer;
+    size_t capacity;
+    size_t size = 0;
+    
+    FastResponseWriter(uint8_t* buf, size_t cap) : buffer(buf), capacity(cap) {}
+    
+    // Write raw bytes
+    bool write(const char* data, size_t len) noexcept {
+        if (size + len > capacity) return false;
+        memcpy(buffer + size, data, len);
+        size += len;
+        return true;
+    }
+    
+    // Write string_view
+    bool write(std::string_view sv) noexcept {
+        return write(sv.data(), sv.size());
+    }
+    
+    // Write common status lines (pre-computed)
+    bool write_status_200() noexcept {
+        static constexpr char s[] = "HTTP/1.1 200 OK\r\n";
+        return write(s, sizeof(s) - 1);
+    }
+    
+    // Write Content-Type: application/json
+    bool write_content_type_json() noexcept {
+        static constexpr char s[] = "Content-Type: application/json\r\n";
+        return write(s, sizeof(s) - 1);
+    }
+    
+    // Write Content-Type: text/plain
+    bool write_content_type_text() noexcept {
+        static constexpr char s[] = "Content-Type: text/plain\r\n";
+        return write(s, sizeof(s) - 1);
+    }
+    
+    // Write Connection: keep-alive
+    bool write_connection_keepalive() noexcept {
+        static constexpr char s[] = "Connection: keep-alive\r\n";
+        return write(s, sizeof(s) - 1);
+    }
+    
+    // Write Content-Length with value
+    bool write_content_length(size_t len) noexcept {
+        char buf[48];
+        char* ptr = buf;
+        memcpy(ptr, "Content-Length: ", 16);
+        ptr += 16;
+        auto [end, ec] = std::to_chars(ptr, ptr + 20, len);
+        *end++ = '\r';
+        *end++ = '\n';
+        return write(buf, end - buf);
+    }
+    
+    // Write end of headers
+    bool write_headers_end() noexcept {
+        return write("\r\n", 2);
     }
 };
 
@@ -183,6 +262,16 @@ public:
      * during the callback invocation.
      */
     using FastRequestCallback = std::function<Http1Response(const Http1RequestView&)>;
+    
+    /**
+     * Ultra-fast callback type (zero allocation)
+     * 
+     * Writes response directly to pre-allocated buffer.
+     * Returns number of bytes written, or 0 on error.
+     * 
+     * This is the fastest path - no std::function, no allocations.
+     */
+    using UltraFastCallback = size_t(*)(const Http1RequestView&, FastResponseWriter&);
 
     /**
      * Create HTTP/1.1 connection
@@ -223,6 +312,19 @@ public:
     void set_fast_request_callback(FastRequestCallback callback) {
         fast_request_callback_ = std::move(callback);
         request_callback_ = nullptr;  // Clear legacy callback
+        ultra_fast_callback_ = nullptr;
+    }
+    
+    /**
+     * Set ultra-fast callback (zero allocation, maximum performance)
+     * 
+     * Uses raw function pointer and writes directly to buffer.
+     * Best for benchmarks and high-throughput scenarios.
+     */
+    void set_ultra_fast_callback(UltraFastCallback callback) {
+        ultra_fast_callback_ = callback;
+        fast_request_callback_ = nullptr;
+        request_callback_ = nullptr;
     }
 
     /**
@@ -454,6 +556,7 @@ private:
     // Callbacks
     RequestCallback request_callback_;
     FastRequestCallback fast_request_callback_;
+    UltraFastCallback ultra_fast_callback_ = nullptr;
 
     // Error tracking
     std::string error_message_;

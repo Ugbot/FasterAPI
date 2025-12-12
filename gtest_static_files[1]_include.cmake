@@ -1,0 +1,5 @@
+if(EXISTS "/Users/bengamble/FasterAPI/gtest_static_files[1]_tests.cmake")
+  include("/Users/bengamble/FasterAPI/gtest_static_files[1]_tests.cmake")
+else()
+  add_test(gtest_static_files_NOT_BUILT gtest_static_files_NOT_BUILT)
+endif()

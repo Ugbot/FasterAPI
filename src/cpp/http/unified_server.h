@@ -246,6 +246,16 @@ public:
     void set_app_instance(void* app);
 
     /**
+     * Set ultra-fast callback for maximum performance HTTP/1.1 handling.
+     * 
+     * This callback writes directly to a pre-allocated buffer with zero allocations.
+     * Best for benchmarks and high-throughput scenarios.
+     *
+     * @param callback Raw function pointer for zero-overhead dispatch
+     */
+    void set_ultra_fast_callback(Http1Connection::UltraFastCallback callback);
+
+    /**
      * Start the server (blocks until stop())
      *
      * Starts listening on configured ports and processes requests.

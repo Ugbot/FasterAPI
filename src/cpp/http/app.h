@@ -563,6 +563,15 @@ public:
         const std::unordered_map<std::string, std::string>& headers,
         const std::string& body
     ) noexcept;
+    
+    /**
+     * Handle HTTP/1.1 request with zero-copy view - used by UnifiedServer fast path.
+     * This avoids string allocations by using string_view into the connection buffer.
+     *
+     * @param view Zero-copy request view (valid only during this call)
+     * @return Http1Response to send to client
+     */
+    http::Http1Response handle_http1_fast(const http::Http1RequestView& view) noexcept;
 
 private:
     Config config_;

@@ -939,6 +939,32 @@ gtest_webtransport/fast:
 .PHONY : gtest_webtransport/fast
 
 #=============================================================================
+# Target rules for targets named gtest_static_files
+
+# Build rule for target.
+gtest_static_files: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 gtest_static_files
+.PHONY : gtest_static_files
+
+# fast build rule for target.
+gtest_static_files/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gtest_static_files.dir/build.make CMakeFiles/gtest_static_files.dir/build
+.PHONY : gtest_static_files/fast
+
+#=============================================================================
+# Target rules for targets named gtest_graceful_shutdown
+
+# Build rule for target.
+gtest_graceful_shutdown: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 gtest_graceful_shutdown
+.PHONY : gtest_graceful_shutdown
+
+# fast build rule for target.
+gtest_graceful_shutdown/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gtest_graceful_shutdown.dir/build.make CMakeFiles/gtest_graceful_shutdown.dir/build
+.PHONY : gtest_graceful_shutdown/fast
+
+#=============================================================================
 # Target rules for targets named gbench_ring_buffer
 
 # Build rule for target.
@@ -2798,6 +2824,7 @@ src/cpp/http/response.o: src/cpp/http/response.cpp.o
 # target to build an object file
 src/cpp/http/response.cpp.o:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/fasterapi_http.dir/build.make CMakeFiles/fasterapi_http.dir/src/cpp/http/response.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gtest_static_files.dir/build.make CMakeFiles/gtest_static_files.dir/src/cpp/http/response.cpp.o
 .PHONY : src/cpp/http/response.cpp.o
 
 src/cpp/http/response.i: src/cpp/http/response.cpp.i
@@ -2806,6 +2833,7 @@ src/cpp/http/response.i: src/cpp/http/response.cpp.i
 # target to preprocess a source file
 src/cpp/http/response.cpp.i:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/fasterapi_http.dir/build.make CMakeFiles/fasterapi_http.dir/src/cpp/http/response.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gtest_static_files.dir/build.make CMakeFiles/gtest_static_files.dir/src/cpp/http/response.cpp.i
 .PHONY : src/cpp/http/response.cpp.i
 
 src/cpp/http/response.s: src/cpp/http/response.cpp.s
@@ -2814,6 +2842,7 @@ src/cpp/http/response.s: src/cpp/http/response.cpp.s
 # target to generate assembly for a file
 src/cpp/http/response.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/fasterapi_http.dir/build.make CMakeFiles/fasterapi_http.dir/src/cpp/http/response.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gtest_static_files.dir/build.make CMakeFiles/gtest_static_files.dir/src/cpp/http/response.cpp.s
 .PHONY : src/cpp/http/response.cpp.s
 
 src/cpp/http/route_metadata.o: src/cpp/http/route_metadata.cpp.o
@@ -3980,6 +4009,33 @@ src/cpp/pg/pg_result.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/fasterapi_pg.dir/build.make CMakeFiles/fasterapi_pg.dir/src/cpp/pg/pg_result.cpp.s
 .PHONY : src/cpp/pg/pg_result.cpp.s
 
+src/cpp/python/binary_kwargs.o: src/cpp/python/binary_kwargs.cpp.o
+.PHONY : src/cpp/python/binary_kwargs.o
+
+# target to build an object file
+src/cpp/python/binary_kwargs.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/fasterapi_http.dir/build.make CMakeFiles/fasterapi_http.dir/src/cpp/python/binary_kwargs.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/bench_gil_strategies.dir/build.make CMakeFiles/bench_gil_strategies.dir/src/cpp/python/binary_kwargs.cpp.o
+.PHONY : src/cpp/python/binary_kwargs.cpp.o
+
+src/cpp/python/binary_kwargs.i: src/cpp/python/binary_kwargs.cpp.i
+.PHONY : src/cpp/python/binary_kwargs.i
+
+# target to preprocess a source file
+src/cpp/python/binary_kwargs.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/fasterapi_http.dir/build.make CMakeFiles/fasterapi_http.dir/src/cpp/python/binary_kwargs.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/bench_gil_strategies.dir/build.make CMakeFiles/bench_gil_strategies.dir/src/cpp/python/binary_kwargs.cpp.i
+.PHONY : src/cpp/python/binary_kwargs.cpp.i
+
+src/cpp/python/binary_kwargs.s: src/cpp/python/binary_kwargs.cpp.s
+.PHONY : src/cpp/python/binary_kwargs.s
+
+# target to generate assembly for a file
+src/cpp/python/binary_kwargs.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/fasterapi_http.dir/build.make CMakeFiles/fasterapi_http.dir/src/cpp/python/binary_kwargs.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/bench_gil_strategies.dir/build.make CMakeFiles/bench_gil_strategies.dir/src/cpp/python/binary_kwargs.cpp.s
+.PHONY : src/cpp/python/binary_kwargs.cpp.s
+
 src/cpp/python/free_threading.o: src/cpp/python/free_threading.cpp.o
 .PHONY : src/cpp/python/free_threading.o
 
@@ -4411,6 +4467,54 @@ tests/core/ring_buffer_test.s: tests/core/ring_buffer_test.cpp.s
 tests/core/ring_buffer_test.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/gtest_ring_buffer.dir/build.make CMakeFiles/gtest_ring_buffer.dir/tests/core/ring_buffer_test.cpp.s
 .PHONY : tests/core/ring_buffer_test.cpp.s
+
+tests/gtest/gtest_graceful_shutdown.o: tests/gtest/gtest_graceful_shutdown.cpp.o
+.PHONY : tests/gtest/gtest_graceful_shutdown.o
+
+# target to build an object file
+tests/gtest/gtest_graceful_shutdown.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gtest_graceful_shutdown.dir/build.make CMakeFiles/gtest_graceful_shutdown.dir/tests/gtest/gtest_graceful_shutdown.cpp.o
+.PHONY : tests/gtest/gtest_graceful_shutdown.cpp.o
+
+tests/gtest/gtest_graceful_shutdown.i: tests/gtest/gtest_graceful_shutdown.cpp.i
+.PHONY : tests/gtest/gtest_graceful_shutdown.i
+
+# target to preprocess a source file
+tests/gtest/gtest_graceful_shutdown.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gtest_graceful_shutdown.dir/build.make CMakeFiles/gtest_graceful_shutdown.dir/tests/gtest/gtest_graceful_shutdown.cpp.i
+.PHONY : tests/gtest/gtest_graceful_shutdown.cpp.i
+
+tests/gtest/gtest_graceful_shutdown.s: tests/gtest/gtest_graceful_shutdown.cpp.s
+.PHONY : tests/gtest/gtest_graceful_shutdown.s
+
+# target to generate assembly for a file
+tests/gtest/gtest_graceful_shutdown.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gtest_graceful_shutdown.dir/build.make CMakeFiles/gtest_graceful_shutdown.dir/tests/gtest/gtest_graceful_shutdown.cpp.s
+.PHONY : tests/gtest/gtest_graceful_shutdown.cpp.s
+
+tests/gtest/gtest_static_files.o: tests/gtest/gtest_static_files.cpp.o
+.PHONY : tests/gtest/gtest_static_files.o
+
+# target to build an object file
+tests/gtest/gtest_static_files.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gtest_static_files.dir/build.make CMakeFiles/gtest_static_files.dir/tests/gtest/gtest_static_files.cpp.o
+.PHONY : tests/gtest/gtest_static_files.cpp.o
+
+tests/gtest/gtest_static_files.i: tests/gtest/gtest_static_files.cpp.i
+.PHONY : tests/gtest/gtest_static_files.i
+
+# target to preprocess a source file
+tests/gtest/gtest_static_files.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gtest_static_files.dir/build.make CMakeFiles/gtest_static_files.dir/tests/gtest/gtest_static_files.cpp.i
+.PHONY : tests/gtest/gtest_static_files.cpp.i
+
+tests/gtest/gtest_static_files.s: tests/gtest/gtest_static_files.cpp.s
+.PHONY : tests/gtest/gtest_static_files.s
+
+# target to generate assembly for a file
+tests/gtest/gtest_static_files.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/gtest_static_files.dir/build.make CMakeFiles/gtest_static_files.dir/tests/gtest/gtest_static_files.cpp.s
+.PHONY : tests/gtest/gtest_static_files.cpp.s
 
 tests/gtest/gtest_websocket.o: tests/gtest/gtest_websocket.cpp.o
 .PHONY : tests/gtest/gtest_websocket.o
@@ -5360,12 +5464,14 @@ help:
 	@echo "... gmock_main"
 	@echo "... gtest"
 	@echo "... gtest_event_loop"
+	@echo "... gtest_graceful_shutdown"
 	@echo "... gtest_http1_parser"
 	@echo "... gtest_http2_frame"
 	@echo "... gtest_lockfree_queue"
 	@echo "... gtest_main"
 	@echo "... gtest_ring_buffer"
 	@echo "... gtest_router"
+	@echo "... gtest_static_files"
 	@echo "... gtest_tcp_socket"
 	@echo "... gtest_websocket"
 	@echo "... gtest_webtransport"
@@ -5708,6 +5814,9 @@ help:
 	@echo "... src/cpp/pg/pg_result.o"
 	@echo "... src/cpp/pg/pg_result.i"
 	@echo "... src/cpp/pg/pg_result.s"
+	@echo "... src/cpp/python/binary_kwargs.o"
+	@echo "... src/cpp/python/binary_kwargs.i"
+	@echo "... src/cpp/python/binary_kwargs.s"
 	@echo "... src/cpp/python/free_threading.o"
 	@echo "... src/cpp/python/free_threading.i"
 	@echo "... src/cpp/python/free_threading.s"
@@ -5756,6 +5865,12 @@ help:
 	@echo "... tests/core/ring_buffer_test.o"
 	@echo "... tests/core/ring_buffer_test.i"
 	@echo "... tests/core/ring_buffer_test.s"
+	@echo "... tests/gtest/gtest_graceful_shutdown.o"
+	@echo "... tests/gtest/gtest_graceful_shutdown.i"
+	@echo "... tests/gtest/gtest_graceful_shutdown.s"
+	@echo "... tests/gtest/gtest_static_files.o"
+	@echo "... tests/gtest/gtest_static_files.i"
+	@echo "... tests/gtest/gtest_static_files.s"
 	@echo "... tests/gtest/gtest_websocket.o"
 	@echo "... tests/gtest/gtest_websocket.i"
 	@echo "... tests/gtest/gtest_websocket.s"

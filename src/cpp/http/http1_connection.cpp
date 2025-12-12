@@ -11,9 +11,109 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <cerrno>
+#include <ctime>
+#include <charconv>
 
 namespace fasterapi {
 namespace http {
+
+// ============================================================================
+// Pre-built static response fragments (avoid per-request string building)
+// ============================================================================
+static constexpr char HTTP11_200[] = "HTTP/1.1 200 OK\r\n";
+static constexpr char HTTP11_201[] = "HTTP/1.1 201 Created\r\n";
+static constexpr char HTTP11_204[] = "HTTP/1.1 204 No Content\r\n";
+static constexpr char HTTP11_400[] = "HTTP/1.1 400 Bad Request\r\n";
+static constexpr char HTTP11_404[] = "HTTP/1.1 404 Not Found\r\n";
+static constexpr char HTTP11_500[] = "HTTP/1.1 500 Internal Server Error\r\n";
+static constexpr char CONN_KEEPALIVE[] = "Connection: keep-alive\r\n";
+static constexpr char CONN_CLOSE[] = "Connection: close\r\n";
+static constexpr char CRLF[] = "\r\n";
+
+// Thread-local cached Date header (updated once per second)
+thread_local char t_date_header[64] = "Date: Thu, 01 Jan 1970 00:00:00 GMT\r\n";
+thread_local size_t t_date_header_len = 37;
+thread_local time_t t_cached_time = 0;
+
+// Thread-local response buffer (reused to avoid allocations)
+thread_local std::vector<uint8_t> t_response_buffer;
+
+// ============================================================================
+// Thread-local buffer pool for pipeline responses
+// Pre-allocates 16 x 8KB buffers per thread to avoid malloc/free in hot path
+// ============================================================================
+static constexpr size_t POOL_BUFFER_SIZE = 8192;
+static constexpr size_t POOL_BUFFER_COUNT = 16;
+
+struct alignas(64) PoolBuffer {
+    uint8_t data[POOL_BUFFER_SIZE];
+};
+
+struct BufferPool {
+    std::array<PoolBuffer, POOL_BUFFER_COUNT> buffers;
+    std::array<bool, POOL_BUFFER_COUNT> in_use{};
+    bool initialized = false;
+    
+    void init() noexcept {
+        if (initialized) return;
+        for (size_t i = 0; i < POOL_BUFFER_COUNT; i++) {
+            in_use[i] = false;
+        }
+        initialized = true;
+    }
+    
+    // Acquire a buffer from the pool
+    // Returns pointer to buffer and its capacity, or nullptr if exhausted
+    uint8_t* acquire(size_t& capacity) noexcept {
+        if (!initialized) init();
+        for (size_t i = 0; i < POOL_BUFFER_COUNT; i++) {
+            if (!in_use[i]) {
+                in_use[i] = true;
+                capacity = POOL_BUFFER_SIZE;
+                return buffers[i].data;
+            }
+        }
+        capacity = 0;
+        return nullptr;  // Pool exhausted
+    }
+    
+    // Release a buffer back to the pool
+    void release(uint8_t* buf) noexcept {
+        if (!buf) return;
+        for (size_t i = 0; i < POOL_BUFFER_COUNT; i++) {
+            if (buffers[i].data == buf) {
+                in_use[i] = false;
+                return;
+            }
+        }
+    }
+};
+
+thread_local BufferPool t_buffer_pool;
+
+static inline void update_cached_date() noexcept {
+    time_t now = time(nullptr);
+    if (now != t_cached_time) {
+        t_cached_time = now;
+        struct tm tm_buf;
+        gmtime_r(&now, &tm_buf);
+        t_date_header_len = strftime(t_date_header, sizeof(t_date_header),
+            "Date: %a, %d %b %Y %H:%M:%S GMT\r\n", &tm_buf);
+    }
+}
+
+// Fast status line lookup
+static inline const char* get_status_line(uint16_t status, size_t& len) noexcept {
+    switch (status) {
+        case 200: len = sizeof(HTTP11_200) - 1; return HTTP11_200;
+        case 201: len = sizeof(HTTP11_201) - 1; return HTTP11_201;
+        case 204: len = sizeof(HTTP11_204) - 1; return HTTP11_204;
+        case 400: len = sizeof(HTTP11_400) - 1; return HTTP11_400;
+        case 404: len = sizeof(HTTP11_404) - 1; return HTTP11_404;
+        case 500: len = sizeof(HTTP11_500) - 1; return HTTP11_500;
+        default: len = 0; return nullptr;
+    }
+}
 
 using core::result;
 using core::ok;
@@ -209,8 +309,11 @@ void Http1Connection::reset_for_next_request() noexcept {
         pipeline_write_idx_ = 0;
         pipeline_read_idx_ = 0;
         
-        // Clear any leftover response slots
+        // Release any pooled buffers and clear response slots
         for (auto& resp : pipeline_responses_) {
+            if (resp.owns_buffer && resp.data) {
+                t_buffer_pool.release(resp.data);
+            }
             resp.clear();
         }
         for (auto& req : pipeline_requests_) {
@@ -360,58 +463,87 @@ void Http1Connection::build_response(const Http1Response& response) noexcept {
     pending_websocket_upgrade_ = response.websocket_upgrade;
     pending_websocket_path_ = response.websocket_path;
 
-    // Build entire response as string first (like benchmark does)
-    // This avoids complex vector operations and potential iterator invalidation
-    std::string response_str;
-    response_str.reserve(8192);  // Reserve space to minimize reallocations
+    // Reuse output buffer (just clear, keep capacity)
+    output_buffer_.clear();
+    
+    // Pre-allocate estimated size
+    size_t estimated = 256 + response.body.size();
+    if (output_buffer_.capacity() < estimated) {
+        output_buffer_.reserve(estimated);
+    }
 
-    // Status line
-    response_str += build_status_line(response.status, response.status_message);
+    // Status line - use pre-built strings for common codes
+    size_t status_len = 0;
+    const char* status_line = get_status_line(response.status, status_len);
+    if (status_line) {
+        output_buffer_.insert(output_buffer_.end(), status_line, status_line + status_len);
+    } else {
+        // Fallback for uncommon status codes
+        char status_buf[64];
+        int len = snprintf(status_buf, sizeof(status_buf), "HTTP/1.1 %u %s\r\n",
+                          response.status, response.status_message.c_str());
+        output_buffer_.insert(output_buffer_.end(), status_buf, status_buf + len);
+    }
 
     // Track important headers
     bool has_content_length = false;
     bool has_connection = false;
+    bool has_date = false;
 
     // Headers
     for (const auto& [name, value] : response.headers) {
-        response_str += name;
-        response_str += ": ";
-        response_str += value;
-        response_str += "\r\n";
+        output_buffer_.insert(output_buffer_.end(), name.begin(), name.end());
+        output_buffer_.push_back(':');
+        output_buffer_.push_back(' ');
+        output_buffer_.insert(output_buffer_.end(), value.begin(), value.end());
+        output_buffer_.push_back('\r');
+        output_buffer_.push_back('\n');
 
-        if (name == "Content-Length" || name == "content-length") {
+        // Fast check: compare length and first char before full string compare
+        if (name.size() == 14 && (name[0] == 'C' || name[0] == 'c')) {
             has_content_length = true;
-        }
-        if (name == "Connection" || name == "connection") {
+        } else if (name.size() == 10 && (name[0] == 'C' || name[0] == 'c')) {
             has_connection = true;
+        } else if (name.size() == 4 && (name[0] == 'D' || name[0] == 'd')) {
+            has_date = true;
         }
     }
 
-    // Add Content-Length if not present
-    if (!has_content_length && !response.body.empty()) {
-        response_str += "Content-Length: ";
-        response_str += std::to_string(response.body.size());
-        response_str += "\r\n";
+    // Add Date header (cached, updated once/second)
+    if (!has_date) {
+        update_cached_date();
+        output_buffer_.insert(output_buffer_.end(), t_date_header, t_date_header + t_date_header_len);
     }
 
-    // Add Connection header if not present
+    // Add Content-Length if not present (use to_chars, no allocation)
+    if (!has_content_length && !response.body.empty()) {
+        char cl_buf[48];
+        char* ptr = cl_buf;
+        memcpy(ptr, "Content-Length: ", 16);
+        ptr += 16;
+        auto [end, ec] = std::to_chars(ptr, ptr + 20, response.body.size());
+        *end++ = '\r';
+        *end++ = '\n';
+        output_buffer_.insert(output_buffer_.end(), cl_buf, end);
+    }
+
+    // Add Connection header if not present (use pre-built strings)
     if (!has_connection) {
-        response_str += "Connection: ";
-        response_str += keep_alive_ ? "keep-alive" : "close";
-        response_str += "\r\n";
+        if (keep_alive_) {
+            output_buffer_.insert(output_buffer_.end(), CONN_KEEPALIVE, CONN_KEEPALIVE + sizeof(CONN_KEEPALIVE) - 1);
+        } else {
+            output_buffer_.insert(output_buffer_.end(), CONN_CLOSE, CONN_CLOSE + sizeof(CONN_CLOSE) - 1);
+        }
     }
 
     // End of headers
-    response_str += "\r\n";
+    output_buffer_.push_back('\r');
+    output_buffer_.push_back('\n');
 
     // Body
     if (!response.body.empty()) {
-        response_str += response.body;
+        output_buffer_.insert(output_buffer_.end(), response.body.begin(), response.body.end());
     }
-
-    // Copy complete string to output buffer (single operation)
-    output_buffer_.clear();
-    output_buffer_.insert(output_buffer_.end(), response_str.begin(), response_str.end());
 
     LOG_DEBUG("HTTP1", "Response built: %zu bytes", output_buffer_.size());
 }
@@ -586,34 +718,71 @@ void Http1Connection::process_pending_requests() noexcept {
         }
         
         // Call the request handler
-        Http1Response response;
-        if (fast_request_callback_) {
-            response = fast_request_callback_(view);
-        } else if (request_callback_) {
-            // Legacy callback - need to allocate
-            std::unordered_map<std::string, std::string> headers;
-            for (size_t h = 0; h < req.header_count; h++) {
-                headers[std::string(req.headers[h].name)] = std::string(req.headers[h].value);
+        if (ultra_fast_callback_) {
+            // Ultra-fast path: write directly to pooled buffer, zero allocations
+            size_t capacity = 0;
+            uint8_t* buf = t_buffer_pool.acquire(capacity);
+            
+            if (buf) {
+                FastResponseWriter writer(buf, capacity);
+                size_t written = ultra_fast_callback_(view, writer);
+                
+                if (written > 0) {
+                    resp_slot.data = buf;
+                    resp_slot.size = written;
+                    resp_slot.capacity = capacity;
+                    resp_slot.owns_buffer = true;
+                    resp_slot.ready = true;
+                } else {
+                    // Callback failed - return 500 using the pooled buffer
+                    static constexpr char err_resp[] = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 21\r\nConnection: keep-alive\r\n\r\nInternal Server Error";
+                    memcpy(buf, err_resp, sizeof(err_resp) - 1);
+                    resp_slot.data = buf;
+                    resp_slot.size = sizeof(err_resp) - 1;
+                    resp_slot.capacity = capacity;
+                    resp_slot.owns_buffer = true;
+                    resp_slot.ready = true;
+                }
+            } else {
+                // Pool exhausted - use static error response
+                static constexpr char err_resp[] = "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 19\r\nConnection: close\r\n\r\nService Unavailable";
+                resp_slot.data = const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(err_resp));
+                resp_slot.size = sizeof(err_resp) - 1;
+                resp_slot.capacity = 0;
+                resp_slot.owns_buffer = false;  // Don't release static buffer
+                resp_slot.ready = true;
             }
-            response = request_callback_(
-                std::string(req.method_str),
-                std::string(req.url),
-                headers,
-                std::string(view.body)
-            );
+            req_slot.processed = true;
         } else {
-            // No callback - return 500
-            response.status = 500;
-            response.status_message = "Internal Server Error";
-            response.body = "No request handler configured";
+            Http1Response response;
+            if (fast_request_callback_) {
+                response = fast_request_callback_(view);
+            } else if (request_callback_) {
+                // Legacy callback - need to allocate
+                std::unordered_map<std::string, std::string> headers;
+                for (size_t h = 0; h < req.header_count; h++) {
+                    headers[std::string(req.headers[h].name)] = std::string(req.headers[h].value);
+                }
+                response = request_callback_(
+                    std::string(req.method_str),
+                    std::string(req.url),
+                    headers,
+                    std::string(view.body)
+                );
+            } else {
+                // No callback - return 500
+                response.status = 500;
+                response.status_message = "Internal Server Error";
+                response.body = "No request handler configured";
+            }
+            
+            // Build response into the pipeline slot
+            build_pipelined_response(response, resp_slot);
+            req_slot.processed = true;
         }
         
-        // Build response into the pipeline slot
-        build_pipelined_response(response, resp_slot);
-        req_slot.processed = true;
-        
-        LOG_DEBUG("HTTP1", "Processed pipelined request %zu, response %d %zu bytes",
-                  i, response.status, resp_slot.data.size());
+        LOG_DEBUG("HTTP1", "Processed pipelined request %zu, response %zu bytes",
+                  i, resp_slot.size);
         
         idx = (idx + 1) % MAX_PIPELINE_DEPTH;
     }
@@ -623,7 +792,7 @@ void Http1Connection::process_pending_requests() noexcept {
 }
 
 void Http1Connection::flush_ready_responses() noexcept {
-    // Send responses in FIFO order (head-of-line blocking as per HTTP/1.1 spec)
+    // Copy ready responses to output_buffer_ for send()
     while (pipeline_count_ > 0) {
         auto& resp = pipeline_responses_[pipeline_read_idx_];
         
@@ -633,7 +802,14 @@ void Http1Connection::flush_ready_responses() noexcept {
         }
         
         // Append response to output buffer
-        output_buffer_.insert(output_buffer_.end(), resp.data.begin(), resp.data.end());
+        if (resp.data && resp.size > 0) {
+            output_buffer_.insert(output_buffer_.end(), resp.data, resp.data + resp.size);
+        }
+        
+        // Release buffer back to pool if we own it
+        if (resp.owns_buffer && resp.data) {
+            t_buffer_pool.release(resp.data);
+        }
         
         // Clear slot for reuse
         resp.clear();
@@ -656,66 +832,102 @@ void Http1Connection::flush_ready_responses() noexcept {
 }
 
 void Http1Connection::build_pipelined_response(const Http1Response& response, PipelinedResponse& out) noexcept {
-    out.data.clear();
-    out.data.reserve(256 + response.body.size());
+    // Acquire buffer from pool
+    size_t capacity = 0;
+    uint8_t* buf = t_buffer_pool.acquire(capacity);
     
-    // Status line: "HTTP/1.1 XXX Message\r\n"
-    const char* http11 = "HTTP/1.1 ";
-    out.data.insert(out.data.end(), http11, http11 + 9);
+    if (!buf) {
+        // Pool exhausted - use static error response
+        static constexpr char err_resp[] = "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 19\r\nConnection: close\r\n\r\nService Unavailable";
+        out.data = const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(err_resp));
+        out.size = sizeof(err_resp) - 1;
+        out.capacity = 0;
+        out.owns_buffer = false;
+        out.ready = true;
+        return;
+    }
     
-    std::string status_str = std::to_string(response.status);
-    out.data.insert(out.data.end(), status_str.begin(), status_str.end());
-    out.data.push_back(' ');
-    out.data.insert(out.data.end(), response.status_message.begin(), response.status_message.end());
-    out.data.push_back('\r');
-    out.data.push_back('\n');
+    size_t pos = 0;
+    
+    // Helper to write to buffer
+    auto write = [&](const char* data, size_t len) -> bool {
+        if (pos + len > capacity) return false;
+        memcpy(buf + pos, data, len);
+        pos += len;
+        return true;
+    };
+    
+    // Status line - try fast path first
+    size_t status_len = 0;
+    const char* status_line = get_status_line(response.status, status_len);
+    if (status_line) {
+        write(status_line, status_len);
+    } else {
+        // Fallback for uncommon status codes
+        char status_buf[64];
+        int len = snprintf(status_buf, sizeof(status_buf), "HTTP/1.1 %u %s\r\n",
+                          response.status, response.status_message.c_str());
+        write(status_buf, len);
+    }
     
     // Track important headers
     bool has_content_length = false;
     bool has_connection = false;
+    bool has_date = false;
     
     // Headers
     for (const auto& [name, value] : response.headers) {
-        out.data.insert(out.data.end(), name.begin(), name.end());
-        out.data.push_back(':');
-        out.data.push_back(' ');
-        out.data.insert(out.data.end(), value.begin(), value.end());
-        out.data.push_back('\r');
-        out.data.push_back('\n');
+        write(name.data(), name.size());
+        write(": ", 2);
+        write(value.data(), value.size());
+        write("\r\n", 2);
         
-        if (name == "Content-Length" || name == "content-length") {
+        // Fast check: compare length and first char before full string compare
+        if (name.size() == 14 && (name[0] == 'C' || name[0] == 'c')) {
             has_content_length = true;
-        }
-        if (name == "Connection" || name == "connection") {
+        } else if (name.size() == 10 && (name[0] == 'C' || name[0] == 'c')) {
             has_connection = true;
+        } else if (name.size() == 4 && (name[0] == 'D' || name[0] == 'd')) {
+            has_date = true;
         }
     }
     
-    // Add Content-Length if not present
+    // Add Date header (cached, updated once/second)
+    if (!has_date) {
+        update_cached_date();
+        write(t_date_header, t_date_header_len);
+    }
+    
+    // Add Content-Length using to_chars (no allocation)
     if (!has_content_length) {
-        const char* cl = "Content-Length: ";
-        out.data.insert(out.data.end(), cl, cl + 16);
-        std::string len_str = std::to_string(response.body.size());
-        out.data.insert(out.data.end(), len_str.begin(), len_str.end());
-        out.data.push_back('\r');
-        out.data.push_back('\n');
+        char cl_buf[48];
+        char* ptr = cl_buf;
+        memcpy(ptr, "Content-Length: ", 16);
+        ptr += 16;
+        auto [end, ec] = std::to_chars(ptr, ptr + 20, response.body.size());
+        *end++ = '\r';
+        *end++ = '\n';
+        write(cl_buf, end - cl_buf);
     }
     
     // Add Connection header if not present (always keep-alive for pipelining)
     if (!has_connection) {
-        const char* conn = "Connection: keep-alive\r\n";
-        out.data.insert(out.data.end(), conn, conn + 24);
+        write(CONN_KEEPALIVE, sizeof(CONN_KEEPALIVE) - 1);
     }
     
     // End of headers
-    out.data.push_back('\r');
-    out.data.push_back('\n');
+    write("\r\n", 2);
     
     // Body
     if (!response.body.empty()) {
-        out.data.insert(out.data.end(), response.body.begin(), response.body.end());
+        write(response.body.data(), response.body.size());
     }
     
+    // Set output
+    out.data = buf;
+    out.size = pos;
+    out.capacity = capacity;
+    out.owns_buffer = true;
     out.ready = true;
 }
 

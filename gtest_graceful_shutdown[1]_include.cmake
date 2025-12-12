@@ -1,0 +1,5 @@
+if(EXISTS "/Users/bengamble/FasterAPI/gtest_graceful_shutdown[1]_tests.cmake")
+  include("/Users/bengamble/FasterAPI/gtest_graceful_shutdown[1]_tests.cmake")
+else()
+  add_test(gtest_graceful_shutdown_NOT_BUILT gtest_graceful_shutdown_NOT_BUILT)
+endif()

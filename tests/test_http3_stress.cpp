@@ -77,14 +77,12 @@ static std::string current_test_error;
         return; \
     }
 
+// Note: Exceptions are disabled, so we just execute the expression directly.
+// If it crashes, the test will crash. This is intentional for stress testing.
 #define ASSERT_NO_CRASH(expr) \
-    try { \
-        expr; \
-    } catch (...) { \
-        current_test_failed = true; \
-        current_test_error = "Unexpected exception or crash: " #expr; \
-        return; \
-    }
+    do { \
+        (void)(expr); \
+    } while(0)
 
 // ============================================================================
 // Test Helpers

@@ -182,10 +182,88 @@ if (Python3_VERSION_MAJOR EQUAL 3 AND Python3_VERSION_MINOR GREATER_EQUAL 13)
     add_compile_definitions(FASTERAPI_FREE_THREADING_AVAILABLE)
 endif()
 
-# OpenSSL (required for TLS, ALPN)
+# SSL Library Selection (quictls for QUIC support)
+# quictls is OpenSSL + BoringSSL's QUIC API - used by nginx, curl, etc.
+option(FA_USE_QUICTLS "Use quictls for QUIC-TLS support" ON)
+
 if (FA_ENABLE_HTTP2 OR FA_ENABLE_HTTP3)
-    find_package(OpenSSL REQUIRED)
-    message(STATUS "OpenSSL found: ${OPENSSL_VERSION}")
+    if (FA_USE_QUICTLS)
+        # Try to find quictls first (installed via brew install quictls/quictls/quictls)
+        # or built from source at /opt/quictls
+        set(QUICTLS_SEARCH_PATHS
+            $ENV{HOME}/.local/quictls
+            /Users/bengamble/.local/quictls
+            /opt/homebrew/opt/quictls
+            /usr/local/opt/quictls
+            /opt/quictls
+            $ENV{QUICTLS_ROOT}
+        )
+
+        set(QUICTLS_FOUND FALSE)
+        foreach(QUICTLS_PATH ${QUICTLS_SEARCH_PATHS})
+            if (EXISTS "${QUICTLS_PATH}/include/openssl/ssl.h")
+                set(QUICTLS_FOUND TRUE)
+                set(QUICTLS_ROOT ${QUICTLS_PATH})
+                break()
+            endif()
+        endforeach()
+
+        if (QUICTLS_FOUND)
+            message(STATUS "quictls found at: ${QUICTLS_ROOT}")
+
+            # Create imported targets
+            add_library(OpenSSL::SSL SHARED IMPORTED)
+            set_target_properties(OpenSSL::SSL PROPERTIES
+                IMPORTED_LOCATION "${QUICTLS_ROOT}/lib/libssl.dylib"
+                INTERFACE_INCLUDE_DIRECTORIES "${QUICTLS_ROOT}/include"
+            )
+
+            add_library(OpenSSL::Crypto SHARED IMPORTED)
+            set_target_properties(OpenSSL::Crypto PROPERTIES
+                IMPORTED_LOCATION "${QUICTLS_ROOT}/lib/libcrypto.dylib"
+                INTERFACE_INCLUDE_DIRECTORIES "${QUICTLS_ROOT}/include"
+            )
+
+            # Make sure quictls headers are found first
+            include_directories(BEFORE "${QUICTLS_ROOT}/include")
+            link_directories("${QUICTLS_ROOT}/lib")
+
+            # Set OPENSSL_FOUND so that linking works
+            set(OPENSSL_FOUND TRUE)
+            set(OPENSSL_VERSION "quictls-3.1.5")
+
+            add_compile_definitions(FASTERAPI_USE_QUICTLS)
+            message(STATUS "quictls enabled - QUIC-TLS API available")
+        else()
+            message(STATUS "quictls not found - will build from source via CPM")
+
+            # Build quictls from source
+            CPMAddPackage(
+                NAME quictls
+                GITHUB_REPOSITORY quictls/openssl
+                GIT_TAG openssl-3.1.4-quic1
+                OPTIONS
+                    "BUILD_SHARED_LIBS ON"
+            )
+
+            if (quictls_ADDED)
+                # quictls doesn't have standard CMake, need to run Configure
+                message(STATUS "quictls source at: ${quictls_SOURCE_DIR}")
+                message(WARNING "quictls requires manual build - run: cd ${quictls_SOURCE_DIR} && ./Configure && make")
+
+                # For now, fall back to system OpenSSL
+                find_package(OpenSSL REQUIRED)
+                message(STATUS "Using system OpenSSL: ${OPENSSL_VERSION}")
+                message(WARNING "System OpenSSL lacks QUIC API - install quictls for full HTTP/3 support")
+                message(WARNING "  brew tap quictls/quictls && brew install quictls")
+            endif()
+        endif()
+    else()
+        # Use system OpenSSL
+        find_package(OpenSSL REQUIRED)
+        message(STATUS "OpenSSL found: ${OPENSSL_VERSION}")
+        message(WARNING "System OpenSSL does not have QUIC-TLS API - HTTP/3 will be limited")
+    endif()
 endif()
 
 # ZeroMQ (optional IPC transport for multi-language workers)
@@ -637,9 +715,10 @@ if (FA_BUILD_HTTP)
     target_include_directories(fasterapi_http PRIVATE ${CMAKE_SOURCE_DIR}/src/cpp)
 
     # Add compile definitions
+    # Note: FASTERAPI_ENABLE_LOGGING disabled for max performance
+    # Enable it for debugging: add FASTERAPI_ENABLE_LOGGING below
     target_compile_definitions(fasterapi_http PRIVATE
         FA_BUILD_HTTP=1
-        FASTERAPI_ENABLE_LOGGING
     )
 
     if (FA_USE_UWEBSOCKETS)
@@ -890,7 +969,10 @@ if (FA_BUILD_HTTP)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks"
     )
 
-    add_executable(test_hpack tests/test_hpack.cpp src/cpp/http/hpack.cpp)
+    add_executable(test_hpack tests/test_hpack.cpp
+        src/cpp/http/hpack.cpp
+        src/cpp/http/huffman.cpp
+        src/cpp/http/huffman_table_data.cpp)
     target_include_directories(test_hpack PRIVATE ${CMAKE_SOURCE_DIR})
     set_target_properties(test_hpack PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
@@ -908,7 +990,10 @@ if (FA_BUILD_HTTP)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
     )
 
-    add_executable(bench_hpack benchmarks/fasterapi/bench_hpack.cpp src/cpp/http/hpack.cpp)
+    add_executable(bench_hpack benchmarks/fasterapi/bench_hpack.cpp
+        src/cpp/http/hpack.cpp
+        src/cpp/http/huffman.cpp
+        src/cpp/http/huffman_table_data.cpp)
     target_include_directories(bench_hpack PRIVATE ${CMAKE_SOURCE_DIR})
     set_target_properties(bench_hpack PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks"
@@ -1021,9 +1106,9 @@ if (FA_BUILD_HTTP)
         src/cpp/core/ring_buffer.cpp
         src/cpp/core/logger.cpp
         src/cpp/http/huffman.cpp
+        src/cpp/http/huffman_table_data.cpp
     )
     target_include_directories(test_http3_stress PRIVATE ${CMAKE_SOURCE_DIR})
-    target_compile_definitions(test_http3_stress PRIVATE FASTERAPI_NO_HUFFMAN=1)
     set_target_properties(test_http3_stress PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
     )
@@ -1226,6 +1311,8 @@ if (FA_BUILD_HTTP)
         src/cpp/http/router.cpp
         src/cpp/http/http1_parser.cpp
         src/cpp/http/hpack.cpp
+        src/cpp/http/huffman.cpp
+        src/cpp/http/huffman_table_data.cpp
         ${NATIVE_TYPES_SOURCES}
     )
     target_include_directories(bench_techempower_cpp PRIVATE ${CMAKE_SOURCE_DIR} ${Python3_INCLUDE_DIRS})
@@ -1436,6 +1523,14 @@ if (FA_BUILD_EXAMPLES AND FA_BUILD_HTTP)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples"
     )
 
+    # Ultra-fast benchmark server - zero allocation path
+    add_executable(ultrafast_benchmark examples/ultrafast_benchmark.cpp)
+    target_include_directories(ultrafast_benchmark PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(ultrafast_benchmark PRIVATE fasterapi_http)
+    set_target_properties(ultrafast_benchmark PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples"
+    )
+
     # REST API example - CRUD with proper error handling
     add_executable(rest_api_example examples/rest_api_example.cpp)
     target_include_directories(rest_api_example PRIVATE ${CMAKE_SOURCE_DIR})
@@ -1473,6 +1568,46 @@ if (FA_BUILD_EXAMPLES AND FA_BUILD_HTTP)
     target_include_directories(json_api_example PRIVATE ${CMAKE_SOURCE_DIR})
     target_link_libraries(json_api_example PRIVATE fasterapi_http)
     set_target_properties(json_api_example PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples"
+    )
+
+    # WebTransport chat example - real-time chat using RFC 9297
+    add_executable(webtransport_chat examples/webtransport_chat.cpp)
+    target_include_directories(webtransport_chat PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(webtransport_chat PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+    set_target_properties(webtransport_chat PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples"
+    )
+
+    # WebSocket chat example - real-time chat (works in browser)
+    add_executable(websocket_chat examples/websocket_chat.cpp)
+    target_include_directories(websocket_chat PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(websocket_chat PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+    set_target_properties(websocket_chat PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples"
+    )
+
+    # HTTP/3 server example - QUIC with native TLS 1.3
+    add_executable(http3_server examples/http3_server.cpp)
+    target_include_directories(http3_server PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(http3_server PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+    set_target_properties(http3_server PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples"
+    )
+
+    # QUIC handshake test - for debugging HTTP/3 server
+    add_executable(test_quic_handshake tests/test_quic_handshake.cpp)
+    target_include_directories(test_quic_handshake PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(test_quic_handshake PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+    set_target_properties(test_quic_handshake PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+    )
+
+    # WebTransport chat over HTTP/3 - real-time chat using QUIC datagrams
+    add_executable(webtransport_chat_h3 examples/webtransport_chat_h3.cpp)
+    target_include_directories(webtransport_chat_h3 PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(webtransport_chat_h3 PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+    set_target_properties(webtransport_chat_h3 PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/examples"
     )
 

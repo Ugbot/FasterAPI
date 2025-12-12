@@ -190,7 +190,7 @@ int QUICConnection::process_frame(uint64_t frame_type, const uint8_t* data,
     // STREAM frames (0x08-0x0F)
     if (frame_type >= 0x08 && frame_type <= 0x0F) {
         StreamFrame stream_frame;
-        if (stream_frame.parse(data, length, consumed) == 0) {
+        if (stream_frame.parse(static_cast<uint8_t>(frame_type), data, length, consumed) == 0) {
             handle_stream_frame(stream_frame);
             return static_cast<int>(consumed);
         }

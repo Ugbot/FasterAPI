@@ -95,12 +95,23 @@ public:
 
     /**
      * Add a WebSocket endpoint.
-     * 
+     *
      * @param path WebSocket path
      * @param handler WebSocket handler
      * @return Error code (0 = success)
      */
     int add_websocket(const std::string& path, WebSocketHandler handler) noexcept;
+
+    /**
+     * Enable Prometheus metrics endpoint.
+     *
+     * Registers a GET handler at the specified path that returns
+     * Prometheus-formatted metrics (text/plain; version=0.0.4).
+     *
+     * @param path Metrics endpoint path (default: "/metrics")
+     * @return Error code (0 = success)
+     */
+    int enable_metrics_endpoint(const std::string& path = "/metrics") noexcept;
 
     /**
      * Start the server.

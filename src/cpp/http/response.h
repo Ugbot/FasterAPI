@@ -33,6 +33,7 @@ public:
         CREATED = 201,
         ACCEPTED = 202,
         NO_CONTENT = 204,
+        PARTIAL_CONTENT = 206,
         MOVED_PERMANENTLY = 301,
         FOUND = 302,
         NOT_MODIFIED = 304,
@@ -42,6 +43,7 @@ public:
         NOT_FOUND = 404,
         METHOD_NOT_ALLOWED = 405,
         CONFLICT = 409,
+        RANGE_NOT_SATISFIABLE = 416,
         UNPROCESSABLE_ENTITY = 422,
         TOO_MANY_REQUESTS = 429,
         INTERNAL_SERVER_ERROR = 500,
@@ -207,12 +209,113 @@ public:
 
     /**
      * Clear cookie.
-     * 
+     *
      * @param name Cookie name
      * @param path Cookie path
      * @return Reference to this response
      */
     HttpResponse& clear_cookie(const std::string& name, const std::string& path = "/") noexcept;
+
+    /**
+     * Set ETag header for caching.
+     *
+     * @param etag ETag value (will be quoted if not already)
+     * @return Reference to this response
+     */
+    HttpResponse& etag(const std::string& etag) noexcept;
+
+    /**
+     * Set Last-Modified header.
+     *
+     * @param timestamp Unix timestamp
+     * @return Reference to this response
+     */
+    HttpResponse& last_modified(uint64_t timestamp) noexcept;
+
+    /**
+     * Set Last-Modified header from string.
+     *
+     * @param date HTTP date string (e.g., "Sat, 29 Oct 1994 19:43:31 GMT")
+     * @return Reference to this response
+     */
+    HttpResponse& last_modified(const std::string& date) noexcept;
+
+    /**
+     * Set Cache-Control header.
+     *
+     * @param directive Cache-Control directive (e.g., "max-age=3600, public")
+     * @return Reference to this response
+     */
+    HttpResponse& cache_control(const std::string& directive) noexcept;
+
+    /**
+     * Send 304 Not Modified response.
+     *
+     * Clears body and sets appropriate status.
+     *
+     * @return Reference to this response
+     */
+    HttpResponse& not_modified() noexcept;
+
+    /**
+     * Check if request's If-None-Match header matches our ETag.
+     *
+     * @param if_none_match Value of If-None-Match header from request
+     * @return true if ETag matches (should return 304)
+     */
+    bool matches_etag(const std::string& if_none_match) const noexcept;
+
+    /**
+     * Check if content has been modified since the given date.
+     *
+     * @param if_modified_since Value of If-Modified-Since header from request
+     * @return true if NOT modified (should return 304)
+     */
+    bool not_modified_since(const std::string& if_modified_since) const noexcept;
+
+    /**
+     * Get current ETag value.
+     *
+     * @return ETag value or empty string
+     */
+    const std::string& get_etag() const noexcept;
+
+    /**
+     * Get Last-Modified timestamp.
+     *
+     * @return Unix timestamp or 0 if not set
+     */
+    uint64_t get_last_modified() const noexcept;
+
+    /**
+     * Send partial content response (206).
+     *
+     * @param data Full content data
+     * @param start Start byte offset
+     * @param end End byte offset (inclusive)
+     * @param total Total content length
+     * @return Reference to this response
+     */
+    HttpResponse& partial_content(const std::string& data, size_t start, size_t end, size_t total) noexcept;
+
+    /**
+     * Send partial content response for binary data.
+     *
+     * @param data Full content data
+     * @param start Start byte offset
+     * @param end End byte offset (inclusive)
+     * @param total Total content length
+     * @return Reference to this response
+     */
+    HttpResponse& partial_content(const std::vector<uint8_t>& data, size_t start, size_t end, size_t total) noexcept;
+
+    /**
+     * Set Accept-Ranges header to indicate range support.
+     *
+     * @param unit Range unit (default: "bytes")
+     * @return Reference to this response
+     */
+    HttpResponse& accept_ranges(const std::string& unit = "bytes") noexcept;
 
     /**
      * Send the response.
@@ -302,7 +405,11 @@ private:
     
     // Cookies
     std::vector<std::string> cookies_;
-    
+
+    // Caching
+    std::string etag_;
+    uint64_t last_modified_timestamp_ = 0;
+
     // uWebSockets response object
 #ifdef FA_USE_UWEBSOCKETS
     uWS::HttpResponse* uws_response_;

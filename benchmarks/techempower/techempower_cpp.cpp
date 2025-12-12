@@ -15,10 +15,10 @@
  * 6. Plaintext
  */
 
-#include "../src/cpp/http/router.h"
-#include "../src/cpp/http/http1_parser.h"
-#include "../src/cpp/http/hpack.h"
-#include "../src/cpp/types/native_value.h"
+#include "src/cpp/http/router.h"
+#include "src/cpp/http/http1_parser.h"
+#include "src/cpp/http/hpack.h"
+#include "src/cpp/types/native_value.h"
 #include <iostream>
 #include <chrono>
 #include <random>

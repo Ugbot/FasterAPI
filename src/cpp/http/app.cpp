@@ -815,9 +815,22 @@ HttpServer::RouteHandler App::wrap_handler(
 }
 
 void App::init_default_routes() {
-    // Health check endpoint
+    // Health check endpoint (liveness probe)
     get("/health", [](Request& req, Response& res) {
         res.json({{"status", "healthy"}});
+    });
+
+    // Readiness endpoint (readiness probe for Kubernetes)
+    // Returns 503 during shutdown/draining to stop receiving new traffic
+    get("/ready", [](Request& req, Response& res) {
+        // Check if UnifiedServer exists and is accepting connections
+        auto* server = http::UnifiedServer::get_instance();
+        if (server && server->is_draining()) {
+            res.status(503)
+               .json({{"status", "draining"}, {"accepting", "false"}});
+        } else {
+            res.json({{"status", "ready"}, {"accepting", "true"}});
+        }
     });
 
     // OpenAPI specification endpoint
@@ -908,6 +921,132 @@ http::Http1Response App::handle_http1(
     Response response(&res);
 
     // Build middleware chain (adapted from wrap_handler)
+    std::vector<MiddlewareFunc> all_middleware;
+
+    // Add global middleware
+    all_middleware.insert(all_middleware.end(),
+        global_middleware_.begin(), global_middleware_.end());
+
+    // Add path-specific middleware
+    for (const auto& [prefix, middleware_list] : path_middleware_) {
+        if (path.find(prefix) == 0) {
+            all_middleware.insert(all_middleware.end(),
+                middleware_list.begin(), middleware_list.end());
+        }
+    }
+
+    // Execute middleware chain
+    size_t middleware_index = 0;
+    std::function<void()> next;
+
+    next = [&]() {
+        if (middleware_index < all_middleware.size()) {
+            auto& middleware = all_middleware[middleware_index++];
+            middleware(request, response, next);
+        } else {
+            // All middleware executed, call the route handler
+            handler(&req, &res, params);
+        }
+    };
+
+    // Start middleware chain
+    next();
+
+    // CORS handling if enabled
+    if (config_.enable_cors) {
+        response.cors(config_.cors_origin);
+    }
+
+    // Extract response data and build Http1Response
+    http::Http1Response http1_response;
+    http1_response.status = static_cast<uint16_t>(res.get_status_code());
+
+    // Get status message
+    switch (res.get_status_code()) {
+        case HttpResponse::Status::OK: http1_response.status_message = "OK"; break;
+        case HttpResponse::Status::CREATED: http1_response.status_message = "Created"; break;
+        case HttpResponse::Status::NO_CONTENT: http1_response.status_message = "No Content"; break;
+        case HttpResponse::Status::BAD_REQUEST: http1_response.status_message = "Bad Request"; break;
+        case HttpResponse::Status::UNAUTHORIZED: http1_response.status_message = "Unauthorized"; break;
+        case HttpResponse::Status::FORBIDDEN: http1_response.status_message = "Forbidden"; break;
+        case HttpResponse::Status::NOT_FOUND: http1_response.status_message = "Not Found"; break;
+        case HttpResponse::Status::INTERNAL_SERVER_ERROR: http1_response.status_message = "Internal Server Error"; break;
+        default: http1_response.status_message = "OK"; break;
+    }
+
+    http1_response.headers = res.get_headers();
+    http1_response.body = res.get_body();
+
+    return http1_response;
+}
+
+// =============================================================================
+// HTTP/1.1 Fast Handler (Zero-copy path)
+// =============================================================================
+
+http::Http1Response App::handle_http1_fast(const http::Http1RequestView& view) noexcept {
+    // Convert string_view to string only where necessary for router matching
+    std::string method(view.method);
+    std::string path(view.path);
+    
+    // Match route using router
+    http::RouteParams params;
+    auto* router = server_->get_router();
+    if (!router) {
+        http::Http1Response response;
+        response.status = 500;
+        response.status_message = "Internal Server Error";
+        response.headers["Content-Type"] = "application/json";
+        response.body = "{\"error\":\"Router not initialized\"}";
+        return response;
+    }
+
+    auto handler = router->match(method, path, params);
+
+    // If no route found, return 404
+    if (!handler) {
+        http::Http1Response response;
+        response.status = 404;
+        response.status_message = "Not Found";
+        response.headers["Content-Type"] = "application/json";
+        response.body = "{\"error\":\"Not Found\"}";
+        return response;
+    }
+
+    // Build headers map only when needed (for middleware/handlers that access headers)
+    // Most simple handlers don't need all headers, so we defer this
+    std::unordered_map<std::string, std::string> headers;
+    headers.reserve(view.header_count);
+    for (size_t i = 0; i < view.header_count; ++i) {
+        headers.emplace(
+            std::string(view.headers[i].first),
+            std::string(view.headers[i].second)
+        );
+    }
+
+    // Reconstruct full URL with query string for from_parsed_data
+    // (it expects path?query format to parse query params)
+    std::string full_path;
+    if (!view.query_string.empty()) {
+        full_path.reserve(path.size() + 1 + view.query_string.size());
+        full_path = path;
+        full_path += '?';
+        full_path.append(view.query_string);
+    } else {
+        full_path = path;
+    }
+
+    // Create HttpRequest from parsed data
+    HttpRequest req = HttpRequest::from_parsed_data(method, full_path, headers, std::string(view.body));
+
+    // Create HttpResponse object
+    HttpResponse res;
+
+    // Create wrapper objects
+    Request request(&req, params);
+    Response response(&res);
+
+    // Build middleware chain
     std::vector<MiddlewareFunc> all_middleware;
 
     // Add global middleware
