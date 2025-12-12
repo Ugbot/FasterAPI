@@ -506,6 +506,17 @@ public:
     int run_unified(const std::string& host = "0.0.0.0", uint16_t port = 8080);
 
     /**
+     * Set ultra-fast callback for maximum performance plaintext routes.
+     * 
+     * This bypasses all routing and middleware for a single callback that
+     * writes directly to a pre-allocated buffer. Use for TechEmpower-style
+     * benchmarks where every nanosecond counts.
+     * 
+     * @param callback Function that handles requests and writes responses
+     */
+    void set_ultra_fast_callback(http::Http1Connection::UltraFastCallback callback);
+
+    /**
      * Stop the server.
      *
      * @return Error code (0 = success)
@@ -582,6 +593,9 @@ private:
 
     // WebSocket handlers stored for transfer to UnifiedServer in run_unified()
     std::map<std::string, WSHandler> websocket_handlers_;
+
+    // Ultra-fast callback for maximum performance (bypasses routing)
+    http::Http1Connection::UltraFastCallback ultra_fast_callback_ = nullptr;
 
     // Route metadata for OpenAPI generation
     struct RouteMetadata {

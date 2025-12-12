@@ -26,6 +26,7 @@
  */
 
 #include "../src/cpp/http/app.h"
+#include "../src/cpp/http/http1_connection.h"
 #include "../src/cpp/core/logger.h"
 
 #include <iostream>
@@ -315,6 +316,44 @@ int main() {
         ws.on_close = [&ws](uint16_t code, const char* reason) {
             std::cout << "[Chat] User " << ws.get_id() << " disconnected" << std::endl;
         };
+    });
+
+    // ========================================
+    // Ultra-Fast Callback for Maximum Performance
+    // ========================================
+    
+    // This callback bypasses all routing and writes directly to a pre-allocated buffer.
+    // Use for TechEmpower-style benchmarks where every nanosecond counts.
+    app.set_ultra_fast_callback([](const fasterapi::http::Http1RequestView& req, 
+                                    fasterapi::http::FastResponseWriter& writer) -> size_t {
+        // Check path - only handle /plaintext and /json
+        if (req.path == "/plaintext") {
+            static constexpr char body[] = "Hello, World!";
+            static constexpr size_t body_len = sizeof(body) - 1;
+            
+            writer.write_status_200();
+            writer.write_content_type_text();
+            writer.write_connection_keepalive();
+            writer.write_content_length(body_len);
+            writer.write_headers_end();
+            writer.write(body, body_len);
+            return writer.size;
+        }
+        else if (req.path == "/json") {
+            static constexpr char body[] = R"({"message":"Hello, World!"})";
+            static constexpr size_t body_len = sizeof(body) - 1;
+            
+            writer.write_status_200();
+            writer.write_content_type_json();
+            writer.write_connection_keepalive();
+            writer.write_content_length(body_len);
+            writer.write_headers_end();
+            writer.write(body, body_len);
+            return writer.size;
+        }
+        
+        // Not handled by ultra-fast path - return 0 to fall through to normal routing
+        return 0;
     });
 
     // ========================================

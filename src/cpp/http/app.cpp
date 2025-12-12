@@ -1110,6 +1110,10 @@ http::Http1Response App::handle_http1_fast(const http::Http1RequestView& view) n
 // UnifiedServer Integration (Multi-protocol Pure C++ Mode)
 // =============================================================================
 
+void App::set_ultra_fast_callback(http::Http1Connection::UltraFastCallback callback) {
+    ultra_fast_callback_ = callback;
+}
+
 int App::run_unified(const std::string& host, uint16_t port) {
     // Create UnifiedServer configuration from App config
     http::UnifiedServerConfig server_config;
@@ -1147,6 +1151,12 @@ int App::run_unified(const std::string& host, uint16_t port) {
 
     // Set this App instance for direct HTTP/1.1 handling
     unified_server.set_app_instance(this);
+
+    // Set ultra-fast callback if configured (bypasses routing for max perf)
+    if (ultra_fast_callback_) {
+        unified_server.set_ultra_fast_callback(ultra_fast_callback_);
+        LOG_INFO("App", "Ultra-fast callback enabled (bypasses routing)");
+    }
 
     // Transfer WebSocket handlers to UnifiedServer
     for (const auto& [ws_path, ws_handler] : websocket_handlers_) {
