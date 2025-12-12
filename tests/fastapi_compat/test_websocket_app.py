@@ -94,7 +94,7 @@ class TestClientIdWebSocket:
     def test_connect_with_client_id(self, client):
         """Test connecting with a client ID."""
         client_id = random_string(10)
-        with client.websocket_connect(f"/ws/{client_id}") as ws:
+        with client.websocket_connect(f"/ws/client/{client_id}") as ws:
             # Should receive welcome message
             welcome = ws.receive_text()
             assert client_id in welcome
@@ -102,7 +102,7 @@ class TestClientIdWebSocket:
     def test_send_message_with_client_id(self, client):
         """Test sending message with client ID."""
         client_id = random_string(10)
-        with client.websocket_connect(f"/ws/{client_id}") as ws:
+        with client.websocket_connect(f"/ws/client/{client_id}") as ws:
             ws.receive_text()  # Welcome message
 
             message = random_string(20)
@@ -269,7 +269,7 @@ class TestConnectionManagement:
         """Test that connections are tracked."""
         client_id = random_string(10)
 
-        with client.websocket_connect(f"/ws/{client_id}") as ws:
+        with client.websocket_connect(f"/ws/client/{client_id}") as ws:
             ws.receive_text()  # Welcome
 
             # Check connection is tracked
@@ -280,7 +280,7 @@ class TestConnectionManagement:
         """Test that connection events are logged."""
         client_id = random_string(10)
 
-        with client.websocket_connect(f"/ws/{client_id}") as ws:
+        with client.websocket_connect(f"/ws/client/{client_id}") as ws:
             ws.receive_text()
 
         # Check events after disconnect

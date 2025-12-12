@@ -155,7 +155,7 @@ def create_app() -> FastAPI:
             pass
 
     # WebSocket with client ID path parameter
-    @app.websocket("/ws/{client_id}")
+    @app.websocket("/ws/client/{client_id}")
     async def websocket_with_client_id(websocket: WebSocket, client_id: str):
         """WebSocket with client ID in path."""
         await manager.connect(websocket, client_id)
