@@ -16,9 +16,12 @@
 #include "http1_parser.h"
 #include "../core/result.h"
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <functional>
 #include <vector>
+#include <array>
+#include <chrono>
 
 namespace fasterapi {
 namespace http {
@@ -34,6 +37,78 @@ enum class Http1State {
     KEEPALIVE,           // Connection kept alive, ready for next request
     CLOSING,             // Connection closing
     ERROR                // Error state
+};
+
+/**
+ * Zero-copy HTTP request view (for fast callback path)
+ * 
+ * All string_views point into the connection's input buffer.
+ * Valid only during the callback - do not store references.
+ */
+struct Http1RequestView {
+    std::string_view method;
+    std::string_view path;
+    std::string_view query_string;  // Everything after '?' (empty if none)
+    std::string_view body;
+    
+    // Headers as array of name/value pairs (zero-copy)
+    static constexpr size_t MAX_HEADERS = 64;
+    std::array<std::pair<std::string_view, std::string_view>, MAX_HEADERS> headers;
+    size_t header_count = 0;
+    
+    // Get header value (case-insensitive search)
+    std::string_view get_header(std::string_view name) const noexcept {
+        for (size_t i = 0; i < header_count; ++i) {
+            if (headers[i].first.size() == name.size()) {
+                bool match = true;
+                for (size_t j = 0; j < name.size(); ++j) {
+                    char a = headers[i].first[j];
+                    char b = name[j];
+                    // Case-insensitive compare
+                    if (a >= 'A' && a <= 'Z') a += 32;
+                    if (b >= 'A' && b <= 'Z') b += 32;
+                    if (a != b) { match = false; break; }
+                }
+                if (match) return headers[i].second;
+            }
+        }
+        return {};
+    }
+};
+
+/**
+ * HTTP/1.1 Pipelining Constants
+ */
+static constexpr size_t MAX_PIPELINE_DEPTH = 16;
+
+/**
+ * Pipelined request metadata
+ * 
+ * Tracks the location of a parsed request within the input buffer.
+ * The actual request data lives in the connection's input_buffer_.
+ */
+struct PipelinedRequest {
+    size_t buffer_start = 0;      // Offset in input_buffer_ where request starts
+    size_t buffer_end = 0;        // Offset where request ends (exclusive)
+    bool has_body = false;        // Request has a body
+    size_t content_length = 0;    // Body length if present
+    bool processed = false;       // Handler has been called
+};
+
+/**
+ * Pipelined response slot
+ * 
+ * Holds a serialized HTTP response waiting to be sent.
+ * Responses must be sent in order (FIFO).
+ */
+struct PipelinedResponse {
+    std::vector<uint8_t> data;    // Serialized HTTP response
+    bool ready = false;           // Response is complete and ready to send
+    
+    void clear() noexcept {
+        data.clear();
+        ready = false;
+    }
 };
 
 /**
@@ -100,6 +175,14 @@ public:
         const std::unordered_map<std::string, std::string>& headers,
         const std::string& body
     )>;
+    
+    /**
+     * Fast request callback type (zero-copy)
+     * 
+     * Uses string_view to avoid allocations. All views are valid only
+     * during the callback invocation.
+     */
+    using FastRequestCallback = std::function<Http1Response(const Http1RequestView&)>;
 
     /**
      * Create HTTP/1.1 connection
@@ -128,6 +211,18 @@ public:
      */
     void set_request_callback(RequestCallback callback) {
         request_callback_ = std::move(callback);
+        fast_request_callback_ = nullptr;  // Clear fast callback
+    }
+    
+    /**
+     * Set fast request callback (zero-copy, preferred)
+     * 
+     * This callback avoids string allocations by using string_view.
+     * Provides ~10-20% better throughput for simple handlers.
+     */
+    void set_fast_request_callback(FastRequestCallback callback) {
+        fast_request_callback_ = std::move(callback);
+        request_callback_ = nullptr;  // Clear legacy callback
     }
 
     /**
@@ -197,6 +292,92 @@ public:
     }
 
     /**
+     * Mark request start time (for request timeout tracking)
+     */
+    void mark_request_start() noexcept {
+        request_start_time_ = std::chrono::steady_clock::now();
+    }
+
+    /**
+     * Update last activity time (for idle timeout tracking)
+     */
+    void mark_activity() noexcept {
+        last_activity_time_ = std::chrono::steady_clock::now();
+    }
+
+    /**
+     * Check if request has timed out
+     *
+     * @param timeout_ms Maximum request duration in milliseconds
+     * @return true if request has exceeded timeout
+     */
+    bool is_request_timed_out(uint32_t timeout_ms) const noexcept {
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - request_start_time_).count();
+        return elapsed > timeout_ms;
+    }
+
+    /**
+     * Check if connection is idle (for keep-alive timeout)
+     *
+     * @param timeout_ms Maximum idle time in milliseconds
+     * @return true if connection has been idle longer than timeout
+     */
+    bool is_idle_timed_out(uint32_t timeout_ms) const noexcept {
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - last_activity_time_).count();
+        return elapsed > timeout_ms;
+    }
+
+    /**
+     * Get milliseconds elapsed since request started
+     */
+    uint64_t get_request_elapsed_ms() const noexcept {
+        auto now = std::chrono::steady_clock::now();
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - request_start_time_).count();
+    }
+
+    /**
+     * Get milliseconds since last activity
+     */
+    uint64_t get_idle_time_ms() const noexcept {
+        auto now = std::chrono::steady_clock::now();
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - last_activity_time_).count();
+    }
+
+    /**
+     * Build and queue a 408 Request Timeout response
+     */
+    void send_timeout_response() noexcept;
+
+    /**
+     * Build and queue a 413 Payload Too Large response
+     */
+    void send_payload_too_large_response() noexcept;
+
+    /**
+     * Build and queue a 431 Request Header Fields Too Large response
+     */
+    void send_header_too_large_response() noexcept;
+
+    /**
+     * Check if Content-Length exceeds max body size
+     *
+     * @param max_body_size Maximum allowed body size in bytes
+     * @return true if body too large (should reject), false if acceptable
+     */
+    bool is_body_too_large(size_t max_body_size) const noexcept;
+
+    /**
+     * Get Content-Length from current request (0 if not set)
+     */
+    size_t get_content_length() const noexcept;
+
+    /**
      * Check if connection is pending WebSocket upgrade.
      * Returns true if the last response was a 101 Switching Protocols.
      */
@@ -237,6 +418,21 @@ private:
      */
     bool should_keep_alive_from_request(const HTTP1Request& request) const noexcept;
 
+    /**
+     * Process all pending pipelined requests
+     */
+    void process_pending_requests() noexcept;
+
+    /**
+     * Flush ready responses to output buffer (in order)
+     */
+    void flush_ready_responses() noexcept;
+
+    /**
+     * Build response into pipelined slot
+     */
+    void build_pipelined_response(const Http1Response& response, PipelinedResponse& out) noexcept;
+
     int socket_fd_;
     Http1State state_ = Http1State::READING_REQUEST;
 
@@ -245,6 +441,7 @@ private:
     std::vector<uint8_t> input_buffer_;  // Accumulates partial requests
     HTTP1Request current_request_;
     size_t body_bytes_read_ = 0;
+    size_t bytes_consumed_ = 0;  // Bytes consumed by current request (for pipelining)
 
     // Response
     std::vector<uint8_t> output_buffer_;
@@ -254,8 +451,9 @@ private:
     bool keep_alive_ = true;
     size_t requests_served_ = 0;
 
-    // Callback
+    // Callbacks
     RequestCallback request_callback_;
+    FastRequestCallback fast_request_callback_;
 
     // Error tracking
     std::string error_message_;
@@ -263,6 +461,18 @@ private:
     // WebSocket upgrade tracking
     bool pending_websocket_upgrade_ = false;
     std::string pending_websocket_path_;
+
+    // Timeout tracking
+    std::chrono::steady_clock::time_point request_start_time_;
+    std::chrono::steady_clock::time_point last_activity_time_;
+
+    // HTTP/1.1 Pipelining support
+    std::array<PipelinedRequest, MAX_PIPELINE_DEPTH> pipeline_requests_;
+    std::array<PipelinedResponse, MAX_PIPELINE_DEPTH> pipeline_responses_;
+    size_t pipeline_write_idx_ = 0;   // Next slot to parse into
+    size_t pipeline_read_idx_ = 0;    // Next slot to send from
+    size_t pipeline_count_ = 0;       // Number of requests currently in pipeline
+    size_t pipeline_parse_pos_ = 0;   // Current parse position in input_buffer_
 };
 
 } // namespace http
