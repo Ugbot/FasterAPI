@@ -229,6 +229,39 @@ result<size_t> Http1Connection::process_input(const uint8_t* data, size_t len) n
         slot.has_body = temp_request.has_content_length && temp_request.content_length > 0;
         slot.content_length = temp_request.content_length;
         slot.processed = false;
+        
+        // Cache parsed offsets to avoid re-parsing (string_views point into input_buffer_)
+        const uint8_t* buf_base = input_buffer_.data();
+        slot.method_start = reinterpret_cast<const uint8_t*>(temp_request.method_str.data()) - buf_base;
+        slot.method_len = temp_request.method_str.size();
+        
+        // Use path directly if available, otherwise use url
+        std::string_view path_sv = temp_request.path.empty() ? temp_request.url : temp_request.path;
+        slot.path_start = reinterpret_cast<const uint8_t*>(path_sv.data()) - buf_base;
+        slot.path_len = path_sv.size();
+        
+        // Query string
+        if (!temp_request.query.empty()) {
+            slot.query_start = reinterpret_cast<const uint8_t*>(temp_request.query.data()) - buf_base;
+            slot.query_len = temp_request.query.size();
+        } else {
+            slot.query_start = 0;
+            slot.query_len = 0;
+        }
+        
+        // Cache headers (up to MAX_CACHED_HEADERS)
+        slot.header_count = std::min(temp_request.header_count, 
+                                      static_cast<size_t>(PipelinedRequest::MAX_CACHED_HEADERS));
+        for (size_t i = 0; i < slot.header_count; ++i) {
+            const auto& hdr = temp_request.headers[i];
+            slot.header_offsets[i].name_start = static_cast<uint16_t>(
+                reinterpret_cast<const uint8_t*>(hdr.name.data()) - buf_base);
+            slot.header_offsets[i].name_len = static_cast<uint8_t>(
+                std::min(hdr.name.size(), size_t(255)));
+            slot.header_offsets[i].value_start = static_cast<uint16_t>(
+                reinterpret_cast<const uint8_t*>(hdr.value.data()) - buf_base);
+            slot.header_offsets[i].value_len = static_cast<uint16_t>(hdr.value.size());
+        }
 
         // Check for body
         if (slot.has_body) {
@@ -666,55 +699,33 @@ void Http1Connection::process_pending_requests() noexcept {
             continue;
         }
         
-        // Re-parse the request to get string_views (they point into input_buffer_)
-        parser_.reset();
-        HTTP1Request req;
-        size_t consumed = 0;
-        size_t req_len = req_slot.buffer_end - req_slot.buffer_start;
-        if (req_slot.has_body) {
-            req_len -= req_slot.content_length;  // Exclude body from header parse
-        }
+        // Build request view from cached offsets (no re-parsing needed!)
+        const char* buf_base = reinterpret_cast<const char*>(input_buffer_.data());
         
-        int parse_result = parser_.parse(
-            input_buffer_.data() + req_slot.buffer_start,
-            req_len,
-            req,
-            consumed
-        );
-        
-        if (parse_result != 0) {
-            // Should not happen - we already parsed this successfully
-            LOG_ERROR("HTTP1", "Re-parse failed for pipelined request");
-            idx = (idx + 1) % MAX_PIPELINE_DEPTH;
-            continue;
-        }
-        
-        // Build request view for callback
         Http1RequestView view;
-        view.method = req.method_str;
+        view.method = std::string_view(buf_base + req_slot.method_start, req_slot.method_len);
+        view.path = std::string_view(buf_base + req_slot.path_start, req_slot.path_len);
         
-        // Split URL into path and query string
-        std::string_view url = req.url;
-        auto query_pos = url.find('?');
-        if (query_pos != std::string_view::npos) {
-            view.path = url.substr(0, query_pos);
-            view.query_string = url.substr(query_pos + 1);
+        if (req_slot.query_len > 0) {
+            view.query_string = std::string_view(buf_base + req_slot.query_start, req_slot.query_len);
         } else {
-            view.path = url;
             view.query_string = {};
         }
-        
-        // Copy header views
-        view.header_count = std::min(req.header_count, Http1RequestView::MAX_HEADERS);
+
+        // Reconstruct header views from cached offsets
+        view.header_count = req_slot.header_count;
         for (size_t h = 0; h < view.header_count; h++) {
-            view.headers[h] = {req.headers[h].name, req.headers[h].value};
+            const auto& hdr_off = req_slot.header_offsets[h];
+            view.headers[h] = {
+                std::string_view(buf_base + hdr_off.name_start, hdr_off.name_len),
+                std::string_view(buf_base + hdr_off.value_start, hdr_off.value_len)
+            };
         }
         
         // Body view
         if (req_slot.has_body && req_slot.content_length > 0) {
             size_t body_start = req_slot.buffer_end - req_slot.content_length;
-            const char* body_ptr = reinterpret_cast<const char*>(input_buffer_.data() + body_start);
-            view.body = std::string_view(body_ptr, req_slot.content_length);
+            view.body = std::string_view(buf_base + body_start, req_slot.content_length);
         }
         
         // Call the request handler
@@ -760,12 +771,12 @@ void Http1Connection::process_pending_requests() noexcept {
             } else if (request_callback_) {
                 // Legacy callback - need to allocate
                 std::unordered_map<std::string, std::string> headers;
-                for (size_t h = 0; h < req.header_count; h++) {
-                    headers[std::string(req.headers[h].name)] = std::string(req.headers[h].value);
+                for (size_t h = 0; h < view.header_count; h++) {
+                    headers[std::string(view.headers[h].first)] = std::string(view.headers[h].second);
                 }
                 response = request_callback_(
-                    std::string(req.method_str),
-                    std::string(req.url),
+                    std::string(view.method),
+                    std::string(view.path),
                     headers,
                     std::string(view.body)
                 );

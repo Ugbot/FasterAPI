@@ -95,6 +95,27 @@ struct PipelinedRequest {
     bool has_body = false;        // Request has a body
     size_t content_length = 0;    // Body length if present
     bool processed = false;       // Handler has been called
+    
+    // Cached parsed request view (avoids re-parsing)
+    // These are offsets into input_buffer_, converted to string_views at process time
+    size_t method_start = 0;
+    size_t method_len = 0;
+    size_t path_start = 0;
+    size_t path_len = 0;
+    size_t query_start = 0;       // 0 if no query string
+    size_t query_len = 0;
+    size_t body_start = 0;
+    
+    // Header offsets (name_start, name_len, value_start, value_len) packed
+    static constexpr size_t MAX_CACHED_HEADERS = 32;
+    struct HeaderOffset {
+        uint16_t name_start;
+        uint8_t name_len;
+        uint16_t value_start;
+        uint16_t value_len;
+    };
+    std::array<HeaderOffset, MAX_CACHED_HEADERS> header_offsets{};
+    uint8_t header_count = 0;
 };
 
 /**
