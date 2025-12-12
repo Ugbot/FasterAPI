@@ -61,6 +61,19 @@ int main() {
     // HTTP Routes
     // ========================================
 
+    // TechEmpower Benchmark Endpoints
+    // JSON serialization test - must return {"message":"Hello, World!"}
+    app.get("/json", [](fasterapi::Request& req, fasterapi::Response& res) {
+        res.header("Content-Type", "application/json");
+        res.send(R"({"message":"Hello, World!"})");
+    });
+
+    // Plaintext test - must return "Hello, World!"
+    app.get("/plaintext", [](fasterapi::Request& req, fasterapi::Response& res) {
+        res.header("Content-Type", "text/plain");
+        res.send("Hello, World!");
+    });
+
     // Health check endpoint
     app.get("/health", [](fasterapi::Request& req, fasterapi::Response& res) {
         res.json(R"({"status":"ok","mode":"pure_cpp"})");

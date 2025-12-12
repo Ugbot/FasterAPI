@@ -13,3 +13,9 @@
 [submodule "external/quiche-reference"]
 	path = external/quiche-reference
 	url = https://github.com/google/quiche
+[submodule "benchmarks/TFBToolset"]
+	path = benchmarks/TFBToolset
+	url = https://github.com/TechEmpower/TFBToolset.git
+[submodule "benchmarks/TFBVerifier"]
+	path = benchmarks/TFBVerifier
+	url = https://github.com/TechEmpower/TFBVerifier.git
