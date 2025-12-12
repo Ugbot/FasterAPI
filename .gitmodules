@@ -19,3 +19,6 @@
 [submodule "benchmarks/TFBVerifier"]
 	path = benchmarks/TFBVerifier
 	url = https://github.com/TechEmpower/TFBVerifier.git
+[submodule "external/FrameworkBenchmarks"]
+	path = external/FrameworkBenchmarks
+	url = https://github.com/TechEmpower/FrameworkBenchmarks.git
