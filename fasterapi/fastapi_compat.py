@@ -370,7 +370,8 @@ class FastAPIApp:
     FastAPI-compatible application class.
 
     This provides the same decorator API as FastAPI but uses C++ for
-    all performance-critical operations.
+    all performance-critical operations. Also supports ASGI interface
+    for running with uvicorn in fallback mode.
     """
 
     def __init__(
@@ -411,6 +412,10 @@ class FastAPIApp:
         # Middleware stack
         self._middleware: List[tuple] = []
 
+        # Route storage for ASGI fallback mode
+        self._routes: Dict[str, Dict[str, Callable]] = {}  # {path: {method: handler}}
+        self._websocket_routes: Dict[str, Callable] = {}
+
         # Register special routes if enabled
         if HAS_NATIVE:
             if openapi_url:
@@ -419,6 +424,328 @@ class FastAPIApp:
                 self._register_docs_route()
             if redoc_url:
                 self._register_redoc_route()
+
+    async def __call__(self, scope, receive, send):
+        """
+        ASGI interface for running with uvicorn/other ASGI servers.
+
+        This is the fallback mode when native C++ bindings aren't available.
+        """
+        import json as json_module
+        import re
+
+        if scope["type"] == "lifespan":
+            # Handle lifespan events
+            while True:
+                message = await receive()
+                if message["type"] == "lifespan.startup":
+                    # Run startup handlers
+                    for handler in self._on_startup:
+                        if inspect.iscoroutinefunction(handler):
+                            await handler()
+                        else:
+                            handler()
+                    await send({"type": "lifespan.startup.complete"})
+                elif message["type"] == "lifespan.shutdown":
+                    # Run shutdown handlers
+                    for handler in self._on_shutdown:
+                        if inspect.iscoroutinefunction(handler):
+                            await handler()
+                        else:
+                            handler()
+                    await send({"type": "lifespan.shutdown.complete"})
+                    return
+
+        elif scope["type"] == "http":
+            # Handle HTTP requests
+            path = scope["path"]
+            method = scope["method"]
+
+            # Find matching route
+            handler = None
+            path_params = {}
+
+            for route_path, methods in self._routes.items():
+                if method in methods:
+                    # Check for exact match
+                    if route_path == path:
+                        handler = methods[method]
+                        break
+
+                    # Check for path parameter match
+                    pattern = re.sub(r"\{(\w+)\}", r"(?P<\1>[^/]+)", route_path)
+                    pattern = f"^{pattern}$"
+                    match = re.match(pattern, path)
+                    if match:
+                        handler = methods[method]
+                        path_params = match.groupdict()
+                        break
+
+            if handler is None:
+                # 404 Not Found
+                await self._send_json_response(send, {"detail": "Not Found"}, 404)
+                return
+
+            # Parse request body
+            body = b""
+            while True:
+                message = await receive()
+                body += message.get("body", b"")
+                if not message.get("more_body", False):
+                    break
+
+            # Parse query params
+            from urllib.parse import unquote
+
+            query_string = scope.get("query_string", b"").decode()
+            query_params = {}
+            if query_string:
+                for param in query_string.split("&"):
+                    if "=" in param:
+                        key, value = param.split("=", 1)
+                        query_params[key] = unquote(value)
+
+            # Parse JSON body if present
+            body_data = None
+            if body:
+                try:
+                    body_data = json_module.loads(body.decode())
+                except (json_module.JSONDecodeError, UnicodeDecodeError):
+                    pass
+
+            # Build kwargs for handler based on signature
+            kwargs = {}
+            sig = inspect.signature(handler)
+            try:
+                type_hints = get_type_hints(handler)
+            except Exception:
+                type_hints = {}
+
+            # Import param classes to check instance
+            try:
+                from fasterapi.params import Body as BodyParam
+                from fasterapi.params import Path as PathParam
+                from fasterapi.params import Query as QueryParam
+
+                has_param_classes = True
+            except ImportError:
+                has_param_classes = False
+
+            # Process each parameter based on its type and default
+            for param_name, param in sig.parameters.items():
+                param_type = type_hints.get(param_name, str)
+                default = param.default
+
+                # Check if it's a path parameter
+                if param_name in path_params:
+                    value = path_params[param_name]
+                    # Convert to appropriate type
+                    if param_type == int:
+                        value = int(value)
+                    elif param_type == float:
+                        value = float(value)
+                    kwargs[param_name] = value
+                    continue
+
+                # Check if it's a Pydantic model (body parameter)
+                if (
+                    HAS_PYDANTIC
+                    and isinstance(param_type, type)
+                    and issubclass(param_type, BaseModel)
+                ):
+                    if body_data is not None:
+                        try:
+                            # Convert dict to Pydantic model instance
+                            kwargs[param_name] = param_type.model_validate(body_data)
+                        except Exception as e:
+                            await self._send_json_response(
+                                send,
+                                {
+                                    "detail": [
+                                        {
+                                            "loc": ["body"],
+                                            "msg": str(e),
+                                            "type": "value_error",
+                                        }
+                                    ]
+                                },
+                                422,
+                            )
+                            return
+                    continue
+
+                # Handle Query/Path/Body descriptors or regular defaults
+                is_descriptor = False
+                actual_default = inspect.Parameter.empty
+
+                if has_param_classes and default is not inspect.Parameter.empty:
+                    if isinstance(default, (QueryParam, PathParam)):
+                        is_descriptor = True
+                        actual_default = getattr(default, "default", None)
+                    elif isinstance(default, BodyParam):
+                        is_descriptor = True
+                        if body_data is not None:
+                            kwargs[param_name] = body_data
+                        continue
+
+                if is_descriptor:
+                    # Extract value from query params or use default
+                    if param_name in query_params:
+                        value = query_params[param_name]
+                        # Convert to appropriate type
+                        if param_type == int:
+                            value = int(value)
+                        elif param_type == float:
+                            value = float(value)
+                        elif param_type == bool:
+                            value = value.lower() in ("true", "1", "yes")
+                        kwargs[param_name] = value
+                    elif actual_default is not ...:
+                        # Use the actual default (can be None for Optional params)
+                        kwargs[param_name] = actual_default
+                elif param_name in query_params:
+                    # Regular query parameter
+                    value = query_params[param_name]
+                    if param_type == int:
+                        value = int(value)
+                    elif param_type == float:
+                        value = float(value)
+                    elif param_type == bool:
+                        value = value.lower() in ("true", "1", "yes")
+                    kwargs[param_name] = value
+                elif default is not inspect.Parameter.empty:
+                    # Use default value if no query param provided
+                    kwargs[param_name] = default
+
+            # Call handler
+            try:
+                if inspect.iscoroutinefunction(handler):
+                    result = await handler(**kwargs)
+                else:
+                    result = handler(**kwargs)
+
+                # Handle tuple responses (body, status) or (body, status, headers)
+                status_code = 200
+                headers = {}
+                if isinstance(result, tuple):
+                    if len(result) == 2:
+                        result, status_code = result
+                    elif len(result) >= 3:
+                        result, status_code, headers = result[0], result[1], result[2]
+
+                # Convert Pydantic models to dict
+                if HAS_PYDANTIC and isinstance(result, BaseModel):
+                    result = result.model_dump()
+
+                await self._send_json_response(send, result, status_code, headers)
+
+            except HTTPException as e:
+                response = {"detail": e.detail} if e.detail is not None else {}
+                await self._send_json_response(
+                    send, response, e.status_code, e.headers or {}
+                )
+            except Exception as e:
+                await self._send_json_response(send, {"detail": str(e)}, 500)
+
+        elif scope["type"] == "websocket":
+            # Handle WebSocket
+            path = scope["path"]
+
+            # Find matching WebSocket route
+            handler = None
+            path_params = {}
+
+            for route_path, ws_handler in self._websocket_routes.items():
+                if route_path == path:
+                    handler = ws_handler
+                    break
+
+                # Check for path parameter match
+                pattern = re.sub(r"\{(\w+)\}", r"(?P<\1>[^/]+)", route_path)
+                pattern = f"^{pattern}$"
+                match = re.match(pattern, path)
+                if match:
+                    handler = ws_handler
+                    path_params = match.groupdict()
+                    break
+
+            if handler is None:
+                await send({"type": "websocket.close", "code": 4004})
+                return
+
+            # Create WebSocket wrapper
+            from fasterapi.websockets import WebSocket as FasterAPIWebSocket
+
+            websocket = FasterAPIWebSocket(scope, receive, send)
+
+            # Call handler with path params
+            try:
+                # Parse query params for WebSocket
+                query_string = scope.get("query_string", b"").decode()
+                query_params = {}
+                if query_string:
+                    for param in query_string.split("&"):
+                        if "=" in param:
+                            key, value = param.split("=", 1)
+                            query_params[key] = value
+
+                kwargs = {"websocket": websocket}
+                kwargs.update(path_params)
+                kwargs.update(query_params)
+
+                if inspect.iscoroutinefunction(handler):
+                    await handler(**kwargs)
+                else:
+                    handler(**kwargs)
+            except Exception as e:
+                try:
+                    await send({"type": "websocket.close", "code": 1011})
+                except Exception:
+                    pass
+
+    async def _send_json_response(self, send, body, status_code=200, headers=None):
+        """Send a JSON response."""
+        import json as json_module
+        from datetime import date, datetime
+
+        if headers is None:
+            headers = {}
+
+        def json_serializer(obj):
+            if isinstance(obj, datetime):
+                return obj.isoformat()
+            elif isinstance(obj, date):
+                return obj.isoformat()
+            raise TypeError(
+                f"Object of type {type(obj).__name__} is not JSON serializable"
+            )
+
+        body_bytes = (
+            json_module.dumps(body, default=json_serializer).encode()
+            if body is not None
+            else b""
+        )
+
+        response_headers = [
+            (b"content-type", b"application/json"),
+            (b"content-length", str(len(body_bytes)).encode()),
+        ]
+        for key, value in headers.items():
+            response_headers.append((key.lower().encode(), str(value).encode()))
+
+        await send(
+            {
+                "type": "http.response.start",
+                "status": status_code,
+                "headers": response_headers,
+            }
+        )
+        await send(
+            {
+                "type": "http.response.body",
+                "body": body_bytes,
+            }
+        )
 
     def exception_handler(
         self, exc_class: Type[Exception]
@@ -572,6 +899,37 @@ class FastAPIApp:
         def redoc():
             return generate_redoc_response(self.openapi_url, self.title)
 
+    def _register_route(
+        self,
+        method: str,
+        path: str,
+        response_model: Optional[Type[BaseModel]] = None,
+        summary: str = "",
+        description: str = "",
+        tags: Optional[List[str]] = None,
+        **kwargs,
+    ):
+        """Internal method to register a route and return decorator."""
+        app = self  # Capture self for the decorator
+
+        def decorator(func: Callable) -> Callable:
+            # Store route for ASGI fallback mode
+            if path not in app._routes:
+                app._routes[path] = {}
+            app._routes[path][method.upper()] = func
+
+            # If native bindings available, also register with C++
+            if HAS_NATIVE:
+                # Use the existing route_decorator logic
+                native_decorator = route_decorator(
+                    method, path, response_model, summary, description, tags, **kwargs
+                )
+                return native_decorator(func)
+
+            return func
+
+        return decorator
+
     def get(
         self,
         path: str,
@@ -582,7 +940,7 @@ class FastAPIApp:
         **kwargs,
     ):
         """GET route decorator."""
-        return route_decorator(
+        return self._register_route(
             "GET", path, response_model, summary, description, tags, **kwargs
         )
 
@@ -596,7 +954,7 @@ class FastAPIApp:
         **kwargs,
     ):
         """POST route decorator."""
-        return route_decorator(
+        return self._register_route(
             "POST", path, response_model, summary, description, tags, **kwargs
         )
 
@@ -610,7 +968,7 @@ class FastAPIApp:
         **kwargs,
     ):
         """PUT route decorator."""
-        return route_decorator(
+        return self._register_route(
             "PUT", path, response_model, summary, description, tags, **kwargs
         )
 
@@ -624,7 +982,7 @@ class FastAPIApp:
         **kwargs,
     ):
         """DELETE route decorator."""
-        return route_decorator(
+        return self._register_route(
             "DELETE", path, response_model, summary, description, tags, **kwargs
         )
 
@@ -638,7 +996,7 @@ class FastAPIApp:
         **kwargs,
     ):
         """PATCH route decorator."""
-        return route_decorator(
+        return self._register_route(
             "PATCH", path, response_model, summary, description, tags, **kwargs
         )
 
@@ -652,7 +1010,7 @@ class FastAPIApp:
         **kwargs,
     ):
         """OPTIONS route decorator."""
-        return route_decorator(
+        return self._register_route(
             "OPTIONS", path, response_model, summary, description, tags, **kwargs
         )
 
@@ -666,7 +1024,7 @@ class FastAPIApp:
         **kwargs,
     ):
         """HEAD route decorator."""
-        return route_decorator(
+        return self._register_route(
             "HEAD", path, response_model, summary, description, tags, **kwargs
         )
 
