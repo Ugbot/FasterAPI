@@ -408,6 +408,9 @@ class FastAPIApp:
         self._on_startup: List[Callable] = []
         self._on_shutdown: List[Callable] = []
 
+        # Middleware stack
+        self._middleware: List[tuple] = []
+
         # Register special routes if enabled
         if HAS_NATIVE:
             if openapi_url:
@@ -485,6 +488,65 @@ class FastAPIApp:
                 raise ValueError(
                     f"Invalid event type: {event_type}. Must be 'startup' or 'shutdown'"
                 )
+            return func
+
+        return decorator
+
+    def add_middleware(
+        self,
+        middleware_class: Type,
+        **options: Any,
+    ) -> None:
+        """
+        Add middleware to the application.
+
+        Usage:
+            from fasterapi.middleware import CORSMiddleware
+
+            app.add_middleware(
+                CORSMiddleware,
+                allow_origins=["*"],
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
+
+        Args:
+            middleware_class: Middleware class to add
+            **options: Options to pass to the middleware constructor
+        """
+        self._middleware.append((middleware_class, options))
+
+    def middleware(self, middleware_type: str) -> Callable[[Callable], Callable]:
+        """
+        Decorator to add middleware using the dispatch pattern.
+
+        Usage:
+            @app.middleware("http")
+            async def add_process_time_header(request, call_next):
+                import time
+                start_time = time.time()
+                response = await call_next(request)
+                process_time = time.time() - start_time
+                response.headers["X-Process-Time"] = str(process_time)
+                return response
+
+        Args:
+            middleware_type: Type of middleware ("http")
+
+        Returns:
+            Decorator function
+        """
+
+        def decorator(func: Callable) -> Callable:
+            # Import BaseHTTPMiddleware to create wrapper
+            from fasterapi.middleware import BaseHTTPMiddleware
+
+            # Create a middleware class from the function
+            class FunctionMiddleware(BaseHTTPMiddleware):
+                async def dispatch(self, request, call_next):
+                    return await func(request, call_next)
+
+            self._middleware.append((FunctionMiddleware, {}))
             return func
 
         return decorator
@@ -579,6 +641,72 @@ class FastAPIApp:
         return route_decorator(
             "PATCH", path, response_model, summary, description, tags, **kwargs
         )
+
+    def options(
+        self,
+        path: str,
+        response_model: Optional[Type[BaseModel]] = None,
+        summary: str = "",
+        description: str = "",
+        tags: Optional[List[str]] = None,
+        **kwargs,
+    ):
+        """OPTIONS route decorator."""
+        return route_decorator(
+            "OPTIONS", path, response_model, summary, description, tags, **kwargs
+        )
+
+    def head(
+        self,
+        path: str,
+        response_model: Optional[Type[BaseModel]] = None,
+        summary: str = "",
+        description: str = "",
+        tags: Optional[List[str]] = None,
+        **kwargs,
+    ):
+        """HEAD route decorator."""
+        return route_decorator(
+            "HEAD", path, response_model, summary, description, tags, **kwargs
+        )
+
+    def websocket(
+        self,
+        path: str,
+        **kwargs,
+    ) -> Callable[[Callable], Callable]:
+        """
+        WebSocket route decorator.
+
+        Usage:
+            @app.websocket("/ws")
+            async def websocket_endpoint(websocket: WebSocket):
+                await websocket.accept()
+                while True:
+                    data = await websocket.receive_text()
+                    await websocket.send_text(f"Echo: {data}")
+
+        Args:
+            path: WebSocket endpoint path
+            **kwargs: Additional options
+
+        Returns:
+            Decorator function
+        """
+
+        def decorator(func: Callable) -> Callable:
+            # Store the websocket handler
+            if not hasattr(self, "_websocket_routes"):
+                self._websocket_routes: Dict[str, Callable] = {}
+            self._websocket_routes[path] = func
+
+            # Register with native if available
+            if HAS_NATIVE:
+                register_route("WEBSOCKET", path, func.__name__, "", "", [])
+
+            return func
+
+        return decorator
 
     def routes(self) -> List[Dict[str, Any]]:
         """Get all registered routes."""

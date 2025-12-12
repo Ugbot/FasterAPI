@@ -318,8 +318,6 @@ class App:
         try:
             import time
 
-        try:
-            import time
             while self.server.is_running():
                 time.sleep(0.1)
         except KeyboardInterrupt:
