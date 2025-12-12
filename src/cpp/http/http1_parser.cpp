@@ -1,13 +1,7 @@
 #include "http1_parser.h"
-#include "../core/simd_utils.h"
 #include <cctype>
 #include <cstring>
 #include <algorithm>
-
-// NOTE: SIMD functions are available in simd_utils.h for bulk operations,
-// but for HTTP/1 parsing of small tokens (method, URL, header names),
-// scalar loops are faster due to SIMD setup overhead.
-// SIMD is useful for: large bodies, cookie parsing, WebSocket frames, etc.
 
 namespace fasterapi {
 namespace http {
@@ -149,7 +143,7 @@ int HTTP1Parser::parse_method(
 ) noexcept {
     mark_ = pos_;
     
-    // Find end of method (space) - method names are short, scalar is faster
+    // Find end of method (space)
     while (pos_ < len && data[pos_] != ' ') {
         if (!is_token_char(data[pos_])) {
             state_ = HTTP1State::ERROR;
@@ -193,7 +187,7 @@ int HTTP1Parser::parse_url(
 ) noexcept {
     mark_ = pos_;
     
-    // Find end of URL (space) - URLs are typically short, scalar is faster
+    // Find end of URL (space)
     while (pos_ < len && data[pos_] != ' ') {
         pos_++;
     }
@@ -251,7 +245,7 @@ int HTTP1Parser::parse_header_field(
     
     mark_ = pos_;
     
-    // Find colon - header names are short, scalar is faster
+    // Find colon
     while (pos_ < len && data[pos_] != ':') {
         if (data[pos_] == '\r') {
             // End of headers
@@ -364,8 +358,7 @@ bool HTTP1Parser::str_eq_ci(std::string_view a, std::string_view b) noexcept {
     }
     
     for (size_t i = 0; i < a.length(); ++i) {
-        if (std::tolower(static_cast<unsigned char>(a[i])) != 
-            std::tolower(static_cast<unsigned char>(b[i]))) {
+        if (std::tolower(a[i]) != std::tolower(b[i])) {
             return false;
         }
     }
