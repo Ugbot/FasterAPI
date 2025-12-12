@@ -613,7 +613,11 @@ if (FA_BUILD_HTTP)
     # Note: http1_coroio_handler.cpp removed - CoroIO dependency removed
 
     # Add unified HTTP server (TLS/ALPN multi-protocol)
+    # Split into multiple files for maintainability
     list(APPEND HTTP_SOURCES src/cpp/http/unified_server.cpp)
+    list(APPEND HTTP_SOURCES src/cpp/http/connection_handlers.cpp)
+    list(APPEND HTTP_SOURCES src/cpp/http/websocket_handlers.cpp)
+    list(APPEND HTTP_SOURCES src/cpp/http/quic_handlers.cpp)
 
     # Note: Removed CoroIO-based handlers - using native event loop instead
 
