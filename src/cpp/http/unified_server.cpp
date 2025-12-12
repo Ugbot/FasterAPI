@@ -7,6 +7,7 @@
 #include "unified_server.h"
 #include "app.h"
 #include "core/logger.h"
+#include "core/string_hash.h"
 #include "net/tls_cert_generator.h"
 #include "net/udp_socket.h"
 #include "quic/quic_packet.h"
@@ -51,8 +52,11 @@ thread_local std::unordered_map<int, std::unique_ptr<http2::Http2Connection>> t_
 thread_local std::unordered_map<int, std::unique_ptr<Http1Connection>> t_http1_connections;
 
 // HTTP/3 and WebTransport connection storage (keyed by connection ID string)
-thread_local std::unordered_map<std::string, std::unique_ptr<Http3Connection>> t_http3_connections;
-thread_local std::unordered_map<std::string, std::unique_ptr<WebTransportConnection>> t_webtransport_connections;
+// Using StringHash for heterogeneous lookup (avoid temp string allocations)
+thread_local std::unordered_map<std::string, std::unique_ptr<Http3Connection>, 
+    core::StringHash, std::equal_to<>> t_http3_connections;
+thread_local std::unordered_map<std::string, std::unique_ptr<WebTransportConnection>,
+    core::StringHash, std::equal_to<>> t_webtransport_connections;
 
 // WebSocket connection storage (keyed by fd)
 thread_local std::unordered_map<int, std::unique_ptr<WebSocketConnection>> t_websocket_connections;
@@ -729,6 +733,7 @@ void UnifiedServer::handle_tls_connection(
             LOG_ERROR("Server", "TLS socket error on fd=%d", fd);
             loop->remove_fd(fd);
             t_tls_sockets.erase(it);
+            ::close(fd);
             return;
         }
 
@@ -739,6 +744,7 @@ void UnifiedServer::handle_tls_connection(
                 LOG_ERROR("Server", "TLS process_incoming failed on fd=%d", fd);
                 loop->remove_fd(fd);
                 t_tls_sockets.erase(it);
+                ::close(fd);
                 return;
             }
         }
@@ -878,6 +884,7 @@ void UnifiedServer::handle_tls_connection(
             LOG_ERROR("Server", "TLS handshake failed on fd=%d: %s", fd, tls_sock->get_error().c_str());
             loop->remove_fd(fd);
             t_tls_sockets.erase(it);
+            ::close(fd);
         }
     };
 
@@ -908,60 +915,67 @@ void UnifiedServer::on_cleartext_connection(net::TcpSocket socket, net::EventLoo
 
     // Create HTTP/1.1 connection
     auto http1_conn = new Http1Connection(fd);
-    http1_conn->set_request_callback([](
-        const std::string& method,
-        const std::string& path,
-        const std::unordered_map<std::string, std::string>& headers,
-        const std::string& body
-    ) -> Http1Response {
+    
+    // Use fast zero-copy callback for better performance
+    http1_conn->set_fast_request_callback([](const Http1RequestView& view) -> Http1Response {
         Http1Response response;
 
         // Check for WebSocket upgrade request first
-        auto upgrade_it = headers.find("Upgrade");
-        auto connection_it = headers.find("Connection");
-        auto ws_key_it = headers.find("Sec-WebSocket-Key");
-        auto ws_version_it = headers.find("Sec-WebSocket-Version");
+        auto upgrade_val = view.get_header("Upgrade");
+        auto connection_val = view.get_header("Connection");
+        auto ws_key = view.get_header("Sec-WebSocket-Key");
+        auto ws_version = view.get_header("Sec-WebSocket-Version");
 
-        if (upgrade_it != headers.end() && ws_key_it != headers.end()) {
-            std::string upgrade_val = upgrade_it->second;
-            std::string connection_val = connection_it != headers.end() ? connection_it->second : "";
-            std::string ws_version = ws_version_it != headers.end() ? ws_version_it->second : "";
-            std::string ws_key = ws_key_it->second;
-
+        if (!upgrade_val.empty() && !ws_key.empty()) {
             if (websocket::HandshakeUtils::validate_upgrade_request(
-                    method, upgrade_val, connection_val, ws_version, ws_key)) {
+                    std::string(view.method),
+                    std::string(upgrade_val),
+                    std::string(connection_val),
+                    std::string(ws_version),
+                    std::string(ws_key))) {
                 // Valid WebSocket upgrade - build 101 Switching Protocols response
-                LOG_INFO("WebSocket", "Cleartext: Valid upgrade request for path: %s", path.c_str());
+                LOG_INFO("WebSocket", "Cleartext: Valid upgrade request for path: %.*s",
+                         static_cast<int>(view.path.size()), view.path.data());
 
-                std::string accept_key = websocket::HandshakeUtils::compute_accept_key(ws_key);
+                std::string accept_key = websocket::HandshakeUtils::compute_accept_key(std::string(ws_key));
 
                 response.status = 101;
                 response.status_message = "Switching Protocols";
                 response.add_header("Upgrade", "websocket");
                 response.add_header("Connection", "Upgrade");
                 response.add_header("Sec-WebSocket-Accept", accept_key);
-                response.mark_websocket_upgrade(path);
+                response.mark_websocket_upgrade(std::string(view.path));
 
                 return response;
             }
         }
 
-        // Simplified path: call App::handle_http1() directly if available
+        // Fast path: call App::handle_http1_fast() directly if available
         if (s_app_instance_) {
-            return s_app_instance_->handle_http1(method, path, headers, body);
+            return s_app_instance_->handle_http1_fast(view);
         }
 
         // Fallback to old path if App not set (for backward compatibility)
         if (s_request_handler_) {
+            // Build headers map for legacy handler
+            std::unordered_map<std::string, std::string> headers;
+            headers.reserve(view.header_count);
+            for (size_t i = 0; i < view.header_count; ++i) {
+                headers.emplace(
+                    std::string(view.headers[i].first),
+                    std::string(view.headers[i].second)
+                );
+            }
+            
             std::unordered_map<std::string, std::string> response_headers;
             std::string response_body;
             uint16_t status_code = 200;
 
             s_request_handler_(
-                method,
-                path,
+                std::string(view.method),
+                std::string(view.path),
                 headers,
-                body,
+                std::string(view.body),
                 [&status_code, &response_headers, &response_body](
                     uint16_t status,
                     const std::unordered_map<std::string, std::string>& hdrs,
@@ -1026,6 +1040,7 @@ static void handle_websocket_connection(
     if (it == t_websocket_connections.end()) {
         LOG_ERROR("WebSocket", "Connection not found for fd=%d", fd);
         event_loop->remove_fd(fd);
+        ::close(fd);
         return;
     }
 
@@ -1196,6 +1211,7 @@ void UnifiedServer::handle_http1_connection(
             event_loop->remove_fd(fd);
             t_http1_connections.erase(it);
             if (using_tls) t_tls_sockets.erase(tls_it);
+            ::close(fd);
             do_track_connection_close();
             return;
         }
@@ -1226,17 +1242,19 @@ void UnifiedServer::handle_http1_connection(
                 event_loop->remove_fd(fd);
                 t_http1_connections.erase(it);
                 if (using_tls) t_tls_sockets.erase(tls_it);
+                ::close(fd);
                 do_track_connection_close();
             }
             return;
         }
 
         if (n == 0) {
-            // Connection closed
+            // Connection closed by peer
             LOG_DEBUG("HTTP1", "Connection closed on fd=%d", fd);
             event_loop->remove_fd(fd);
             t_http1_connections.erase(it);
             if (using_tls) t_tls_sockets.erase(tls_it);
+            ::close(fd);
             do_track_connection_close();
             return;
         }
@@ -1249,6 +1267,7 @@ void UnifiedServer::handle_http1_connection(
             event_loop->remove_fd(fd);
             t_http1_connections.erase(it);
             if (using_tls) t_tls_sockets.erase(tls_it);
+            ::close(fd);
             do_track_connection_close();
             return;
         }
@@ -1296,6 +1315,17 @@ void UnifiedServer::handle_http1_connection(
                 } else {
                     LOG_DEBUG("HTTP1", "fd=%d TLS flush complete", fd);
 
+                    // Check if connection should be closed (non-keep-alive)
+                    if (http1_conn->get_state() == Http1State::CLOSING) {
+                        LOG_DEBUG("HTTP1", "fd=%d TLS connection closing (non-keep-alive)", fd);
+                        event_loop->remove_fd(fd);
+                        t_http1_connections.erase(it);
+                        t_tls_sockets.erase(tls_it);
+                        ::close(fd);
+                        do_track_connection_close();
+                        return;
+                    }
+
                     // Check if we transitioned to a reading state (keep-alive/pipelined requests)
                     if (http1_conn->get_state() == Http1State::READING_REQUEST ||
                         http1_conn->get_state() == Http1State::KEEPALIVE) {
@@ -1314,6 +1344,7 @@ void UnifiedServer::handle_http1_connection(
                                 event_loop->remove_fd(fd);
                                 t_http1_connections.erase(it);
                                 t_tls_sockets.erase(tls_it);
+                                ::close(fd);
                                 do_track_connection_close();
                                 return;
                             }
@@ -1358,6 +1389,7 @@ void UnifiedServer::handle_http1_connection(
                     event_loop->remove_fd(fd);
                     t_http1_connections.erase(it);
                     if (using_tls) t_tls_sockets.erase(tls_it);
+                    ::close(fd);
                     do_track_connection_close();
                 }
                 return;
@@ -1366,6 +1398,17 @@ void UnifiedServer::handle_http1_connection(
             if (sent > 0) {
                 http1_conn->commit_output(sent);
                 LOG_DEBUG("HTTP1", "fd=%d After commit_output, state=%d", fd, static_cast<int>(http1_conn->get_state()));
+
+                // Check if connection should be closed (non-keep-alive)
+                if (http1_conn->get_state() == Http1State::CLOSING) {
+                    LOG_DEBUG("HTTP1", "fd=%d Connection closing (non-keep-alive)", fd);
+                    event_loop->remove_fd(fd);
+                    t_http1_connections.erase(it);
+                    if (using_tls) t_tls_sockets.erase(tls_it);
+                    ::close(fd);
+                    do_track_connection_close();
+                    return;
+                }
 
                 // Check for WebSocket upgrade transition
                 // If the 101 response is fully sent, transition to WebSocket mode
@@ -1520,6 +1563,7 @@ void UnifiedServer::handle_http1_connection(
                             LOG_ERROR("HTTP1", "fd=%d pipelined request process error", fd);
                             event_loop->remove_fd(fd);
                             t_http1_connections.erase(it);
+                            ::close(fd);
                             do_track_connection_close();
                             return;
                         }
@@ -1540,6 +1584,7 @@ void UnifiedServer::handle_http1_connection(
                         // Read error
                         event_loop->remove_fd(fd);
                         t_http1_connections.erase(it);
+                        ::close(fd);
                         do_track_connection_close();
                         return;
                     }
@@ -1567,6 +1612,7 @@ void UnifiedServer::handle_http1_connection(
         event_loop->remove_fd(fd);
         t_http1_connections.erase(it);
         if (using_tls) t_tls_sockets.erase(tls_it);
+        ::close(fd);
         do_track_connection_close();
     }
 }

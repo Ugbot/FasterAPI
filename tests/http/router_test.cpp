@@ -394,10 +394,13 @@ static void dump_tree(const RouterNode* node, const std::string& prefix = "", in
               << "\", indices=\"" << node->indices
               << "\", has_handler=" << (node->handler ? "yes" : "no")
               << ", children=" << node->children.size()
-              << ", child_map={";
+              << ", child_index={";
 
-    for (const auto& [c, idx] : node->child_map) {
-        std::cout << "'" << c << "':" << idx << ",";
+    // Iterate through child_index array and print non-empty entries
+    for (int c = 0; c < 256; ++c) {
+        if (node->child_index[c] >= 0) {
+            std::cout << "'" << static_cast<char>(c) << "':" << node->child_index[c] << ",";
+        }
     }
     std::cout << "}" << std::endl;
 

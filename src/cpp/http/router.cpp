@@ -35,27 +35,13 @@ const RouteParam& RouteParams::operator[](size_t index) const noexcept {
 // RouterNode Implementation
 // ============================================================================
 
-RouterNode* RouterNode::get_child(char c) const noexcept {
-    // Try hash map first (O(1) lookup)
-    auto it = child_map.find(c);
-    if (it != child_map.end() && it->second < children.size()) {
-        return children[it->second].get();
-    }
-    
-    // Fallback to indices string (for backward compatibility)
-    size_t idx = indices.find(c);
-    if (idx != std::string::npos && idx < children.size()) {
-        return children[idx].get();
-    }
-    
-    return nullptr;
-}
+// get_child is now inline in header using child_index array
 
 RouterNode* RouterNode::add_child(char c, NodeType node_type) {
-    // Check if child already exists (via hash map)
-    auto it = child_map.find(c);
-    if (it != child_map.end() && it->second < children.size()) {
-        return children[it->second].get();
+    // Check if child already exists (via direct array lookup)
+    int16_t existing_idx = child_index[static_cast<uint8_t>(c)];
+    if (existing_idx >= 0 && static_cast<size_t>(existing_idx) < children.size()) {
+        return children[existing_idx].get();
     }
     
     // Create new child
@@ -66,9 +52,9 @@ RouterNode* RouterNode::add_child(char c, NodeType node_type) {
     size_t idx = children.size();
     children.push_back(std::move(child));
     
-    // Update indices and hash map
+    // Update indices and direct array lookup
     indices += c;
-    child_map[c] = idx;
+    child_index[static_cast<uint8_t>(c)] = static_cast<int16_t>(idx);
     
     return child_ptr;
 }
@@ -103,8 +89,15 @@ int Router::add_route(
         return 1;
     }
 
-    // Get or create tree for method
-    auto& tree = trees_[method];
+    // Parse method string to enum for fast array indexing
+    HttpMethod method_enum = parse_http_method(method);
+    if (method_enum == HttpMethod::UNKNOWN) {
+        std::cerr << "Router: unknown HTTP method: " << method << std::endl;
+        return 1;
+    }
+
+    // Get or create tree for method (direct array access - no hash)
+    auto& tree = trees_[static_cast<size_t>(method_enum)];
     if (!tree) {
         tree = std::make_unique<RouterNode>(NodeType::STATIC);
         tree->path = "/";
@@ -138,24 +131,35 @@ RouteHandler Router::match(
     // Clear params
     params.clear();
 
-    // Find tree for method
-    auto it = trees_.find(method);
-    if (it == trees_.end()) {
+    // Parse method to enum for direct array access (no hash)
+    HttpMethod method_enum = parse_http_method(method);
+    if (method_enum == HttpMethod::UNKNOWN) {
+        return nullptr;
+    }
+
+    // Direct array lookup - O(1), no hashing
+    const auto& tree = trees_[static_cast<size_t>(method_enum)];
+    if (!tree) {
         return nullptr;
     }
 
     // Special case: root path "/" - check root node's handler
-    if (path == "/" && it->second->handler) {
-        return it->second->handler;
+    if (path == "/" && tree->handler) {
+        return tree->handler;
     }
 
     // Match in tree (start at pos=1 to skip root's '/')
-    return match_route(it->second.get(), path, params, 1);
+    return match_route(tree.get(), path, params, 1);
 }
 
 size_t Router::route_count(const std::string& method) const noexcept {
-    auto it = trees_.find(method);
-    if (it == trees_.end()) {
+    HttpMethod method_enum = parse_http_method(method);
+    if (method_enum == HttpMethod::UNKNOWN) {
+        return 0;
+    }
+    
+    const auto& tree = trees_[static_cast<size_t>(method_enum)];
+    if (!tree) {
         return 0;
     }
     
@@ -171,7 +175,7 @@ size_t Router::route_count(const std::string& method) const noexcept {
         }
     };
     
-    count_routes(it->second.get());
+    count_routes(tree.get());
     return count;
 }
 
@@ -182,8 +186,13 @@ size_t Router::total_routes() const noexcept {
 std::vector<Router::RouteInfo> Router::get_routes() const {
     std::vector<RouteInfo> routes;
     
-    for (const auto& [method, tree] : trees_) {
-        collect_routes(tree.get(), method, "", routes);
+    // Iterate over all method trees using enum
+    for (size_t i = 0; i < static_cast<size_t>(HttpMethod::COUNT); ++i) {
+        const auto& tree = trees_[i];
+        if (tree) {
+            const char* method_str = http_method_to_string(static_cast<HttpMethod>(i));
+            collect_routes(tree.get(), method_str, "", routes);
+        }
     }
     
     return routes;
@@ -269,7 +278,7 @@ int Router::insert_route(
 
                     // Update split node's child tracking
                     split_node->indices = std::string(1, c->path[0]);
-                    split_node->child_map[c->path[0]] = 0;
+                    split_node->child_index[static_cast<uint8_t>(c->path[0])] = 0;
                     split_node->children.push_back(std::move(c));
 
                     // Replace old child with split node
@@ -294,7 +303,7 @@ int Router::insert_route(
 
             // Add to current child (the split node or prefix-matched node)
             child->indices += segment[0];
-            child->child_map[segment[0]] = child->children.size();
+            child->child_index[static_cast<uint8_t>(segment[0])] = static_cast<int16_t>(child->children.size());
             child->children.push_back(std::move(new_child));
             child = new_child_ptr;
         } else if (!child && !segment.empty()) {
@@ -306,7 +315,7 @@ int Router::insert_route(
             node->indices += segment[0];
             size_t child_idx = node->children.size();
             node->children.push_back(std::move(new_child));
-            node->child_map[segment[0]] = child_idx;
+            node->child_index[static_cast<uint8_t>(segment[0])] = static_cast<int16_t>(child_idx);
         }
     } else {
         // Parameter or wildcard node
@@ -354,12 +363,12 @@ RouteHandler Router::match_route(
     // Try children in priority order: static > param > wildcard
     
     // 1. Try static children first (highest priority)
-    // Optimize: Try hash map lookup if we have the first character
+    // Use direct array lookup - O(1), no hashing
     if (pos < path.length()) {
         char first_char = path[pos];
-        auto it = node->child_map.find(first_char);
-        if (it != node->child_map.end() && it->second < node->children.size()) {
-            const auto& child = node->children[it->second];
+        int16_t child_idx = node->child_index[static_cast<uint8_t>(first_char)];
+        if (child_idx >= 0 && static_cast<size_t>(child_idx) < node->children.size()) {
+            const auto& child = node->children[child_idx];
             if (child->type == NodeType::STATIC) {
                 // Check if path matches child's path
                 if (pos + child->path.length() <= path.length()) {
@@ -388,9 +397,9 @@ RouteHandler Router::match_route(
             continue;
         }
         
-        // Skip if already tried via hash map
+        // Skip if already tried via direct array lookup
         if (pos < path.length() && !child->path.empty() && 
-            node->child_map.find(child->path[0]) != node->child_map.end()) {
+            node->child_index[static_cast<uint8_t>(child->path[0])] >= 0) {
             continue;
         }
         

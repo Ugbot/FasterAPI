@@ -16,6 +16,7 @@
 #pragma once
 
 #include "http1_connection.h"
+#include "../core/string_hash.h"
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -346,7 +347,7 @@ private:
 
     // LRU list: front = most recently used, back = least recently used
     std::list<std::pair<std::string, CacheEntry>> lru_list_;
-    std::unordered_map<std::string, decltype(lru_list_)::iterator> cache_map_;
+    std::unordered_map<std::string, decltype(lru_list_)::iterator, core::StringHash, std::equal_to<>> cache_map_;
 
     std::atomic<uint64_t> hits_{0};
     std::atomic<uint64_t> misses_{0};

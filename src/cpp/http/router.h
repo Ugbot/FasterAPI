@@ -1,7 +1,9 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 #include <vector>
+#include <array>
 #include <unordered_map>
 #include <functional>
 #include <memory>
@@ -98,6 +100,70 @@ enum class NodeType : uint8_t {
 };
 
 /**
+ * HTTP method enumeration for fast array-based lookup.
+ * Using enum instead of string hash eliminates hashing overhead.
+ */
+enum class HttpMethod : uint8_t {
+    GET = 0,
+    POST,
+    PUT,
+    DELETE_,   // DELETE is a macro on some platforms
+    PATCH,
+    HEAD,
+    OPTIONS,
+    CONNECT,
+    TRACE,
+    UNKNOWN,
+    COUNT = UNKNOWN  // Number of valid methods (excludes UNKNOWN)
+};
+
+/**
+ * Parse HTTP method string to enum.
+ * Uses first character for fast switching.
+ */
+inline HttpMethod parse_http_method(std::string_view method) noexcept {
+    if (method.empty()) return HttpMethod::UNKNOWN;
+    
+    switch (method[0]) {
+        case 'G':
+            if (method == "GET") return HttpMethod::GET;
+            break;
+        case 'P':
+            if (method == "POST") return HttpMethod::POST;
+            if (method == "PUT") return HttpMethod::PUT;
+            if (method == "PATCH") return HttpMethod::PATCH;
+            break;
+        case 'D':
+            if (method == "DELETE") return HttpMethod::DELETE_;
+            break;
+        case 'H':
+            if (method == "HEAD") return HttpMethod::HEAD;
+            break;
+        case 'O':
+            if (method == "OPTIONS") return HttpMethod::OPTIONS;
+            break;
+        case 'C':
+            if (method == "CONNECT") return HttpMethod::CONNECT;
+            break;
+        case 'T':
+            if (method == "TRACE") return HttpMethod::TRACE;
+            break;
+    }
+    return HttpMethod::UNKNOWN;
+}
+
+/**
+ * Convert HTTP method enum to string.
+ */
+inline const char* http_method_to_string(HttpMethod method) noexcept {
+    static const char* names[] = {
+        "GET", "POST", "PUT", "DELETE", "PATCH",
+        "HEAD", "OPTIONS", "CONNECT", "TRACE", "UNKNOWN"
+    };
+    return names[static_cast<size_t>(method)];
+}
+
+/**
  * Node in radix tree.
  */
 struct RouterNode {
@@ -115,19 +181,31 @@ struct RouterNode {
     // Indices for faster child lookup
     std::string indices;        // First char of each child's path
     
-    // Hash map for O(1) static child lookup (optimization for many children)
-    std::unordered_map<char, size_t> child_map;  // first_char -> index in children
+    // Direct array lookup for child indices: O(1) instead of hash map
+    // -1 = no child with this first character, else index into children vector
+    // Uses 512 bytes but eliminates hash computation in hot path
+    std::array<int16_t, 256> child_index;
     
     // Priority for ordering (higher = checked first)
     uint32_t priority;
     
     RouterNode(NodeType t = NodeType::STATIC)
-        : type(t), priority(0) {}
+        : type(t), priority(0) {
+        // Initialize all child indices to -1 (no child)
+        child_index.fill(-1);
+    }
     
     /**
      * Get child node by index character.
+     * O(1) direct array lookup - no hashing.
      */
-    RouterNode* get_child(char c) const noexcept;
+    RouterNode* get_child(char c) const noexcept {
+        int16_t idx = child_index[static_cast<uint8_t>(c)];
+        if (idx < 0 || static_cast<size_t>(idx) >= children.size()) {
+            return nullptr;
+        }
+        return children[idx].get();
+    }
     
     /**
      * Add or get child with given first character.
@@ -208,8 +286,9 @@ public:
     std::vector<RouteInfo> get_routes() const;
     
 private:
-    // Per-method trees
-    std::unordered_map<std::string, std::unique_ptr<RouterNode>> trees_;
+    // Per-method trees using enum-indexed array (no hash lookup)
+    // Index by HttpMethod enum for O(1) access
+    std::array<std::unique_ptr<RouterNode>, static_cast<size_t>(HttpMethod::COUNT)> trees_;
     
     // Route count
     size_t route_count_;

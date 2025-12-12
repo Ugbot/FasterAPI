@@ -10,6 +10,11 @@ HttpRequest::HttpRequest() noexcept
     : method_(Method::GET), path_("/"), query_(""), version_("HTTP/1.1"), 
       protocol_("HTTP/1.1"), client_ip_("127.0.0.1"), request_id_(0), 
       timestamp_(0), secure_(false) {
+    // Pre-allocate maps to avoid rehashing (reduces per-request allocations)
+    headers_.reserve(32);      // Typical HTTP request has 10-30 headers
+    query_params_.reserve(16); // Typical query has 5-15 parameters
+    path_params_.reserve(8);   // Route patterns rarely have >5 params
+    
     // Generate unique request ID
     static std::random_device rd;
     static std::mt19937_64 gen(rd());
@@ -182,4 +187,48 @@ void HttpRequest::parse_query_params() noexcept {
 
 std::string HttpRequest::parse_content_type() const noexcept {
     return get_header("content-type");
+}
+
+void HttpRequest::parse_multipart() const noexcept {
+    if (multipart_parsed_) return;
+    multipart_parsed_ = true;
+
+    if (!is_multipart()) return;
+
+    std::string content_type = get_content_type();
+    fasterapi::MultipartFormData form;
+    if (form.parse(content_type, body_)) {
+        files_ = form.files();
+        form_fields_ = form.fields();
+    }
+}
+
+const std::vector<fasterapi::FileUpload>& HttpRequest::files() noexcept {
+    parse_multipart();
+    return files_;
+}
+
+const std::vector<fasterapi::FormField>& HttpRequest::form_fields() noexcept {
+    parse_multipart();
+    return form_fields_;
+}
+
+const fasterapi::FileUpload* HttpRequest::get_file(const std::string& name) noexcept {
+    parse_multipart();
+    for (const auto& file : files_) {
+        if (file.name == name) {
+            return &file;
+        }
+    }
+    return nullptr;
+}
+
+std::string HttpRequest::get_form_field(const std::string& name) noexcept {
+    parse_multipart();
+    for (const auto& field : form_fields_) {
+        if (field.name == name) {
+            return field.value;
+        }
+    }
+    return "";
 }

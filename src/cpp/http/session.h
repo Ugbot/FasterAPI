@@ -15,6 +15,7 @@
 #pragma once
 
 #include "http1_connection.h"
+#include "../core/string_hash.h"
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -294,9 +295,9 @@ public:
 private:
     mutable std::shared_mutex mutex_;
     size_t max_sessions_;
-    std::unordered_map<std::string, SessionEntry> sessions_;
+    std::unordered_map<std::string, SessionEntry, core::StringHash, std::equal_to<>> sessions_;
     std::list<std::string> lru_list_;
-    std::unordered_map<std::string, std::list<std::string>::iterator> lru_map_;
+    std::unordered_map<std::string, std::list<std::string>::iterator, core::StringHash, std::equal_to<>> lru_map_;
 };
 
 /**

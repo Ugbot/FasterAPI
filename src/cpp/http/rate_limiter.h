@@ -30,6 +30,8 @@
 #include <optional>
 #include <cstdint>
 
+#include "../core/string_hash.h"
+
 namespace fasterapi {
 namespace http {
 
@@ -299,10 +301,10 @@ private:
     RateLimitConfig config_;
     mutable std::shared_mutex mutex_;
 
-    // State for each algorithm
-    std::unordered_map<std::string, TokenBucket> token_buckets_;
-    std::unordered_map<std::string, SlidingWindow> sliding_windows_;
-    std::unordered_map<std::string, FixedWindow> fixed_windows_;
+    // State for each algorithm (using StringHash for heterogeneous lookup)
+    std::unordered_map<std::string, TokenBucket, core::StringHash, std::equal_to<>> token_buckets_;
+    std::unordered_map<std::string, SlidingWindow, core::StringHash, std::equal_to<>> sliding_windows_;
+    std::unordered_map<std::string, FixedWindow, core::StringHash, std::equal_to<>> fixed_windows_;
 
     uint64_t last_cleanup_us_{0};
 
