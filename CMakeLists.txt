@@ -100,6 +100,7 @@ set(CORE_SOURCES
     src/cpp/core/ring_buffer.cpp
     src/cpp/core/async_io.cpp
     src/cpp/core/logger.cpp
+    src/cpp/core/simd_utils.cpp
 )
 
 # Platform-specific async I/O implementations
@@ -135,6 +136,7 @@ set(CORE_HEADERS
     src/cpp/core/task.h
     src/cpp/core/ring_buffer.h
     src/cpp/core/async_io.h
+    src/cpp/core/simd_utils.h
 )
 
 # Python executor sources
