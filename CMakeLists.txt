@@ -1336,6 +1336,22 @@ if (FA_BUILD_HTTP)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks"
     )
 
+    # TechEmpower HTTP/2 benchmarks (with optimizations)
+    add_executable(bench_techempower_http2 benchmarks/techempower/techempower_http2.cpp
+        src/cpp/http/router.cpp
+        src/cpp/http/http1_parser.cpp
+        src/cpp/http/http2_frame.cpp
+        src/cpp/http/http2_connection.cpp
+        src/cpp/http/http2_stream.cpp
+        src/cpp/http/hpack.cpp
+        src/cpp/http/huffman.cpp
+        src/cpp/http/huffman_table_data.cpp
+    )
+    target_include_directories(bench_techempower_http2 PRIVATE ${CMAKE_SOURCE_DIR})
+    set_target_properties(bench_techempower_http2 PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks"
+    )
+
     # 1 Million Request Challenge (1MRC) - Pure C++ server
     add_executable(1mrc_cpp_server benchmarks/1mrc/cpp/1mrc_cpp_server.cpp)
     target_include_directories(1mrc_cpp_server PRIVATE ${CMAKE_SOURCE_DIR})
