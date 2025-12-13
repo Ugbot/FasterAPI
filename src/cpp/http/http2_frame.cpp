@@ -542,5 +542,254 @@ std::vector<uint8_t> write_rst_stream_frame(
     return frame;
 }
 
+// ============================================================================
+// Zero-allocation frame serialization (_to variants)
+// ============================================================================
+
+size_t write_data_frame_to(
+    uint8_t* buf,
+    size_t capacity,
+    uint32_t stream_id,
+    const uint8_t* data,
+    size_t data_len,
+    bool end_stream
+) noexcept {
+    const size_t frame_size = 9 + data_len;
+    if (capacity < frame_size) {
+        return 0;
+    }
+
+    uint8_t flags = end_stream ? FrameFlags::DATA_END_STREAM : 0;
+    FrameHeader header(static_cast<uint32_t>(data_len), FrameType::DATA, flags, stream_id);
+    write_frame_header(header, buf);
+
+    if (data_len > 0 && data) {
+        std::memcpy(buf + 9, data, data_len);
+    }
+
+    return frame_size;
+}
+
+size_t write_headers_frame_to(
+    uint8_t* buf,
+    size_t capacity,
+    uint32_t stream_id,
+    const uint8_t* header_block,
+    size_t header_block_len,
+    bool end_stream,
+    bool end_headers,
+    const PrioritySpec* priority
+) noexcept {
+    const size_t priority_size = priority ? 5 : 0;
+    const size_t payload_len = priority_size + header_block_len;
+    const size_t frame_size = 9 + payload_len;
+
+    if (capacity < frame_size) {
+        return 0;
+    }
+
+    uint8_t flags = 0;
+    if (end_stream) flags |= FrameFlags::HEADERS_END_STREAM;
+    if (end_headers) flags |= FrameFlags::HEADERS_END_HEADERS;
+    if (priority) flags |= FrameFlags::HEADERS_PRIORITY;
+
+    FrameHeader header(static_cast<uint32_t>(payload_len), FrameType::HEADERS, flags, stream_id);
+    write_frame_header(header, buf);
+
+    size_t offset = 9;
+
+    if (priority) {
+        uint32_t stream_dep = priority->stream_dependency;
+        if (priority->exclusive) {
+            stream_dep |= 0x80000000;
+        }
+        write_uint32(buf + offset, stream_dep);
+        buf[offset + 4] = priority->weight;
+        offset += 5;
+    }
+
+    if (header_block_len > 0 && header_block) {
+        std::memcpy(buf + offset, header_block, header_block_len);
+    }
+
+    return frame_size;
+}
+
+size_t write_settings_frame_to(
+    uint8_t* buf,
+    size_t capacity,
+    const SettingsParameter* params,
+    size_t param_count,
+    bool ack
+) noexcept {
+    if (ack) {
+        if (capacity < 9) {
+            return 0;
+        }
+        FrameHeader header(0, FrameType::SETTINGS, FrameFlags::SETTINGS_ACK, 0);
+        write_frame_header(header, buf);
+        return 9;
+    }
+
+    const size_t payload_len = param_count * 6;
+    const size_t frame_size = 9 + payload_len;
+
+    if (capacity < frame_size) {
+        return 0;
+    }
+
+    FrameHeader header(static_cast<uint32_t>(payload_len), FrameType::SETTINGS, 0, 0);
+    write_frame_header(header, buf);
+
+    for (size_t i = 0; i < param_count; ++i) {
+        uint8_t* param_data = buf + 9 + (i * 6);
+        write_uint16(param_data, static_cast<uint16_t>(params[i].id));
+        write_uint32(param_data + 2, params[i].value);
+    }
+
+    return frame_size;
+}
+
+size_t write_settings_ack_to(uint8_t* buf, size_t capacity) noexcept {
+    return write_settings_frame_to(buf, capacity, nullptr, 0, true);
+}
+
+size_t write_window_update_frame_to(
+    uint8_t* buf,
+    size_t capacity,
+    uint32_t stream_id,
+    uint32_t increment
+) noexcept {
+    constexpr size_t frame_size = 9 + 4;
+    if (capacity < frame_size) {
+        return 0;
+    }
+
+    FrameHeader header(4, FrameType::WINDOW_UPDATE, 0, stream_id);
+    write_frame_header(header, buf);
+    write_uint32(buf + 9, increment & 0x7FFFFFFF);
+
+    return frame_size;
+}
+
+size_t write_ping_frame_to(
+    uint8_t* buf,
+    size_t capacity,
+    uint64_t opaque_data,
+    bool ack
+) noexcept {
+    constexpr size_t frame_size = 9 + 8;
+    if (capacity < frame_size) {
+        return 0;
+    }
+
+    uint8_t flags = ack ? FrameFlags::PING_ACK : 0;
+    FrameHeader header(8, FrameType::PING, flags, 0);
+    write_frame_header(header, buf);
+    write_uint64(buf + 9, opaque_data);
+
+    return frame_size;
+}
+
+size_t write_goaway_frame_to(
+    uint8_t* buf,
+    size_t capacity,
+    uint32_t last_stream_id,
+    ErrorCode error_code,
+    const uint8_t* debug_data,
+    size_t debug_data_len
+) noexcept {
+    const size_t payload_len = 8 + debug_data_len;
+    const size_t frame_size = 9 + payload_len;
+
+    if (capacity < frame_size) {
+        return 0;
+    }
+
+    FrameHeader header(static_cast<uint32_t>(payload_len), FrameType::GOAWAY, 0, 0);
+    write_frame_header(header, buf);
+    write_uint32(buf + 9, last_stream_id & 0x7FFFFFFF);
+    write_uint32(buf + 13, static_cast<uint32_t>(error_code));
+
+    if (debug_data_len > 0 && debug_data) {
+        std::memcpy(buf + 17, debug_data, debug_data_len);
+    }
+
+    return frame_size;
+}
+
+size_t write_rst_stream_frame_to(
+    uint8_t* buf,
+    size_t capacity,
+    uint32_t stream_id,
+    ErrorCode error_code
+) noexcept {
+    constexpr size_t frame_size = 9 + 4;
+    if (capacity < frame_size) {
+        return 0;
+    }
+
+    FrameHeader header(4, FrameType::RST_STREAM, 0, stream_id);
+    write_frame_header(header, buf);
+    write_uint32(buf + 9, static_cast<uint32_t>(error_code));
+
+    return frame_size;
+}
+
+size_t write_push_promise_frame_to(
+    uint8_t* buf,
+    size_t capacity,
+    uint32_t stream_id,
+    uint32_t promised_stream_id,
+    const uint8_t* header_block,
+    size_t header_block_len,
+    bool end_headers
+) noexcept {
+    const size_t payload_len = 4 + header_block_len;  // 4 bytes for promised stream ID
+    const size_t frame_size = 9 + payload_len;
+
+    if (capacity < frame_size) {
+        return 0;
+    }
+
+    uint8_t flags = end_headers ? FrameFlags::PUSH_PROMISE_END_HEADERS : 0;
+    FrameHeader header(static_cast<uint32_t>(payload_len), FrameType::PUSH_PROMISE, flags, stream_id);
+    write_frame_header(header, buf);
+
+    // Write promised stream ID (31 bits)
+    write_uint32(buf + 9, promised_stream_id & 0x7FFFFFFF);
+
+    if (header_block_len > 0 && header_block) {
+        std::memcpy(buf + 13, header_block, header_block_len);
+    }
+
+    return frame_size;
+}
+
+size_t write_continuation_frame_to(
+    uint8_t* buf,
+    size_t capacity,
+    uint32_t stream_id,
+    const uint8_t* header_block,
+    size_t header_block_len,
+    bool end_headers
+) noexcept {
+    const size_t frame_size = 9 + header_block_len;
+
+    if (capacity < frame_size) {
+        return 0;
+    }
+
+    uint8_t flags = end_headers ? FrameFlags::CONTINUATION_END_HEADERS : 0;
+    FrameHeader header(static_cast<uint32_t>(header_block_len), FrameType::CONTINUATION, flags, stream_id);
+    write_frame_header(header, buf);
+
+    if (header_block_len > 0 && header_block) {
+        std::memcpy(buf + 9, header_block, header_block_len);
+    }
+
+    return frame_size;
+}
+
 } // namespace http2
 } // namespace fasterapi

@@ -2,9 +2,205 @@
 #include <cstring>
 #include <algorithm>
 #include <iostream>
+#include <cstdio>
 
 namespace fasterapi {
 namespace http2 {
+
+// Thread-local buffer pools for HTTP/2 (cache-line aligned, lock-free)
+thread_local Http2BufferPool<H2_FRAME_BUFFER_SIZE, H2_FRAME_BUFFER_COUNT> t_h2_frame_pool;
+thread_local Http2BufferPool<H2_HEADER_BUFFER_SIZE, H2_HEADER_BUFFER_COUNT> t_h2_header_pool;
+
+// ============================================================================
+// CachedHpackHeaders Implementation
+// ============================================================================
+
+bool CachedHpackHeaders::initialized_ = false;
+
+// Helper to build literal header with indexed name
+// Format: 0x40 | index (6-bit) for incremental indexing, OR
+//         0x00 | index (4-bit) for without indexing
+// Using never indexed (0x10) for headers that shouldn't be indexed
+static size_t build_literal_indexed_name(uint8_t index_prefix, uint8_t name_index,
+                                         const char* value, size_t value_len,
+                                         uint8_t* out, size_t capacity) {
+    if (capacity < 2 + value_len) return 0;
+    
+    size_t pos = 0;
+    
+    // Header byte with indexed name
+    out[pos++] = index_prefix | name_index;
+    
+    // Value length (no Huffman for simplicity, values are short)
+    out[pos++] = static_cast<uint8_t>(value_len);
+    
+    // Value
+    std::memcpy(out + pos, value, value_len);
+    pos += value_len;
+    
+    return pos;
+}
+
+// Pre-computed content-type headers
+// content-type is index 31 in static table
+// Using literal without indexing (0x0f for 4-bit prefix)
+const CachedHpackHeaders::ContentTypeHeader CachedHpackHeaders::CT_JSON = []() {
+    ContentTypeHeader h{};
+    const char* value = "application/json";
+    size_t vlen = strlen(value);
+    // 0x5f = 0x40 (literal with indexing) | 31 (index)
+    // But 31 needs extension: 0x4f + 0x10 (31-15=16 in next byte)
+    // Simpler: use 0x0f (literal without indexing, 4-bit index) + continuation
+    h.data[0] = 0x0f;  // Literal without indexing, index follows
+    h.data[1] = 0x10;  // 31 - 15 = 16
+    h.data[2] = static_cast<uint8_t>(vlen);
+    std::memcpy(h.data + 3, value, vlen);
+    h.len = static_cast<uint8_t>(3 + vlen);
+    return h;
+}();
+
+const CachedHpackHeaders::ContentTypeHeader CachedHpackHeaders::CT_TEXT_PLAIN = []() {
+    ContentTypeHeader h{};
+    const char* value = "text/plain";
+    size_t vlen = strlen(value);
+    h.data[0] = 0x0f;
+    h.data[1] = 0x10;  // content-type index 31
+    h.data[2] = static_cast<uint8_t>(vlen);
+    std::memcpy(h.data + 3, value, vlen);
+    h.len = static_cast<uint8_t>(3 + vlen);
+    return h;
+}();
+
+const CachedHpackHeaders::ContentTypeHeader CachedHpackHeaders::CT_TEXT_HTML = []() {
+    ContentTypeHeader h{};
+    const char* value = "text/html";
+    size_t vlen = strlen(value);
+    h.data[0] = 0x0f;
+    h.data[1] = 0x10;  // content-type index 31
+    h.data[2] = static_cast<uint8_t>(vlen);
+    std::memcpy(h.data + 3, value, vlen);
+    h.len = static_cast<uint8_t>(3 + vlen);
+    return h;
+}();
+
+const CachedHpackHeaders::ContentTypeHeader CachedHpackHeaders::CT_OCTET_STREAM = []() {
+    ContentTypeHeader h{};
+    const char* value = "application/octet-stream";
+    size_t vlen = strlen(value);
+    h.data[0] = 0x0f;
+    h.data[1] = 0x10;  // content-type index 31
+    h.data[2] = static_cast<uint8_t>(vlen);
+    std::memcpy(h.data + 3, value, vlen);
+    h.len = static_cast<uint8_t>(3 + vlen);
+    return h;
+}();
+
+// Pre-computed content-length: 0
+// content-length is index 28 in static table
+const CachedHpackHeaders::ContentLengthHeader CachedHpackHeaders::CL_0 = []() {
+    ContentLengthHeader h{};
+    const char* value = "0";
+    h.data[0] = 0x0f;  // Literal without indexing
+    h.data[1] = 0x0d;  // 28 - 15 = 13
+    h.data[2] = 1;     // Length 1
+    h.data[3] = '0';
+    h.len = 4;
+    return h;
+}();
+
+// Combined response headers for common cases
+// :status 200 + content-type: application/json
+const uint8_t CachedHpackHeaders::RESP_200_JSON[] = {
+    0x88,              // :status 200 (index 8)
+    0x0f, 0x10,        // content-type (index 31)
+    16,                // value length
+    'a','p','p','l','i','c','a','t','i','o','n','/','j','s','o','n'
+};
+const size_t CachedHpackHeaders::RESP_200_JSON_LEN = sizeof(RESP_200_JSON);
+
+// :status 200 + content-type: text/plain
+const uint8_t CachedHpackHeaders::RESP_200_TEXT[] = {
+    0x88,              // :status 200 (index 8)
+    0x0f, 0x10,        // content-type (index 31)
+    10,                // value length
+    't','e','x','t','/','p','l','a','i','n'
+};
+const size_t CachedHpackHeaders::RESP_200_TEXT_LEN = sizeof(RESP_200_TEXT);
+
+// :status 404 + content-type: text/plain
+const uint8_t CachedHpackHeaders::RESP_404_TEXT[] = {
+    0x8d,              // :status 404 (index 13)
+    0x0f, 0x10,        // content-type (index 31)
+    10,                // value length
+    't','e','x','t','/','p','l','a','i','n'
+};
+const size_t CachedHpackHeaders::RESP_404_TEXT_LEN = sizeof(RESP_404_TEXT);
+
+// :status 500 + content-type: text/plain
+const uint8_t CachedHpackHeaders::RESP_500_TEXT[] = {
+    0x8e,              // :status 500 (index 14)
+    0x0f, 0x10,        // content-type (index 31)
+    10,                // value length
+    't','e','x','t','/','p','l','a','i','n'
+};
+const size_t CachedHpackHeaders::RESP_500_TEXT_LEN = sizeof(RESP_500_TEXT);
+
+size_t CachedHpackHeaders::get_status(uint16_t status_code, uint8_t* buf, size_t capacity) noexcept {
+    if (capacity < 1) return 0;
+    
+    // Check for indexed status codes (single byte)
+    switch (status_code) {
+        case 200: buf[0] = STATUS_200; return 1;
+        case 204: buf[0] = STATUS_204; return 1;
+        case 206: buf[0] = STATUS_206; return 1;
+        case 304: buf[0] = STATUS_304; return 1;
+        case 400: buf[0] = STATUS_400; return 1;
+        case 404: buf[0] = STATUS_404; return 1;
+        case 500: buf[0] = STATUS_500; return 1;
+        default: break;
+    }
+    
+    // Non-indexed status: literal with indexed name
+    // :status is index 8, but we need literal value
+    // Format: 0x08 (literal without indexing, index 8) + length + value
+    if (capacity < 6) return 0;
+    
+    char status_str[4];
+    int len = snprintf(status_str, sizeof(status_str), "%u", status_code);
+    if (len < 0 || len > 3) return 0;
+    
+    buf[0] = 0x08;  // Literal without indexing, indexed name :status (index 8)
+    buf[1] = static_cast<uint8_t>(len);
+    std::memcpy(buf + 2, status_str, static_cast<size_t>(len));
+    
+    return 2 + static_cast<size_t>(len);
+}
+
+size_t CachedHpackHeaders::encode_content_length(size_t length, uint8_t* buf, size_t capacity) noexcept {
+    // Special case: content-length 0
+    if (length == 0 && capacity >= CL_0.len) {
+        std::memcpy(buf, CL_0.data, CL_0.len);
+        return CL_0.len;
+    }
+    
+    // Encode dynamically
+    char len_str[24];
+    int str_len = snprintf(len_str, sizeof(len_str), "%zu", length);
+    if (str_len < 0 || capacity < static_cast<size_t>(3 + str_len)) return 0;
+    
+    buf[0] = 0x0f;  // Literal without indexing
+    buf[1] = 0x0d;  // content-length index 28 - 15 = 13
+    buf[2] = static_cast<uint8_t>(str_len);
+    std::memcpy(buf + 3, len_str, static_cast<size_t>(str_len));
+    
+    return 3 + static_cast<size_t>(str_len);
+}
+
+void CachedHpackHeaders::initialize() noexcept {
+    if (initialized_) return;
+    // All static initialization done via lambdas above
+    initialized_ = true;
+}
 
 using core::result;
 using core::error_code;

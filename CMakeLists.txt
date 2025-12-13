@@ -1812,6 +1812,10 @@ if(FA_BUILD_GTEST AND TARGET gtest)
     )
     target_sources(gtest_http2_frame PRIVATE
         src/cpp/http/http2_frame.cpp
+        src/cpp/http/http2_connection.cpp
+        src/cpp/http/http2_stream.cpp
+        src/cpp/http/hpack.cpp
+        src/cpp/http/huffman.cpp
     )
 
     # WebSocket tests

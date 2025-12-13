@@ -271,6 +271,7 @@ result<void> parse_push_promise_frame(
 );
 
 // Frame serialization functions (for sending responses)
+// Legacy allocating versions - prefer the _to variants for zero-allocation
 
 /**
  * Serialize DATA frame.
@@ -337,6 +338,147 @@ std::vector<uint8_t> write_rst_stream_frame(
     uint32_t stream_id,
     ErrorCode error_code
 );
+
+// ============================================================================
+// Zero-allocation frame serialization (_to variants)
+// These write directly to a provided buffer, returning bytes written.
+// All return 0 on insufficient capacity.
+// ============================================================================
+
+/**
+ * Serialize DATA frame to buffer (zero-allocation).
+ * @param buf Output buffer
+ * @param capacity Buffer capacity
+ * @param stream_id Stream identifier
+ * @param data Data payload
+ * @param data_len Data length
+ * @param end_stream END_STREAM flag
+ * @return Bytes written, or 0 if insufficient capacity
+ */
+size_t write_data_frame_to(
+    uint8_t* buf,
+    size_t capacity,
+    uint32_t stream_id,
+    const uint8_t* data,
+    size_t data_len,
+    bool end_stream = false
+) noexcept;
+
+/**
+ * Serialize HEADERS frame to buffer (zero-allocation).
+ * @param buf Output buffer
+ * @param capacity Buffer capacity
+ * @param stream_id Stream identifier
+ * @param header_block HPACK-encoded header block
+ * @param header_block_len Header block length
+ * @param end_stream END_STREAM flag
+ * @param end_headers END_HEADERS flag
+ * @param priority Optional priority spec
+ * @return Bytes written, or 0 if insufficient capacity
+ */
+size_t write_headers_frame_to(
+    uint8_t* buf,
+    size_t capacity,
+    uint32_t stream_id,
+    const uint8_t* header_block,
+    size_t header_block_len,
+    bool end_stream = false,
+    bool end_headers = true,
+    const PrioritySpec* priority = nullptr
+) noexcept;
+
+/**
+ * Serialize SETTINGS frame to buffer (zero-allocation).
+ * @param buf Output buffer
+ * @param capacity Buffer capacity
+ * @param params Settings parameters array
+ * @param param_count Number of parameters
+ * @param ack ACK flag
+ * @return Bytes written, or 0 if insufficient capacity
+ */
+size_t write_settings_frame_to(
+    uint8_t* buf,
+    size_t capacity,
+    const SettingsParameter* params,
+    size_t param_count,
+    bool ack = false
+) noexcept;
+
+/**
+ * Serialize SETTINGS ACK frame to buffer (zero-allocation).
+ * Always 9 bytes (header only, no payload).
+ */
+size_t write_settings_ack_to(uint8_t* buf, size_t capacity) noexcept;
+
+/**
+ * Serialize WINDOW_UPDATE frame to buffer (zero-allocation).
+ * Always 13 bytes (9 header + 4 payload).
+ */
+size_t write_window_update_frame_to(
+    uint8_t* buf,
+    size_t capacity,
+    uint32_t stream_id,
+    uint32_t increment
+) noexcept;
+
+/**
+ * Serialize PING frame to buffer (zero-allocation).
+ * Always 17 bytes (9 header + 8 payload).
+ */
+size_t write_ping_frame_to(
+    uint8_t* buf,
+    size_t capacity,
+    uint64_t opaque_data,
+    bool ack = false
+) noexcept;
+
+/**
+ * Serialize GOAWAY frame to buffer (zero-allocation).
+ */
+size_t write_goaway_frame_to(
+    uint8_t* buf,
+    size_t capacity,
+    uint32_t last_stream_id,
+    ErrorCode error_code,
+    const uint8_t* debug_data = nullptr,
+    size_t debug_data_len = 0
+) noexcept;
+
+/**
+ * Serialize RST_STREAM frame to buffer (zero-allocation).
+ * Always 13 bytes (9 header + 4 payload).
+ */
+size_t write_rst_stream_frame_to(
+    uint8_t* buf,
+    size_t capacity,
+    uint32_t stream_id,
+    ErrorCode error_code
+) noexcept;
+
+/**
+ * Serialize PUSH_PROMISE frame to buffer (zero-allocation).
+ */
+size_t write_push_promise_frame_to(
+    uint8_t* buf,
+    size_t capacity,
+    uint32_t stream_id,
+    uint32_t promised_stream_id,
+    const uint8_t* header_block,
+    size_t header_block_len,
+    bool end_headers = true
+) noexcept;
+
+/**
+ * Serialize CONTINUATION frame to buffer (zero-allocation).
+ */
+size_t write_continuation_frame_to(
+    uint8_t* buf,
+    size_t capacity,
+    uint32_t stream_id,
+    const uint8_t* header_block,
+    size_t header_block_len,
+    bool end_headers = true
+) noexcept;
 
 /**
  * HTTP/2 Connection Preface (RFC 7540 Section 3.5)

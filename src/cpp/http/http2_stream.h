@@ -4,11 +4,240 @@
 #include "../core/result.h"
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
+#include <array>
 #include <unordered_map>
 
 namespace fasterapi {
 namespace http2 {
+
+// ============================================================================
+// Common Header Value Constants
+// Provides string_view to avoid allocations for common header values.
+// ============================================================================
+namespace common_headers {
+    // Common content types
+    inline constexpr std::string_view CT_JSON = "application/json";
+    inline constexpr std::string_view CT_TEXT_PLAIN = "text/plain";
+    inline constexpr std::string_view CT_TEXT_HTML = "text/html";
+    inline constexpr std::string_view CT_OCTET_STREAM = "application/octet-stream";
+    inline constexpr std::string_view CT_FORM_URLENCODED = "application/x-www-form-urlencoded";
+    inline constexpr std::string_view CT_MULTIPART = "multipart/form-data";
+    
+    // Common HTTP methods
+    inline constexpr std::string_view METHOD_GET = "GET";
+    inline constexpr std::string_view METHOD_POST = "POST";
+    inline constexpr std::string_view METHOD_PUT = "PUT";
+    inline constexpr std::string_view METHOD_DELETE = "DELETE";
+    inline constexpr std::string_view METHOD_PATCH = "PATCH";
+    inline constexpr std::string_view METHOD_HEAD = "HEAD";
+    inline constexpr std::string_view METHOD_OPTIONS = "OPTIONS";
+    
+    // Common header names (lowercase per HTTP/2 spec)
+    inline constexpr std::string_view HDR_CONTENT_TYPE = "content-type";
+    inline constexpr std::string_view HDR_CONTENT_LENGTH = "content-length";
+    inline constexpr std::string_view HDR_ACCEPT = "accept";
+    inline constexpr std::string_view HDR_AUTHORIZATION = "authorization";
+    inline constexpr std::string_view HDR_CACHE_CONTROL = "cache-control";
+    inline constexpr std::string_view HDR_USER_AGENT = "user-agent";
+    inline constexpr std::string_view HDR_HOST = "host";
+    
+    // Pseudo-headers
+    inline constexpr std::string_view HDR_METHOD = ":method";
+    inline constexpr std::string_view HDR_PATH = ":path";
+    inline constexpr std::string_view HDR_SCHEME = ":scheme";
+    inline constexpr std::string_view HDR_AUTHORITY = ":authority";
+    inline constexpr std::string_view HDR_STATUS = ":status";
+    
+    // Common cache-control values
+    inline constexpr std::string_view CC_NO_CACHE = "no-cache";
+    inline constexpr std::string_view CC_NO_STORE = "no-store";
+    inline constexpr std::string_view CC_PRIVATE = "private";
+    inline constexpr std::string_view CC_PUBLIC = "public";
+}
+
+/**
+ * Optimized header storage using string_view where possible.
+ * 
+ * For common values (content-types, methods), uses constexpr string_view
+ * to avoid allocations. Falls back to string storage for dynamic values.
+ */
+struct HeaderView {
+    std::string_view name;
+    std::string_view value;
+    
+    // Storage for dynamically-allocated values (when not using constexpr)
+    std::string name_storage;
+    std::string value_storage;
+    
+    // Track whether we own the storage (for proper move semantics)
+    bool owns_name{false};
+    bool owns_value{false};
+    
+    HeaderView() = default;
+    
+    // Construct with string_view (zero-copy, references external data)
+    HeaderView(std::string_view n, std::string_view v)
+        : name(n), value(v), owns_name(false), owns_value(false) {}
+    
+    // Construct with owned strings
+    HeaderView(std::string n, std::string v)
+        : name_storage(std::move(n)), value_storage(std::move(v)),
+          owns_name(true), owns_value(true) {
+        name = name_storage;
+        value = value_storage;
+    }
+    
+    // Copy constructor - must re-point string_views if owned
+    HeaderView(const HeaderView& other)
+        : name_storage(other.name_storage), value_storage(other.value_storage),
+          owns_name(other.owns_name), owns_value(other.owns_value) {
+        name = owns_name ? std::string_view(name_storage) : other.name;
+        value = owns_value ? std::string_view(value_storage) : other.value;
+    }
+    
+    // Move constructor - must re-point string_views after moving storage
+    HeaderView(HeaderView&& other) noexcept
+        : name_storage(std::move(other.name_storage)),
+          value_storage(std::move(other.value_storage)),
+          owns_name(other.owns_name), owns_value(other.owns_value) {
+        name = owns_name ? std::string_view(name_storage) : other.name;
+        value = owns_value ? std::string_view(value_storage) : other.value;
+    }
+    
+    // Copy assignment
+    HeaderView& operator=(const HeaderView& other) {
+        if (this != &other) {
+            name_storage = other.name_storage;
+            value_storage = other.value_storage;
+            owns_name = other.owns_name;
+            owns_value = other.owns_value;
+            name = owns_name ? std::string_view(name_storage) : other.name;
+            value = owns_value ? std::string_view(value_storage) : other.value;
+        }
+        return *this;
+    }
+    
+    // Move assignment
+    HeaderView& operator=(HeaderView&& other) noexcept {
+        if (this != &other) {
+            name_storage = std::move(other.name_storage);
+            value_storage = std::move(other.value_storage);
+            owns_name = other.owns_name;
+            owns_value = other.owns_value;
+            name = owns_name ? std::string_view(name_storage) : other.name;
+            value = owns_value ? std::string_view(value_storage) : other.value;
+        }
+        return *this;
+    }
+    
+    // Set from string_view (caller must ensure lifetime)
+    void set_view(std::string_view n, std::string_view v) {
+        name = n;
+        value = v;
+        name_storage.clear();
+        value_storage.clear();
+        owns_name = false;
+        owns_value = false;
+    }
+    
+    // Set with owned copy
+    void set_owned(std::string n, std::string v) {
+        name_storage = std::move(n);
+        value_storage = std::move(v);
+        name = name_storage;
+        value = value_storage;
+        owns_name = true;
+        owns_value = true;
+    }
+};
+
+/**
+ * Fast header lookup for common headers.
+ * 
+ * Uses a small fixed array for pseudo-headers and common headers,
+ * with overflow to vector for rare/custom headers.
+ */
+class FastHeaders {
+public:
+    static constexpr size_t COMMON_HEADER_SLOTS = 16;
+    
+    FastHeaders() = default;
+    
+    // Add header (auto-detects if common value can use string_view)
+    void add(std::string_view name, std::string_view value);
+    void add(std::string name, std::string value);
+    
+    // Get header value by name (returns empty if not found)
+    std::string_view get(std::string_view name) const noexcept;
+    
+    // Check if header exists
+    bool has(std::string_view name) const noexcept;
+    
+    // Get pseudo-headers quickly (no string comparison)
+    std::string_view method() const noexcept { return method_; }
+    std::string_view path() const noexcept { return path_; }
+    std::string_view scheme() const noexcept { return scheme_; }
+    std::string_view authority() const noexcept { return authority_; }
+    std::string_view status() const noexcept { return status_; }
+    
+    // Set pseudo-headers
+    void set_method(std::string_view m) { method_ = m; }
+    void set_path(std::string_view p);
+    void set_scheme(std::string_view s) { scheme_ = s; }
+    void set_authority(std::string_view a);
+    void set_status(std::string_view s) { status_ = s; }
+    
+    // Iterate all headers
+    template<typename Fn>
+    void for_each(Fn&& fn) const {
+        if (!method_.empty()) fn(common_headers::HDR_METHOD, method_);
+        if (!path_.empty()) fn(common_headers::HDR_PATH, path_);
+        if (!scheme_.empty()) fn(common_headers::HDR_SCHEME, scheme_);
+        if (!authority_.empty()) fn(common_headers::HDR_AUTHORITY, authority_);
+        if (!status_.empty()) fn(common_headers::HDR_STATUS, status_);
+        
+        for (size_t i = 0; i < common_count_; ++i) {
+            fn(common_headers_[i].name, common_headers_[i].value);
+        }
+        for (const auto& h : overflow_headers_) {
+            fn(h.name, h.value);
+        }
+    }
+    
+    // Get header count
+    size_t size() const noexcept;
+    
+    // Clear all headers
+    void clear() noexcept;
+    
+    // Convert to unordered_map for compatibility
+    std::unordered_map<std::string, std::string> to_map() const;
+    
+private:
+    // Pseudo-headers (direct access, no lookup)
+    std::string_view method_;
+    std::string_view path_;
+    std::string_view scheme_;
+    std::string_view authority_;
+    std::string_view status_;
+    
+    // Storage for path/authority if they're dynamically set
+    std::string path_storage_;
+    std::string authority_storage_;
+    
+    // Common headers in fixed array (fast iteration)
+    std::array<HeaderView, COMMON_HEADER_SLOTS> common_headers_;
+    size_t common_count_{0};
+    
+    // Overflow for additional headers
+    std::vector<HeaderView> overflow_headers_;
+    
+    // Try to use constexpr string_view for common values
+    static std::string_view intern_content_type(std::string_view value) noexcept;
+    static std::string_view intern_method(std::string_view value) noexcept;
+};
 
 /**
  * HTTP/2 Stream States (RFC 7540 Section 5.1)
