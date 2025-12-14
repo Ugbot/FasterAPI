@@ -104,8 +104,14 @@ class BaseHTTPMiddleware:
         async def call_next(req):
             nonlocal response_started, response_status, response_headers, response_body
 
-            # Create a new receive that returns empty body (already consumed)
-            async def empty_receive():
+            # Create a new receive that returns the already-consumed body
+            body_sent = False
+
+            async def body_receive():
+                nonlocal body_sent
+                if not body_sent:
+                    body_sent = True
+                    return {"type": "http.request", "body": body, "more_body": False}
                 return {"type": "http.request", "body": b"", "more_body": False}
 
             # Capture response
@@ -127,7 +133,7 @@ class BaseHTTPMiddleware:
                 elif message["type"] == "http.response.body":
                     response_body += message.get("body", b"")
 
-            await self.app(scope, empty_receive, capture_send)
+            await self.app(scope, body_receive, capture_send)
 
             # Return a response-like object
             return _CapturedResponse(response_status, response_headers, response_body)

@@ -6,6 +6,7 @@ while leveraging C++ for all performance-critical operations.
 """
 
 import inspect
+from enum import Enum
 from functools import wraps
 from typing import (
     Any,
@@ -653,6 +654,9 @@ class FastAPIApp:
                     value = int(value)
                 elif param_type == float:
                     value = float(value)
+                elif isinstance(param_type, type) and issubclass(param_type, Enum):
+                    # Convert string to Enum
+                    value = param_type(value)
                 kwargs[param_name] = value
                 continue
 
@@ -662,22 +666,11 @@ class FastAPIApp:
                     dep_func = default.dependency
                     if dep_func is not None:
                         try:
-                            # Call the dependency with the request object
-                            if inspect.iscoroutinefunction(dep_func):
-                                kwargs[param_name] = await dep_func(request=request_obj)
-                            elif hasattr(dep_func, "__call__"):
-                                # Check if __call__ is async (for callable classes like JWTBearer)
-                                call_method = getattr(dep_func, "__call__", None)
-                                if call_method and inspect.iscoroutinefunction(
-                                    call_method
-                                ):
-                                    kwargs[param_name] = await dep_func(
-                                        request=request_obj
-                                    )
-                                else:
-                                    kwargs[param_name] = dep_func(request=request_obj)
-                            else:
-                                kwargs[param_name] = dep_func(request=request_obj)
+                            # Resolve dependency (with recursive support for nested Depends)
+                            resolved = await self._resolve_dependency(
+                                dep_func, request_obj, query_params, DependsParam
+                            )
+                            kwargs[param_name] = resolved
                         except HTTPException as e:
                             # Dependency raised HTTPException (e.g., auth failure)
                             response = (
@@ -687,6 +680,16 @@ class FastAPIApp:
                                 send, response, e.status_code, e.headers or {}
                             )
                             return
+                    else:
+                        # Depends() with no argument - use type annotation to instantiate
+                        # This is how FastAPI handles BackgroundTasks, Request, etc.
+                        if param_type is not None and param_type != str:
+                            try:
+                                # Try to instantiate the type
+                                kwargs[param_name] = param_type()
+                            except Exception:
+                                # If instantiation fails, leave it as None
+                                kwargs[param_name] = None
                     continue
 
             # Check if it's an UploadFile parameter (by type annotation)
@@ -837,7 +840,11 @@ class FastAPIApp:
                         validated = []
                         for item in result:
                             if isinstance(item, BaseModel):
-                                validated.append(item.model_dump())
+                                # Convert to dict first, then validate through response model
+                                item_dict = item.model_dump()
+                                validated.append(
+                                    inner_model.model_validate(item_dict).model_dump()
+                                )
                             elif isinstance(item, dict):
                                 validated.append(
                                     inner_model.model_validate(item).model_dump()
@@ -845,16 +852,19 @@ class FastAPIApp:
                             else:
                                 validated.append(item)
                         result = validated
-                    elif isinstance(result, BaseModel):
-                        # Already a model, convert to dict
-                        result = result.model_dump()
-                    elif (
-                        isinstance(result, dict)
-                        and isinstance(response_model, type)
-                        and issubclass(response_model, BaseModel)
+                    elif isinstance(response_model, type) and issubclass(
+                        response_model, BaseModel
                     ):
                         # Validate and filter through response_model
-                        result = response_model.model_validate(result).model_dump()
+                        # This handles both BaseModel instances and dicts
+                        if isinstance(result, BaseModel):
+                            # Convert to dict first to allow field filtering
+                            result_dict = result.model_dump()
+                        elif isinstance(result, dict):
+                            result_dict = result
+                        else:
+                            result_dict = result
+                        result = response_model.model_validate(result_dict).model_dump()
                 except PydanticValidationError as e:
                     # Response validation failed
                     errors = convert_pydantic_validation_error(
@@ -1108,6 +1118,88 @@ class FastAPIApp:
 
         elif scope["type"] == "websocket":
             await self._handle_websocket(scope, receive, send)
+
+    async def _resolve_dependency(
+        self, dep_func, request_obj, query_params, DependsParam, _resolved_cache=None
+    ):
+        """
+        Recursively resolve a dependency function, including nested Depends.
+
+        Args:
+            dep_func: The dependency function to call
+            request_obj: The request object
+            query_params: Query parameters dict
+            DependsParam: The Depends class for isinstance checks
+            _resolved_cache: Cache to avoid resolving the same dependency twice
+
+        Returns:
+            The result of calling dep_func with resolved arguments
+        """
+        if _resolved_cache is None:
+            _resolved_cache = {}
+
+        # Check cache to avoid duplicate resolution
+        cache_key = id(dep_func)
+        if cache_key in _resolved_cache:
+            return _resolved_cache[cache_key]
+
+        # Introspect the dependency function's signature
+        dep_sig = inspect.signature(dep_func)
+        try:
+            dep_type_hints = get_type_hints(dep_func)
+        except Exception:
+            dep_type_hints = {}
+
+        dep_kwargs = {}
+
+        for dep_param_name, dep_param in dep_sig.parameters.items():
+            dep_param_type = dep_type_hints.get(dep_param_name, str)
+            dep_default = dep_param.default
+
+            # Check if this parameter is itself a nested Depends
+            if DependsParam is not None and isinstance(dep_default, DependsParam):
+                nested_dep_func = dep_default.dependency
+                if nested_dep_func is not None:
+                    # Recursively resolve nested dependency
+                    resolved_nested = await self._resolve_dependency(
+                        nested_dep_func,
+                        request_obj,
+                        query_params,
+                        DependsParam,
+                        _resolved_cache,
+                    )
+                    dep_kwargs[dep_param_name] = resolved_nested
+                continue
+
+            # Check if it expects 'request' parameter
+            if dep_param_name == "request":
+                dep_kwargs["request"] = request_obj
+                continue
+
+            # Check query params
+            if dep_param_name in query_params:
+                value = query_params[dep_param_name]
+                # Convert to appropriate type
+                if dep_param_type == int:
+                    value = int(value)
+                elif dep_param_type == float:
+                    value = float(value)
+                elif dep_param_type == bool:
+                    value = value.lower() in ("true", "1", "yes")
+                dep_kwargs[dep_param_name] = value
+            elif dep_default is not inspect.Parameter.empty:
+                # Use default value (but not if it's a Depends we didn't handle)
+                dep_kwargs[dep_param_name] = dep_default
+
+        # Call the dependency function
+        if inspect.iscoroutinefunction(dep_func):
+            result = await dep_func(**dep_kwargs)
+        else:
+            result = dep_func(**dep_kwargs)
+
+        # Cache result
+        _resolved_cache[cache_key] = result
+        return result
 
     async def _send_json_response(self, send, body, status_code=200, headers=None):
         """Send a JSON response."""
@@ -1642,17 +1734,26 @@ class FastAPIApp:
 
         # Register each route with this app
         for route in routes:
-            # Use the appropriate method decorator
-            decorator = route_decorator(
-                method=route.method,
-                path=route.path,
-                response_model=route.response_model,
-                summary=route.summary,
-                description=route.description,
-                tags=route.tags,
+            # Add to ASGI fallback routes
+            if route.path not in self._routes:
+                self._routes[route.path] = {}
+            self._routes[route.path][route.method.upper()] = (
+                route.handler,
+                route.response_model,
             )
-            # Apply the decorator to register the route
-            decorator(route.handler)
+
+            # Also register with C++ if available
+            if HAS_NATIVE:
+                decorator = route_decorator(
+                    method=route.method,
+                    path=route.path,
+                    response_model=route.response_model,
+                    summary=route.summary,
+                    description=route.description,
+                    tags=route.tags,
+                )
+                # Apply the decorator to register the route
+                decorator(route.handler)
 
         # Merge lifecycle hooks
         self._on_startup.extend(router._on_startup)
