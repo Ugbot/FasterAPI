@@ -1899,6 +1899,218 @@ class FastAPIApp:
                     tags=["static"],
                 )
 
+    def run(
+        self,
+        host: str = "0.0.0.0",
+        port: int = 8000,
+        *,
+        enable_h2: bool = False,
+        enable_h3: bool = False,
+        enable_compression: bool = True,
+        enable_websocket: bool = True,
+        **kwargs,
+    ):
+        """
+        Start the native C++ HTTP server.
+
+        This runs the high-performance CoroIO-based server directly,
+        bypassing uvicorn/ASGI for maximum throughput.
+
+        Args:
+            host: Server host (default: "0.0.0.0")
+            port: Server port (default: 8000)
+            enable_h2: Enable HTTP/2 (default: False)
+            enable_h3: Enable HTTP/3 (default: False)
+            enable_compression: Enable zstd compression (default: True)
+            enable_websocket: Enable WebSocket (default: True)
+            **kwargs: Additional server configuration options
+
+        Example:
+            app = FastAPI()
+
+            @app.get("/")
+            def home():
+                return {"message": "Hello"}
+
+            app.run(port=8000)  # Uses native C++ server
+        """
+        import ctypes
+        import os
+        import signal
+        import sys
+
+        # Find native library
+        lib_path = None
+        search_paths = [
+            os.path.join(
+                os.path.dirname(__file__), "_native", "libfasterapi_http.dylib"
+            ),
+            os.path.join(os.path.dirname(__file__), "_native", "libfasterapi_http.so"),
+            "libfasterapi_http.dylib",
+            "libfasterapi_http.so",
+        ]
+        for path in search_paths:
+            if os.path.exists(path):
+                lib_path = path
+                break
+
+        if lib_path is None:
+            print("Warning: Native library not found, falling back to uvicorn")
+            import uvicorn
+
+            uvicorn.run(self, host=host, port=port)
+            return
+
+        # Load native library
+        try:
+            lib = ctypes.CDLL(lib_path)
+        except OSError as e:
+            print(f"Warning: Failed to load native library: {e}")
+            print("Falling back to uvicorn...")
+            import uvicorn
+
+            uvicorn.run(self, host=host, port=port)
+            return
+
+        # Define C API function signatures
+        lib.http_lib_init.restype = ctypes.c_int
+        lib.http_lib_init.argtypes = []
+
+        lib.http_server_create.restype = ctypes.c_void_p
+        lib.http_server_create.argtypes = [
+            ctypes.c_uint16,  # port
+            ctypes.c_char_p,  # host
+            ctypes.c_bool,  # enable_h2
+            ctypes.c_bool,  # enable_h3
+            ctypes.c_bool,  # enable_webtransport
+            ctypes.c_uint16,  # http3_port
+            ctypes.c_bool,  # enable_compression
+            ctypes.POINTER(ctypes.c_int),  # error_out
+        ]
+
+        lib.http_add_route.restype = ctypes.c_int
+        lib.http_add_route.argtypes = [
+            ctypes.c_void_p,  # handle
+            ctypes.c_char_p,  # method
+            ctypes.c_char_p,  # path
+            ctypes.c_uint32,  # handler_id
+            ctypes.POINTER(ctypes.c_int),  # error_out
+        ]
+
+        lib.http_register_python_handler.restype = None
+        lib.http_register_python_handler.argtypes = [
+            ctypes.c_char_p,  # method
+            ctypes.c_char_p,  # path
+            ctypes.c_int,  # handler_id
+            ctypes.py_object,  # py_callable
+        ]
+
+        lib.http_server_start.restype = ctypes.c_int
+        lib.http_server_start.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int)]
+
+        lib.http_server_stop.restype = ctypes.c_int
+        lib.http_server_stop.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int)]
+
+        lib.http_server_is_running.restype = ctypes.c_bool
+        lib.http_server_is_running.argtypes = [ctypes.c_void_p]
+
+        lib.http_server_destroy.restype = ctypes.c_int
+        lib.http_server_destroy.argtypes = [ctypes.c_void_p]
+
+        # Initialize library
+        result = lib.http_lib_init()
+        if result != 0:
+            print(f"Warning: http_lib_init failed with error {result}")
+
+        # Connect RouteRegistry if available
+        try:
+            from fasterapi._fastapi_native import connect_route_registry_to_server
+
+            connect_route_registry_to_server()
+        except ImportError:
+            pass
+
+        # Create server
+        error = ctypes.c_int(0)
+        server_handle = lib.http_server_create(
+            port,
+            host.encode("utf-8"),
+            enable_h2,
+            enable_h3,
+            False,  # enable_webtransport
+            port + 1,  # http3_port
+            enable_compression,
+            ctypes.byref(error),
+        )
+
+        if server_handle is None:
+            print(f"Error: Failed to create server (error: {error.value})")
+            return
+
+        # Register routes with C++ server
+        handler_id = 1
+        for path, methods in self._routes.items():
+            for method, route_info in methods.items():
+                handler = route_info[0] if isinstance(route_info, tuple) else route_info
+
+                # Register Python handler with callback bridge
+                lib.http_register_python_handler(
+                    method.encode("utf-8"),
+                    path.encode("utf-8"),
+                    handler_id,
+                    ctypes.py_object(handler),
+                )
+
+                # Register route with C++ server (this creates the bridge lambda)
+                error.value = 0
+                result = lib.http_add_route(
+                    server_handle,
+                    method.encode("utf-8"),
+                    path.encode("utf-8"),
+                    handler_id,
+                    ctypes.byref(error),
+                )
+                if result != 0:
+                    print(f"Warning: Failed to register route {method} {path}")
+
+                handler_id += 1
+
+        # Setup graceful shutdown
+        def signal_handler(signum, frame):
+            print("\nShutting down...")
+            lib.http_server_stop(server_handle, ctypes.byref(error))
+            lib.http_server_destroy(server_handle)
+            sys.exit(0)
+
+        try:
+            signal.signal(signal.SIGINT, signal_handler)
+            signal.signal(signal.SIGTERM, signal_handler)
+        except ValueError:
+            pass
+
+        # Start server
+        print(f"FasterAPI running on http://{host}:{port}")
+        print("Press Ctrl+C to stop")
+
+        error.value = 0
+        result = lib.http_server_start(server_handle, ctypes.byref(error))
+        if result != 0:
+            print(f"Error: Failed to start server (error: {error.value})")
+            lib.http_server_destroy(server_handle)
+            return
+
+        # Keep main thread alive
+        try:
+            while lib.http_server_is_running(server_handle):
+                import time
+
+                time.sleep(0.1)
+        except KeyboardInterrupt:
+            print("\nShutting down...")
+            lib.http_server_stop(server_handle, ctypes.byref(error))
+
+        lib.http_server_destroy(server_handle)
+
 
 class StaticFiles:
     """
