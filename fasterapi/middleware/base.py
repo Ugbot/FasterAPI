@@ -16,6 +16,8 @@ class BaseHTTPMiddleware:
     """
     Base class for HTTP middleware using the dispatch pattern.
 
+    This is ASGI-compatible and works with add_middleware().
+
     Usage:
         class CustomMiddleware(BaseHTTPMiddleware):
             async def dispatch(self, request, call_next):
@@ -49,9 +51,130 @@ class BaseHTTPMiddleware:
         self.app = app
         self.dispatch_func = dispatch or self.dispatch
 
-    async def __call__(self, request: Any, call_next: RequestResponseEndpoint) -> Any:
-        """Handle the request through the dispatch function."""
-        return await self.dispatch_func(request, call_next)
+    async def __call__(self, scope: dict, receive: Callable, send: Callable) -> Any:
+        """ASGI interface - handles HTTP requests through dispatch pattern."""
+        if scope["type"] != "http":
+            # Pass through non-HTTP requests
+            await self.app(scope, receive, send)
+            return
+
+        # Build request object from scope
+        from fasterapi.http.request import Request
+
+        # Read body
+        body = b""
+        while True:
+            message = await receive()
+            body += message.get("body", b"")
+            if not message.get("more_body", False):
+                break
+
+        # Parse headers
+        headers = {
+            k.decode() if isinstance(k, bytes) else k: v.decode()
+            if isinstance(v, bytes)
+            else v
+            for k, v in scope.get("headers", [])
+        }
+
+        # Parse query params
+        from urllib.parse import parse_qs
+
+        query_string = scope.get("query_string", b"").decode()
+        query_params = {}
+        if query_string:
+            for key, values in parse_qs(query_string).items():
+                query_params[key] = values[0] if len(values) == 1 else values
+
+        request = Request(
+            method=scope.get("method", "GET"),
+            path=scope.get("path", "/"),
+            headers=headers,
+            query_params=query_params,
+            body_bytes=body,
+            scope=scope,
+        )
+
+        # Response capture
+        response_started = False
+        response_status = 200
+        response_headers = {}
+        response_body = b""
+
+        async def call_next(req):
+            nonlocal response_started, response_status, response_headers, response_body
+
+            # Create a new receive that returns empty body (already consumed)
+            async def empty_receive():
+                return {"type": "http.request", "body": b"", "more_body": False}
+
+            # Capture response
+            async def capture_send(message):
+                nonlocal \
+                    response_started, \
+                    response_status, \
+                    response_headers, \
+                    response_body
+                if message["type"] == "http.response.start":
+                    response_started = True
+                    response_status = message.get("status", 200)
+                    response_headers = {
+                        k.decode() if isinstance(k, bytes) else k: v.decode()
+                        if isinstance(v, bytes)
+                        else v
+                        for k, v in message.get("headers", [])
+                    }
+                elif message["type"] == "http.response.body":
+                    response_body += message.get("body", b"")
+
+            await self.app(scope, empty_receive, capture_send)
+
+            # Return a response-like object
+            return _CapturedResponse(response_status, response_headers, response_body)
+
+        # Call dispatch
+        response = await self.dispatch_func(request, call_next)
+
+        # Send the response
+        if hasattr(response, "status_code"):
+            status = response.status_code
+        else:
+            status = 200
+
+        if hasattr(response, "headers"):
+            resp_headers = response.headers
+        else:
+            resp_headers = {}
+
+        if hasattr(response, "body"):
+            resp_body = response.body
+        else:
+            resp_body = b""
+
+        # Convert headers to ASGI format
+        header_list = [
+            (
+                k.encode() if isinstance(k, str) else k,
+                v.encode() if isinstance(v, str) else v,
+            )
+            for k, v in resp_headers.items()
+        ]
+
+        await send(
+            {
+                "type": "http.response.start",
+                "status": status,
+                "headers": header_list,
+            }
+        )
+        await send(
+            {
+                "type": "http.response.body",
+                "body": resp_body
+                if isinstance(resp_body, bytes)
+                else resp_body.encode(),
+            }
+        )
 
     async def dispatch(
         self,
@@ -69,6 +192,15 @@ class BaseHTTPMiddleware:
             Response object
         """
         return await call_next(request)
+
+
+class _CapturedResponse:
+    """Simple response object for middleware."""
+
+    def __init__(self, status_code: int, headers: dict, body: bytes):
+        self.status_code = status_code
+        self.headers = headers
+        self.body = body
 
 
 class MiddlewareStack:

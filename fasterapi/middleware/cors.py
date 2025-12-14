@@ -219,7 +219,10 @@ class CORSMiddleware(BaseHTTPMiddleware):
 
         # Get request method
         method = getattr(request, "method", "GET")
-        if hasattr(method, "upper"):
+        if hasattr(method, "value"):
+            # Handle enum (Method.OPTIONS -> "OPTIONS")
+            method = method.value
+        elif hasattr(method, "upper"):
             method = method.upper()
 
         # Handle preflight OPTIONS request

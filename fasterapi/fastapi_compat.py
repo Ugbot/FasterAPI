@@ -382,6 +382,7 @@ class FastAPIApp:
         docs_url: str = "/docs",
         redoc_url: str = "/redoc",
         openapi_url: str = "/openapi.json",
+        lifespan: Optional[Callable] = None,
         **kwargs,
     ):
         """
@@ -394,6 +395,20 @@ class FastAPIApp:
             docs_url: Swagger UI URL (None to disable)
             redoc_url: ReDoc URL (None to disable)
             openapi_url: OpenAPI spec URL
+            lifespan: Async context manager for startup/shutdown
+
+        Example lifespan usage:
+            from contextlib import asynccontextmanager
+
+            @asynccontextmanager
+            async def lifespan(app):
+                # Startup
+                app.state.db = await create_db_pool()
+                yield
+                # Shutdown
+                await app.state.db.close()
+
+            app = FastAPI(lifespan=lifespan)
         """
         self.title = title
         self.version = version
@@ -402,10 +417,19 @@ class FastAPIApp:
         self.redoc_url = redoc_url
         self.openapi_url = openapi_url
 
+        # Lifespan context manager (new API)
+        self._lifespan = lifespan
+        self._lifespan_context = None  # Will hold the context manager instance
+
+        # App state for storing shared data
+        from fasterapi.datastructures import State
+
+        self.state = State()
+
         # Exception handlers registry
         self._exception_handlers: Dict[Type[Exception], Callable] = {}
 
-        # Lifecycle event handlers
+        # Lifecycle event handlers (old API, still supported)
         self._on_startup: List[Callable] = []
         self._on_shutdown: List[Callable] = []
 
@@ -416,6 +440,9 @@ class FastAPIApp:
         # Route storage for ASGI fallback mode
         self._routes: Dict[str, Dict[str, Callable]] = {}  # {path: {method: handler}}
         self._websocket_routes: Dict[str, Callable] = {}
+
+        # Mounted sub-applications {path_prefix: app}
+        self._mounted_apps: Dict[str, Any] = {}
 
         # Register special routes if enabled
         if HAS_NATIVE:
@@ -450,6 +477,19 @@ class FastAPIApp:
 
         path = scope["path"]
         method = scope["method"]
+
+        # Check mounted sub-applications first
+        for mount_path, mounted_app in self._mounted_apps.items():
+            if path == mount_path or path.startswith(mount_path + "/"):
+                # Adjust path for the sub-app (strip mount prefix)
+                sub_path = path[len(mount_path) :] or "/"
+                # Create new scope with adjusted path
+                sub_scope = dict(scope)
+                sub_scope["path"] = sub_path
+                sub_scope["root_path"] = scope.get("root_path", "") + mount_path
+                # Delegate to mounted app
+                await mounted_app(sub_scope, receive, send)
+                return
 
         # Find matching route
         handler = None
@@ -915,6 +955,19 @@ class FastAPIApp:
 
         path = scope["path"]
 
+        # Check mounted sub-applications first
+        for mount_path, mounted_app in self._mounted_apps.items():
+            if path == mount_path or path.startswith(mount_path + "/"):
+                # Adjust path for the sub-app (strip mount prefix)
+                sub_path = path[len(mount_path) :] or "/"
+                # Create new scope with adjusted path
+                sub_scope = dict(scope)
+                sub_scope["path"] = sub_path
+                sub_scope["root_path"] = scope.get("root_path", "") + mount_path
+                # Delegate to mounted app
+                await mounted_app(sub_scope, receive, send)
+                return
+
         # Find matching WebSocket route
         handler = None
         path_params = {}
@@ -981,21 +1034,42 @@ class FastAPIApp:
             while True:
                 message = await receive()
                 if message["type"] == "lifespan.startup":
-                    # Run startup handlers
-                    for handler in self._on_startup:
-                        if inspect.iscoroutinefunction(handler):
-                            await handler()
-                        else:
-                            handler()
-                    await send({"type": "lifespan.startup.complete"})
+                    try:
+                        # If lifespan context manager is provided, use it
+                        if self._lifespan is not None:
+                            self._lifespan_context = self._lifespan(self)
+                            await self._lifespan_context.__aenter__()
+
+                        # Also run old-style startup handlers for compatibility
+                        for handler in self._on_startup:
+                            if inspect.iscoroutinefunction(handler):
+                                await handler()
+                            else:
+                                handler()
+                        await send({"type": "lifespan.startup.complete"})
+                    except Exception as e:
+                        await send(
+                            {"type": "lifespan.startup.failed", "message": str(e)}
+                        )
+                        return
+
                 elif message["type"] == "lifespan.shutdown":
-                    # Run shutdown handlers
-                    for handler in self._on_shutdown:
-                        if inspect.iscoroutinefunction(handler):
-                            await handler()
-                        else:
-                            handler()
-                    await send({"type": "lifespan.shutdown.complete"})
+                    try:
+                        # Run old-style shutdown handlers first
+                        for handler in self._on_shutdown:
+                            if inspect.iscoroutinefunction(handler):
+                                await handler()
+                            else:
+                                handler()
+
+                        # If lifespan context manager was used, exit it
+                        if self._lifespan_context is not None:
+                            await self._lifespan_context.__aexit__(None, None, None)
+                            self._lifespan_context = None
+
+                        await send({"type": "lifespan.shutdown.complete"})
+                    except Exception:
+                        await send({"type": "lifespan.shutdown.complete"})
                     return
 
         elif scope["type"] == "http":
@@ -1449,15 +1523,39 @@ class FastAPIApp:
         self._on_startup.extend(router._on_startup)
         self._on_shutdown.extend(router._on_shutdown)
 
-    def mount(self, path: str, app: "StaticFiles", name: str = ""):
+    def mount(self, path: str, app: Any, name: str = ""):
         """
-        Mount a sub-application (typically StaticFiles) at a path.
+        Mount a sub-application at a path.
+
+        Supports:
+        - StaticFiles for serving static files
+        - ASGI applications (FastAPI, FasterAPI, Starlette, etc.)
 
         Args:
-            path: URL path prefix (e.g., "/static")
-            app: Application to mount (e.g., StaticFiles instance)
+            path: URL path prefix (e.g., "/static" or "/api/v1")
+            app: Application to mount (StaticFiles or ASGI app)
             name: Optional name for the mount
+
+        Examples:
+            # Mount static files
+            app.mount("/static", StaticFiles(directory="static"))
+
+            # Mount sub-application
+            api_v1 = FastAPI()
+            app.mount("/api/v1", api_v1)
         """
+        # Normalize path
+        if not path.startswith("/"):
+            path = "/" + path
+        if path.endswith("/") and path != "/":
+            path = path[:-1]
+
+        # Check if it's an ASGI app (has __call__ method that's async)
+        if hasattr(app, "__call__") and not isinstance(app, StaticFiles):
+            # Mount as sub-application
+            self._mounted_apps[path] = app
+            return
+
         if isinstance(app, StaticFiles):
             # Register a wildcard route for static files
             import mimetypes
