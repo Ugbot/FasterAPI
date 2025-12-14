@@ -83,6 +83,10 @@ cdef extern from "http/route_metadata.h" namespace "fasterapi::http":
         string summary
         string description
         vector[string] tags
+        unordered_map[int, string] responses
+        string operation_id
+        bool_t deprecated
+        string openapi_extra
 
     cdef cppclass RouteRegistry:
         RouteRegistry() except +

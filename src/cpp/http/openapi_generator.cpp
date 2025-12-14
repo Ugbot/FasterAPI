@@ -124,24 +124,47 @@ std::string OpenAPIGenerator::generate_responses(const RouteMetadata& route) noe
 
     json << "{";
 
-    // 200 OK response
-    json << "\"200\":{";
-    json << "\"description\":\"Successful Response\"";
+    bool first_response = true;
 
-    if (!route.response_schema.empty()) {
-        json << ",\"content\":{";
-        json << "\"application/json\":{";
-        json << "\"schema\":{";
-        json << "\"$ref\":\"#/components/schemas/" << escape_json_string(route.response_schema) << "\"";
+    // Check if custom responses include 200
+    bool has_custom_200 = route.responses.find(200) != route.responses.end();
+
+    // 200 OK response (unless custom responses override it)
+    if (!has_custom_200) {
+        json << "\"200\":{";
+        json << "\"description\":\"Successful Response\"";
+
+        if (!route.response_schema.empty()) {
+            json << ",\"content\":{";
+            json << "\"application/json\":{";
+            json << "\"schema\":{";
+            json << "\"$ref\":\"#/components/schemas/" << escape_json_string(route.response_schema) << "\"";
+            json << "}";
+            json << "}";
+            json << "}";
+        }
+
         json << "}";
-        json << "}";
+        first_response = false;
+    }
+
+    // Add custom responses
+    for (const auto& [status_code, description] : route.responses) {
+        if (!first_response) {
+            json << ",";
+        }
+        first_response = false;
+
+        json << "\"" << status_code << "\":{";
+        json << "\"description\":\"" << escape_json_string(description) << "\"";
         json << "}";
     }
 
-    json << "},";
-
     // 422 Validation Error response (if there are parameters or request body)
     if (!route.parameters.empty() || !route.request_body_schema.empty()) {
+        if (!first_response) {
+            json << ",";
+        }
         json << "\"422\":{";
         json << "\"description\":\"Validation Error\",";
         json << "\"content\":{";
@@ -167,6 +190,11 @@ std::string OpenAPIGenerator::generate_operation(const RouteMetadata& route) noe
 
     json << "{";
 
+    // Operation ID (custom or auto-generated)
+    if (!route.operation_id.empty()) {
+        json << "\"operationId\":\"" << escape_json_string(route.operation_id) << "\",";
+    }
+
     // Summary
     if (!route.summary.empty()) {
         json << "\"summary\":\"" << escape_json_string(route.summary) << "\",";
@@ -175,6 +203,11 @@ std::string OpenAPIGenerator::generate_operation(const RouteMetadata& route) noe
     // Description
     if (!route.description.empty()) {
         json << "\"description\":\"" << escape_json_string(route.description) << "\",";
+    }
+
+    // Deprecated flag
+    if (route.deprecated) {
+        json << "\"deprecated\":true,";
     }
 
     // Tags
@@ -200,6 +233,13 @@ std::string OpenAPIGenerator::generate_operation(const RouteMetadata& route) noe
 
     // Responses
     json << "\"responses\":" << generate_responses(route);
+
+    // OpenAPI extra (merge raw JSON if provided)
+    // Note: openapi_extra should be valid JSON object content without braces
+    // e.g., "\"x-custom\": \"value\", \"x-another\": 123"
+    if (!route.openapi_extra.empty()) {
+        json << "," << route.openapi_extra;
+    }
 
     json << "}";
     return json.str();

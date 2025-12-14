@@ -35,6 +35,7 @@
 /Users/bengamble/FasterAPI/build/CMakeFiles/bench_pure_cpp.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/bench_techempower_cpp.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/bench_techempower_concurrent.dir
+/Users/bengamble/FasterAPI/build/CMakeFiles/bench_techempower_http2.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/1mrc_cpp_server.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/1mrc_async_server.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/1mrc_native_lockfree.dir

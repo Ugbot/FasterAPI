@@ -245,6 +245,10 @@ def route_decorator(
     summary: str = "",
     description: str = "",
     tags: Optional[List[str]] = None,
+    responses: Optional[Dict[int, Dict[str, Any]]] = None,
+    operation_id: Optional[str] = None,
+    deprecated: bool = False,
+    openapi_extra: Optional[Dict[str, Any]] = None,
     **kwargs,
 ):
     """
@@ -257,6 +261,10 @@ def route_decorator(
         summary: Short description for OpenAPI
         description: Detailed description for OpenAPI
         tags: Tags for OpenAPI grouping
+        responses: Custom response definitions for OpenAPI (e.g., {404: {"description": "Not found"}})
+        operation_id: Custom operation ID for OpenAPI
+        deprecated: Mark endpoint as deprecated in OpenAPI
+        openapi_extra: Extra fields to merge into OpenAPI operation object
     """
 
     def decorator(func: Callable):
@@ -344,6 +352,17 @@ def route_decorator(
         handler_to_register = wrapper
 
         # Register route with C++ RouteRegistry
+        # Convert openapi_extra dict to JSON string fragment (without braces)
+        openapi_extra_str = ""
+        if openapi_extra:
+            import json
+
+            # Convert dict to JSON key-value pairs without outer braces
+            pairs = []
+            for k, v in openapi_extra.items():
+                pairs.append(f'"{k}":{json.dumps(v)}')
+            openapi_extra_str = ",".join(pairs)
+
         route_id = register_route(
             method=method.upper(),
             path_pattern=path,
@@ -354,6 +373,10 @@ def route_decorator(
             summary=summary,
             description=description,
             tags=tags or [],
+            responses=responses or {},
+            operation_id=operation_id or "",
+            deprecated=deprecated,
+            openapi_extra=openapi_extra_str,
         )
 
         if route_id < 0:
@@ -1290,6 +1313,10 @@ class FastAPIApp:
         summary: str = "",
         description: str = "",
         tags: Optional[List[str]] = None,
+        responses: Optional[Dict[int, Dict[str, Any]]] = None,
+        operation_id: Optional[str] = None,
+        deprecated: bool = False,
+        openapi_extra: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
         """Internal method to register a route and return decorator."""
@@ -1305,7 +1332,17 @@ class FastAPIApp:
             if HAS_NATIVE:
                 # Use the existing route_decorator logic
                 native_decorator = route_decorator(
-                    method, path, response_model, summary, description, tags, **kwargs
+                    method,
+                    path,
+                    response_model,
+                    summary,
+                    description,
+                    tags,
+                    responses=responses,
+                    operation_id=operation_id,
+                    deprecated=deprecated,
+                    openapi_extra=openapi_extra,
+                    **kwargs,
                 )
                 return native_decorator(func)
 
@@ -1320,11 +1357,25 @@ class FastAPIApp:
         summary: str = "",
         description: str = "",
         tags: Optional[List[str]] = None,
+        responses: Optional[Dict[int, Dict[str, Any]]] = None,
+        operation_id: Optional[str] = None,
+        deprecated: bool = False,
+        openapi_extra: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
         """GET route decorator."""
         return self._register_route(
-            "GET", path, response_model, summary, description, tags, **kwargs
+            "GET",
+            path,
+            response_model,
+            summary,
+            description,
+            tags,
+            responses=responses,
+            operation_id=operation_id,
+            deprecated=deprecated,
+            openapi_extra=openapi_extra,
+            **kwargs,
         )
 
     def post(
@@ -1334,11 +1385,25 @@ class FastAPIApp:
         summary: str = "",
         description: str = "",
         tags: Optional[List[str]] = None,
+        responses: Optional[Dict[int, Dict[str, Any]]] = None,
+        operation_id: Optional[str] = None,
+        deprecated: bool = False,
+        openapi_extra: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
         """POST route decorator."""
         return self._register_route(
-            "POST", path, response_model, summary, description, tags, **kwargs
+            "POST",
+            path,
+            response_model,
+            summary,
+            description,
+            tags,
+            responses=responses,
+            operation_id=operation_id,
+            deprecated=deprecated,
+            openapi_extra=openapi_extra,
+            **kwargs,
         )
 
     def put(
@@ -1348,11 +1413,25 @@ class FastAPIApp:
         summary: str = "",
         description: str = "",
         tags: Optional[List[str]] = None,
+        responses: Optional[Dict[int, Dict[str, Any]]] = None,
+        operation_id: Optional[str] = None,
+        deprecated: bool = False,
+        openapi_extra: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
         """PUT route decorator."""
         return self._register_route(
-            "PUT", path, response_model, summary, description, tags, **kwargs
+            "PUT",
+            path,
+            response_model,
+            summary,
+            description,
+            tags,
+            responses=responses,
+            operation_id=operation_id,
+            deprecated=deprecated,
+            openapi_extra=openapi_extra,
+            **kwargs,
         )
 
     def delete(
@@ -1362,11 +1441,25 @@ class FastAPIApp:
         summary: str = "",
         description: str = "",
         tags: Optional[List[str]] = None,
+        responses: Optional[Dict[int, Dict[str, Any]]] = None,
+        operation_id: Optional[str] = None,
+        deprecated: bool = False,
+        openapi_extra: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
         """DELETE route decorator."""
         return self._register_route(
-            "DELETE", path, response_model, summary, description, tags, **kwargs
+            "DELETE",
+            path,
+            response_model,
+            summary,
+            description,
+            tags,
+            responses=responses,
+            operation_id=operation_id,
+            deprecated=deprecated,
+            openapi_extra=openapi_extra,
+            **kwargs,
         )
 
     def patch(
@@ -1376,11 +1469,25 @@ class FastAPIApp:
         summary: str = "",
         description: str = "",
         tags: Optional[List[str]] = None,
+        responses: Optional[Dict[int, Dict[str, Any]]] = None,
+        operation_id: Optional[str] = None,
+        deprecated: bool = False,
+        openapi_extra: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
         """PATCH route decorator."""
         return self._register_route(
-            "PATCH", path, response_model, summary, description, tags, **kwargs
+            "PATCH",
+            path,
+            response_model,
+            summary,
+            description,
+            tags,
+            responses=responses,
+            operation_id=operation_id,
+            deprecated=deprecated,
+            openapi_extra=openapi_extra,
+            **kwargs,
         )
 
     def options(
@@ -1390,11 +1497,25 @@ class FastAPIApp:
         summary: str = "",
         description: str = "",
         tags: Optional[List[str]] = None,
+        responses: Optional[Dict[int, Dict[str, Any]]] = None,
+        operation_id: Optional[str] = None,
+        deprecated: bool = False,
+        openapi_extra: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
         """OPTIONS route decorator."""
         return self._register_route(
-            "OPTIONS", path, response_model, summary, description, tags, **kwargs
+            "OPTIONS",
+            path,
+            response_model,
+            summary,
+            description,
+            tags,
+            responses=responses,
+            operation_id=operation_id,
+            deprecated=deprecated,
+            openapi_extra=openapi_extra,
+            **kwargs,
         )
 
     def head(
@@ -1404,11 +1525,25 @@ class FastAPIApp:
         summary: str = "",
         description: str = "",
         tags: Optional[List[str]] = None,
+        responses: Optional[Dict[int, Dict[str, Any]]] = None,
+        operation_id: Optional[str] = None,
+        deprecated: bool = False,
+        openapi_extra: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
         """HEAD route decorator."""
         return self._register_route(
-            "HEAD", path, response_model, summary, description, tags, **kwargs
+            "HEAD",
+            path,
+            response_model,
+            summary,
+            description,
+            tags,
+            responses=responses,
+            operation_id=operation_id,
+            deprecated=deprecated,
+            openapi_extra=openapi_extra,
+            **kwargs,
         )
 
     def websocket(

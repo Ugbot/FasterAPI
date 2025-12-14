@@ -145,7 +145,11 @@ def register_route(
     str response_schema = '',
     str summary = '',
     str description = '',
-    list tags = None
+    list tags = None,
+    dict responses = None,
+    str operation_id = '',
+    bint deprecated = False,
+    str openapi_extra = ''
 ):
     """
     Register a route with the C++ RouteRegistry.
@@ -160,6 +164,10 @@ def register_route(
         summary: Short description for OpenAPI
         description: Detailed description for OpenAPI
         tags: List of tags for OpenAPI
+        responses: Dict of {status_code: description} for OpenAPI responses
+        operation_id: Custom operationId for OpenAPI
+        deprecated: Whether this endpoint is deprecated
+        openapi_extra: Extra OpenAPI JSON to merge (without braces)
 
     Returns:
         Route ID (0 on success, -1 on error)
@@ -170,6 +178,7 @@ def register_route(
     cdef ParameterInfo param_info
     cdef RouteMetadata* metadata_ptr
     cdef int result
+    cdef int status_code
 
     if _route_registry == NULL:
         return -1
@@ -202,6 +211,25 @@ def register_route(
         if tags:
             for tag in tags:
                 metadata_ptr.tags.push_back((<str>tag).encode('utf-8'))
+
+        # Add custom responses
+        if responses:
+            for status_code, resp_description in responses.items():
+                if isinstance(resp_description, dict):
+                    # Extract description from dict if provided
+                    resp_description = resp_description.get('description', str(resp_description))
+                metadata_ptr.responses[<int>status_code] = (<str>resp_description).encode('utf-8')
+
+        # Set operation_id
+        if operation_id:
+            metadata_ptr.operation_id = operation_id.encode('utf-8')
+
+        # Set deprecated flag
+        metadata_ptr.deprecated = deprecated
+
+        # Set openapi_extra
+        if openapi_extra:
+            metadata_ptr.openapi_extra = openapi_extra.encode('utf-8')
 
         # Add parameters
         if parameters:

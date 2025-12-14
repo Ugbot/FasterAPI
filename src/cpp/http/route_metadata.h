@@ -101,6 +101,9 @@ struct RouteMetadata {
     std::string description;
     std::vector<std::string> tags;
     std::unordered_map<int, std::string> responses;  // status code → description
+    std::string operation_id;                         // Custom operationId
+    bool deprecated = false;                          // Mark endpoint as deprecated
+    std::string openapi_extra;                        // Extra OpenAPI JSON to merge
 
     RouteMetadata() : handler(nullptr) {}
 
