@@ -646,6 +646,17 @@ class FastAPIApp:
             param_type = type_hints.get(param_name, str)
             default = param.default
 
+            # Check if it's a Request parameter (inject request object)
+            if param_type is not None:
+                type_name = getattr(param_type, "__name__", "")
+                if type_name == "Request" or (
+                    isinstance(param_type, type)
+                    and param_type.__module__.startswith("fasterapi")
+                    and type_name == "Request"
+                ):
+                    kwargs[param_name] = request_obj
+                    continue
+
             # Check if it's a path parameter
             if param_name in path_params:
                 value = path_params[param_name]
