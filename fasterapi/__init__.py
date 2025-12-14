@@ -94,6 +94,7 @@ from fasterapi.pg import Pg, PgPool, TxIsolation
 
 # Responses
 from fasterapi.responses import (
+    EventSourceResponse,
     FileResponse,
     HTMLResponse,
     JSONResponse,
@@ -391,6 +392,7 @@ __all__ = [
     "RedirectResponse",
     "StreamingResponse",
     "FileResponse",
+    "EventSourceResponse",
     "UJSONResponse",
     "ORJSONResponse",
     # Background tasks
