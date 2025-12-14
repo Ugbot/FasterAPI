@@ -411,6 +411,7 @@ class FastAPIApp:
 
         # Middleware stack
         self._middleware: List[tuple] = []
+        self._middleware_app: Optional[Any] = None  # Cached middleware-wrapped app
 
         # Route storage for ASGI fallback mode
         self._routes: Dict[str, Dict[str, Callable]] = {}  # {path: {method: handler}}
@@ -424,6 +425,547 @@ class FastAPIApp:
                 self._register_docs_route()
             if redoc_url:
                 self._register_redoc_route()
+
+    def _build_middleware_stack(self) -> Any:
+        """Build the middleware-wrapped application."""
+        app = self._handle_request
+
+        # Apply middleware in reverse order (last added = outermost)
+        for middleware_class, options in reversed(self._middleware):
+            app = middleware_class(app, **options)
+
+        return app
+
+    async def _handle_request(self, scope, receive, send):
+        """Handle HTTP/WebSocket requests (inner app for middleware)."""
+        if scope["type"] == "http":
+            await self._handle_http(scope, receive, send)
+        elif scope["type"] == "websocket":
+            await self._handle_websocket(scope, receive, send)
+
+    async def _handle_http(self, scope, receive, send):
+        """Handle HTTP request (called by middleware or directly)."""
+        import json as json_module
+        import re
+
+        path = scope["path"]
+        method = scope["method"]
+
+        # Find matching route
+        handler = None
+        response_model = None
+        path_params = {}
+
+        for route_path, methods in self._routes.items():
+            if method in methods:
+                # Check for exact match
+                if route_path == path:
+                    route_info = methods[method]
+                    if isinstance(route_info, tuple):
+                        handler, response_model = route_info
+                    else:
+                        handler = route_info
+                    break
+
+                # Check for path parameter match
+                pattern = re.sub(r"\{(\w+)\}", r"(?P<\1>[^/]+)", route_path)
+                pattern = f"^{pattern}$"
+                match = re.match(pattern, path)
+                if match:
+                    route_info = methods[method]
+                    if isinstance(route_info, tuple):
+                        handler, response_model = route_info
+                    else:
+                        handler = route_info
+                    path_params = match.groupdict()
+                    break
+
+        if handler is None:
+            # 404 Not Found
+            await self._send_json_response(send, {"detail": "Not Found"}, 404)
+            return
+
+        # Parse request body
+        body = b""
+        while True:
+            message = await receive()
+            body += message.get("body", b"")
+            if not message.get("more_body", False):
+                break
+
+        # Parse query params
+        from urllib.parse import unquote
+
+        query_string = scope.get("query_string", b"").decode()
+        query_params = {}
+        if query_string:
+            for param in query_string.split("&"):
+                if "=" in param:
+                    key, value = param.split("=", 1)
+                    query_params[key] = unquote(value)
+
+        # Parse body based on content type
+        body_data = None
+        form_data = None
+        content_type = ""
+        for key, value in scope.get("headers", []):
+            if key == b"content-type":
+                content_type = value.decode()
+                break
+
+        content_type_lower = content_type.lower()
+
+        if body:
+            if "application/json" in content_type_lower:
+                try:
+                    body_data = json_module.loads(body.decode())
+                except (json_module.JSONDecodeError, UnicodeDecodeError):
+                    pass
+            elif (
+                "multipart/form-data" in content_type_lower
+                or "application/x-www-form-urlencoded" in content_type_lower
+            ):
+                # Parse form data (keep original content_type for boundary parsing)
+                from fasterapi.http.request import Request
+
+                temp_request = Request(
+                    "POST",
+                    path,
+                    body_bytes=body,
+                    headers={"content-type": content_type},
+                )
+                form_data = await temp_request.form()
+
+        # Build kwargs for handler based on signature
+        kwargs = {}
+        sig = inspect.signature(handler)
+        try:
+            type_hints = get_type_hints(handler)
+        except Exception:
+            type_hints = {}
+
+        # Import param classes and UploadFile to check instance
+        try:
+            from fasterapi.datastructures import UploadFile
+            from fasterapi.params import Body as BodyParam
+            from fasterapi.params import Depends as DependsParam
+            from fasterapi.params import File as FileParam
+            from fasterapi.params import Form as FormParam
+            from fasterapi.params import Path as PathParam
+            from fasterapi.params import Query as QueryParam
+
+            has_param_classes = True
+        except ImportError:
+            has_param_classes = False
+            UploadFile = None
+            DependsParam = None
+
+        # Create a request object for dependencies
+        from fasterapi.http.request import Request
+
+        request_headers = {
+            k.decode() if isinstance(k, bytes) else k: v.decode()
+            if isinstance(v, bytes)
+            else v
+            for k, v in scope.get("headers", [])
+        }
+        request_obj = Request(
+            method=method,
+            path=path,
+            query_params=query_params,
+            headers=request_headers,
+            body_bytes=body,
+        )
+
+        # Process each parameter based on its type and default
+        for param_name, param in sig.parameters.items():
+            param_type = type_hints.get(param_name, str)
+            default = param.default
+
+            # Check if it's a path parameter
+            if param_name in path_params:
+                value = path_params[param_name]
+                # Convert to appropriate type
+                if param_type == int:
+                    value = int(value)
+                elif param_type == float:
+                    value = float(value)
+                kwargs[param_name] = value
+                continue
+
+            # Check if it's a Depends parameter (dependency injection)
+            if has_param_classes and DependsParam is not None:
+                if isinstance(default, DependsParam):
+                    dep_func = default.dependency
+                    if dep_func is not None:
+                        try:
+                            # Call the dependency with the request object
+                            if inspect.iscoroutinefunction(dep_func):
+                                kwargs[param_name] = await dep_func(request=request_obj)
+                            elif hasattr(dep_func, "__call__"):
+                                # Check if __call__ is async (for callable classes like JWTBearer)
+                                call_method = getattr(dep_func, "__call__", None)
+                                if call_method and inspect.iscoroutinefunction(
+                                    call_method
+                                ):
+                                    kwargs[param_name] = await dep_func(
+                                        request=request_obj
+                                    )
+                                else:
+                                    kwargs[param_name] = dep_func(request=request_obj)
+                            else:
+                                kwargs[param_name] = dep_func(request=request_obj)
+                        except HTTPException as e:
+                            # Dependency raised HTTPException (e.g., auth failure)
+                            response = (
+                                {"detail": e.detail} if e.detail is not None else {}
+                            )
+                            await self._send_json_response(
+                                send, response, e.status_code, e.headers or {}
+                            )
+                            return
+                    continue
+
+            # Check if it's an UploadFile parameter (by type annotation)
+            if has_param_classes and UploadFile is not None:
+                is_upload_file_type = param_type is UploadFile or (
+                    isinstance(param_type, type) and param_type.__name__ == "UploadFile"
+                )
+                if is_upload_file_type:
+                    if form_data and param_name in form_data:
+                        kwargs[param_name] = form_data[param_name]
+                    elif isinstance(default, FileParam):
+                        # Use the default from File(...) descriptor
+                        kwargs[param_name] = getattr(default, "default", None)
+                    elif default is not inspect.Parameter.empty and default is not ...:
+                        kwargs[param_name] = default
+                    else:
+                        kwargs[param_name] = None
+                    continue
+
+            # Check if it's a Pydantic model (body parameter)
+            if (
+                HAS_PYDANTIC
+                and isinstance(param_type, type)
+                and issubclass(param_type, BaseModel)
+            ):
+                if body_data is not None:
+                    try:
+                        # Convert dict to Pydantic model instance
+                        kwargs[param_name] = param_type.model_validate(body_data)
+                    except Exception as e:
+                        await self._send_json_response(
+                            send,
+                            {
+                                "detail": [
+                                    {
+                                        "loc": ["body"],
+                                        "msg": str(e),
+                                        "type": "value_error",
+                                    }
+                                ]
+                            },
+                            422,
+                        )
+                        return
+                continue
+
+            # Handle Query/Path/Body/Form/File descriptors or regular defaults
+            is_descriptor = False
+            actual_default = inspect.Parameter.empty
+
+            if has_param_classes and default is not inspect.Parameter.empty:
+                if isinstance(default, (QueryParam, PathParam)):
+                    is_descriptor = True
+                    actual_default = getattr(default, "default", None)
+                elif isinstance(default, BodyParam):
+                    is_descriptor = True
+                    if body_data is not None:
+                        kwargs[param_name] = body_data
+                    continue
+                elif isinstance(default, FormParam):
+                    # Form field parameter
+                    is_descriptor = True
+                    if form_data and param_name in form_data:
+                        kwargs[param_name] = form_data[param_name]
+                    else:
+                        actual_default = getattr(default, "default", None)
+                        if actual_default is not ...:
+                            kwargs[param_name] = actual_default
+                        else:
+                            kwargs[param_name] = ""
+                    continue
+                elif isinstance(default, FileParam):
+                    # File upload parameter
+                    is_descriptor = True
+                    if form_data and param_name in form_data:
+                        kwargs[param_name] = form_data[param_name]
+                    else:
+                        actual_default = getattr(default, "default", None)
+                        if actual_default is not ...:
+                            kwargs[param_name] = actual_default
+                        else:
+                            kwargs[param_name] = None
+                    continue
+
+            if is_descriptor:
+                # Extract value from query params or use default
+                if param_name in query_params:
+                    value = query_params[param_name]
+                    # Convert to appropriate type
+                    if param_type == int:
+                        value = int(value)
+                    elif param_type == float:
+                        value = float(value)
+                    elif param_type == bool:
+                        value = value.lower() in ("true", "1", "yes")
+                    kwargs[param_name] = value
+                elif actual_default is not ...:
+                    # Use the actual default (can be None for Optional params)
+                    kwargs[param_name] = actual_default
+            elif param_name in query_params:
+                # Regular query parameter
+                value = query_params[param_name]
+                if param_type == int:
+                    value = int(value)
+                elif param_type == float:
+                    value = float(value)
+                elif param_type == bool:
+                    value = value.lower() in ("true", "1", "yes")
+                kwargs[param_name] = value
+            elif default is not inspect.Parameter.empty:
+                # Use default value if no query param provided
+                kwargs[param_name] = default
+
+        # Call handler
+        try:
+            if inspect.iscoroutinefunction(handler):
+                result = await handler(**kwargs)
+            else:
+                result = handler(**kwargs)
+
+            # Handle tuple responses (body, status) or (body, status, headers)
+            status_code = 200
+            headers = {}
+            if isinstance(result, tuple):
+                if len(result) == 2:
+                    result, status_code = result
+                elif len(result) >= 3:
+                    result, status_code, headers = result[0], result[1], result[2]
+
+            # Apply response_model validation/filtering if specified
+            if response_model is not None and HAS_PYDANTIC:
+                try:
+                    # Check if response_model is a generic like List[Model]
+                    origin = get_origin(response_model)
+                    inner_model = None
+
+                    if origin is list:
+                        args = get_args(response_model)
+                        if (
+                            args
+                            and isinstance(args[0], type)
+                            and issubclass(args[0], BaseModel)
+                        ):
+                            inner_model = args[0]
+
+                    if isinstance(result, list) and inner_model is not None:
+                        # Handle List[ResponseModel]
+                        validated = []
+                        for item in result:
+                            if isinstance(item, BaseModel):
+                                validated.append(item.model_dump())
+                            elif isinstance(item, dict):
+                                validated.append(
+                                    inner_model.model_validate(item).model_dump()
+                                )
+                            else:
+                                validated.append(item)
+                        result = validated
+                    elif isinstance(result, BaseModel):
+                        # Already a model, convert to dict
+                        result = result.model_dump()
+                    elif (
+                        isinstance(result, dict)
+                        and isinstance(response_model, type)
+                        and issubclass(response_model, BaseModel)
+                    ):
+                        # Validate and filter through response_model
+                        result = response_model.model_validate(result).model_dump()
+                except PydanticValidationError as e:
+                    # Response validation failed
+                    errors = convert_pydantic_validation_error(
+                        e, loc_prefix=("response",)
+                    )
+                    await self._send_json_response(
+                        send, format_validation_error_response(errors), 500
+                    )
+                    return
+            elif HAS_PYDANTIC and isinstance(result, BaseModel):
+                # Convert Pydantic models to dict even without response_model
+                result = result.model_dump()
+
+            # Handle Response objects (StreamingResponse, FileResponse, etc.)
+            from fasterapi.responses import FileResponse, StreamingResponse
+            from fasterapi.responses import Response as BaseResponse
+
+            if isinstance(result, StreamingResponse):
+                # Send streaming response
+                response_headers = [
+                    (
+                        k.encode() if isinstance(k, str) else k,
+                        v.encode() if isinstance(v, str) else v,
+                    )
+                    for k, v in result.headers.items()
+                ]
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": result.status_code,
+                        "headers": response_headers,
+                    }
+                )
+                async for chunk in result.stream_response():
+                    await send(
+                        {
+                            "type": "http.response.body",
+                            "body": chunk,
+                            "more_body": True,
+                        }
+                    )
+                await send(
+                    {
+                        "type": "http.response.body",
+                        "body": b"",
+                        "more_body": False,
+                    }
+                )
+                return
+
+            if isinstance(result, FileResponse):
+                # Send file response
+                response_headers = [
+                    (
+                        k.encode() if isinstance(k, str) else k,
+                        v.encode() if isinstance(v, str) else v,
+                    )
+                    for k, v in result.headers.items()
+                ]
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": result.status_code,
+                        "headers": response_headers,
+                    }
+                )
+                async for chunk in result.stream_response():
+                    await send(
+                        {
+                            "type": "http.response.body",
+                            "body": chunk,
+                            "more_body": True,
+                        }
+                    )
+                await send(
+                    {
+                        "type": "http.response.body",
+                        "body": b"",
+                        "more_body": False,
+                    }
+                )
+                return
+
+            if isinstance(result, BaseResponse):
+                # Send regular Response object
+                response_headers = [
+                    (
+                        k.encode() if isinstance(k, str) else k,
+                        v.encode() if isinstance(v, str) else v,
+                    )
+                    for k, v in result.headers.items()
+                ]
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": result.status_code,
+                        "headers": response_headers,
+                    }
+                )
+                await send(
+                    {
+                        "type": "http.response.body",
+                        "body": result.body or b"",
+                    }
+                )
+                return
+
+            await self._send_json_response(send, result, status_code, headers)
+
+        except HTTPException as e:
+            response = {"detail": e.detail} if e.detail is not None else {}
+            await self._send_json_response(
+                send, response, e.status_code, e.headers or {}
+            )
+        except Exception as e:
+            await self._send_json_response(send, {"detail": str(e)}, 500)
+
+    async def _handle_websocket(self, scope, receive, send):
+        """Handle WebSocket connection."""
+        import re
+
+        path = scope["path"]
+
+        # Find matching WebSocket route
+        handler = None
+        path_params = {}
+
+        for route_path, ws_handler in self._websocket_routes.items():
+            if route_path == path:
+                handler = ws_handler
+                break
+
+            # Check for path parameter match
+            pattern = re.sub(r"\{(\w+)\}", r"(?P<\1>[^/]+)", route_path)
+            pattern = f"^{pattern}$"
+            match = re.match(pattern, path)
+            if match:
+                handler = ws_handler
+                path_params = match.groupdict()
+                break
+
+        if handler is None:
+            await send({"type": "websocket.close", "code": 4004})
+            return
+
+        # Create WebSocket wrapper
+        from fasterapi.websockets import WebSocket as FasterAPIWebSocket
+
+        websocket = FasterAPIWebSocket(scope, receive, send)
+
+        # Call handler with path params
+        try:
+            # Parse query params for WebSocket
+            query_string = scope.get("query_string", b"").decode()
+            query_params = {}
+            if query_string:
+                for param in query_string.split("&"):
+                    if "=" in param:
+                        key, value = param.split("=", 1)
+                        query_params[key] = value
+
+            kwargs = {"websocket": websocket}
+            kwargs.update(path_params)
+            kwargs.update(query_params)
+
+            if inspect.iscoroutinefunction(handler):
+                await handler(**kwargs)
+            else:
+                handler(**kwargs)
+        except Exception:
+            try:
+                await send({"type": "websocket.close", "code": 1011})
+            except Exception:
+                pass
 
     async def __call__(self, scope, receive, send):
         """
@@ -457,251 +999,18 @@ class FastAPIApp:
                     return
 
         elif scope["type"] == "http":
-            # Handle HTTP requests
-            path = scope["path"]
-            method = scope["method"]
-
-            # Find matching route
-            handler = None
-            path_params = {}
-
-            for route_path, methods in self._routes.items():
-                if method in methods:
-                    # Check for exact match
-                    if route_path == path:
-                        handler = methods[method]
-                        break
-
-                    # Check for path parameter match
-                    pattern = re.sub(r"\{(\w+)\}", r"(?P<\1>[^/]+)", route_path)
-                    pattern = f"^{pattern}$"
-                    match = re.match(pattern, path)
-                    if match:
-                        handler = methods[method]
-                        path_params = match.groupdict()
-                        break
-
-            if handler is None:
-                # 404 Not Found
-                await self._send_json_response(send, {"detail": "Not Found"}, 404)
+            # Build middleware stack if needed
+            if self._middleware:
+                if self._middleware_app is None:
+                    self._middleware_app = self._build_middleware_stack()
+                await self._middleware_app(scope, receive, send)
                 return
 
-            # Parse request body
-            body = b""
-            while True:
-                message = await receive()
-                body += message.get("body", b"")
-                if not message.get("more_body", False):
-                    break
-
-            # Parse query params
-            from urllib.parse import unquote
-
-            query_string = scope.get("query_string", b"").decode()
-            query_params = {}
-            if query_string:
-                for param in query_string.split("&"):
-                    if "=" in param:
-                        key, value = param.split("=", 1)
-                        query_params[key] = unquote(value)
-
-            # Parse JSON body if present
-            body_data = None
-            if body:
-                try:
-                    body_data = json_module.loads(body.decode())
-                except (json_module.JSONDecodeError, UnicodeDecodeError):
-                    pass
-
-            # Build kwargs for handler based on signature
-            kwargs = {}
-            sig = inspect.signature(handler)
-            try:
-                type_hints = get_type_hints(handler)
-            except Exception:
-                type_hints = {}
-
-            # Import param classes to check instance
-            try:
-                from fasterapi.params import Body as BodyParam
-                from fasterapi.params import Path as PathParam
-                from fasterapi.params import Query as QueryParam
-
-                has_param_classes = True
-            except ImportError:
-                has_param_classes = False
-
-            # Process each parameter based on its type and default
-            for param_name, param in sig.parameters.items():
-                param_type = type_hints.get(param_name, str)
-                default = param.default
-
-                # Check if it's a path parameter
-                if param_name in path_params:
-                    value = path_params[param_name]
-                    # Convert to appropriate type
-                    if param_type == int:
-                        value = int(value)
-                    elif param_type == float:
-                        value = float(value)
-                    kwargs[param_name] = value
-                    continue
-
-                # Check if it's a Pydantic model (body parameter)
-                if (
-                    HAS_PYDANTIC
-                    and isinstance(param_type, type)
-                    and issubclass(param_type, BaseModel)
-                ):
-                    if body_data is not None:
-                        try:
-                            # Convert dict to Pydantic model instance
-                            kwargs[param_name] = param_type.model_validate(body_data)
-                        except Exception as e:
-                            await self._send_json_response(
-                                send,
-                                {
-                                    "detail": [
-                                        {
-                                            "loc": ["body"],
-                                            "msg": str(e),
-                                            "type": "value_error",
-                                        }
-                                    ]
-                                },
-                                422,
-                            )
-                            return
-                    continue
-
-                # Handle Query/Path/Body descriptors or regular defaults
-                is_descriptor = False
-                actual_default = inspect.Parameter.empty
-
-                if has_param_classes and default is not inspect.Parameter.empty:
-                    if isinstance(default, (QueryParam, PathParam)):
-                        is_descriptor = True
-                        actual_default = getattr(default, "default", None)
-                    elif isinstance(default, BodyParam):
-                        is_descriptor = True
-                        if body_data is not None:
-                            kwargs[param_name] = body_data
-                        continue
-
-                if is_descriptor:
-                    # Extract value from query params or use default
-                    if param_name in query_params:
-                        value = query_params[param_name]
-                        # Convert to appropriate type
-                        if param_type == int:
-                            value = int(value)
-                        elif param_type == float:
-                            value = float(value)
-                        elif param_type == bool:
-                            value = value.lower() in ("true", "1", "yes")
-                        kwargs[param_name] = value
-                    elif actual_default is not ...:
-                        # Use the actual default (can be None for Optional params)
-                        kwargs[param_name] = actual_default
-                elif param_name in query_params:
-                    # Regular query parameter
-                    value = query_params[param_name]
-                    if param_type == int:
-                        value = int(value)
-                    elif param_type == float:
-                        value = float(value)
-                    elif param_type == bool:
-                        value = value.lower() in ("true", "1", "yes")
-                    kwargs[param_name] = value
-                elif default is not inspect.Parameter.empty:
-                    # Use default value if no query param provided
-                    kwargs[param_name] = default
-
-            # Call handler
-            try:
-                if inspect.iscoroutinefunction(handler):
-                    result = await handler(**kwargs)
-                else:
-                    result = handler(**kwargs)
-
-                # Handle tuple responses (body, status) or (body, status, headers)
-                status_code = 200
-                headers = {}
-                if isinstance(result, tuple):
-                    if len(result) == 2:
-                        result, status_code = result
-                    elif len(result) >= 3:
-                        result, status_code, headers = result[0], result[1], result[2]
-
-                # Convert Pydantic models to dict
-                if HAS_PYDANTIC and isinstance(result, BaseModel):
-                    result = result.model_dump()
-
-                await self._send_json_response(send, result, status_code, headers)
-
-            except HTTPException as e:
-                response = {"detail": e.detail} if e.detail is not None else {}
-                await self._send_json_response(
-                    send, response, e.status_code, e.headers or {}
-                )
-            except Exception as e:
-                await self._send_json_response(send, {"detail": str(e)}, 500)
+            # No middleware - handle directly
+            await self._handle_http(scope, receive, send)
 
         elif scope["type"] == "websocket":
-            # Handle WebSocket
-            path = scope["path"]
-
-            # Find matching WebSocket route
-            handler = None
-            path_params = {}
-
-            for route_path, ws_handler in self._websocket_routes.items():
-                if route_path == path:
-                    handler = ws_handler
-                    break
-
-                # Check for path parameter match
-                pattern = re.sub(r"\{(\w+)\}", r"(?P<\1>[^/]+)", route_path)
-                pattern = f"^{pattern}$"
-                match = re.match(pattern, path)
-                if match:
-                    handler = ws_handler
-                    path_params = match.groupdict()
-                    break
-
-            if handler is None:
-                await send({"type": "websocket.close", "code": 4004})
-                return
-
-            # Create WebSocket wrapper
-            from fasterapi.websockets import WebSocket as FasterAPIWebSocket
-
-            websocket = FasterAPIWebSocket(scope, receive, send)
-
-            # Call handler with path params
-            try:
-                # Parse query params for WebSocket
-                query_string = scope.get("query_string", b"").decode()
-                query_params = {}
-                if query_string:
-                    for param in query_string.split("&"):
-                        if "=" in param:
-                            key, value = param.split("=", 1)
-                            query_params[key] = value
-
-                kwargs = {"websocket": websocket}
-                kwargs.update(path_params)
-                kwargs.update(query_params)
-
-                if inspect.iscoroutinefunction(handler):
-                    await handler(**kwargs)
-                else:
-                    handler(**kwargs)
-            except Exception as e:
-                try:
-                    await send({"type": "websocket.close", "code": 1011})
-                except Exception:
-                    pass
+            await self._handle_websocket(scope, receive, send)
 
     async def _send_json_response(self, send, body, status_code=200, headers=None):
         """Send a JSON response."""
@@ -913,10 +1222,10 @@ class FastAPIApp:
         app = self  # Capture self for the decorator
 
         def decorator(func: Callable) -> Callable:
-            # Store route for ASGI fallback mode
+            # Store route for ASGI fallback mode (handler, response_model)
             if path not in app._routes:
                 app._routes[path] = {}
-            app._routes[path][method.upper()] = func
+            app._routes[path][method.upper()] = (func, response_model)
 
             # If native bindings available, also register with C++
             if HAS_NATIVE:

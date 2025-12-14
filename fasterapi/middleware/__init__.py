@@ -36,6 +36,14 @@ from fasterapi.middleware.base import (
 )
 from fasterapi.middleware.cors import CORSMiddleware
 from fasterapi.middleware.gzip import GZipMiddleware
+from fasterapi.middleware.rate_limit import (
+    FixedWindow,
+    RateLimitAlgorithm,
+    RateLimitMiddleware,
+    RateLimitResult,
+    SlidingWindow,
+    TokenBucket,
+)
 from fasterapi.middleware.trustedhost import TrustedHostMiddleware
 
 __all__ = [
@@ -48,4 +56,11 @@ __all__ = [
     "CORSMiddleware",
     "GZipMiddleware",
     "TrustedHostMiddleware",
+    # Rate limiting
+    "RateLimitMiddleware",
+    "RateLimitAlgorithm",
+    "RateLimitResult",
+    "TokenBucket",
+    "SlidingWindow",
+    "FixedWindow",
 ]
