@@ -4,16 +4,18 @@ FasterAPI - Setup
 Builds the C++ native library and Cython extensions, packages with Python modules.
 """
 
-from setuptools import setup, find_packages, Extension
-from setuptools.command.build_ext import build_ext
 import os
-import sys
 import subprocess
+import sys
 from pathlib import Path
+
+from setuptools import Extension, find_packages, setup
+from setuptools.command.build_ext import build_ext
 
 # Check if Cython is available
 try:
     from Cython.Build import cythonize
+
     HAS_CYTHON = True
 except ImportError:
     HAS_CYTHON = False
@@ -49,21 +51,20 @@ class CMakeBuildExt(build_ext):
         cmake_args = [
             f"-DCMAKE_BUILD_TYPE=Release",
             f"-DFA_BUILD_MCP=OFF",  # Disable MCP (has exception issues)
-            f"-DFA_BUILD_PG=ON",   # Enable PostgreSQL
-            f"-DFA_BUILD_HTTP=ON", # Enable HTTP
+            f"-DFA_BUILD_PG=ON",  # Enable PostgreSQL
+            f"-DFA_BUILD_HTTP=ON",  # Enable HTTP
             f"-DFA_BUILD_BENCHMARKS=OFF",  # Disable benchmarks for faster build
         ]
 
         subprocess.check_call(
             ["cmake", "-G", "Ninja", str(source_dir), "-Wno-dev"] + cmake_args,
-            cwd=build_dir
+            cwd=build_dir,
         )
 
         # Run Ninja build
         print("Building C++ library with Ninja")
         subprocess.check_call(
-            ["ninja", "fasterapi_http", "fasterapi_pg"],
-            cwd=build_dir
+            ["ninja", "fasterapi_http", "fasterapi_pg"], cwd=build_dir
         )
 
         # Copy libraries to fasterapi/_native/
@@ -72,31 +73,42 @@ class CMakeBuildExt(build_ext):
         # Copy MCP library
         for pattern in ["libfasterapi_mcp.*", "fasterapi_mcp.*"]:
             for lib_file in build_dir.rglob(pattern):
-                if lib_file.is_file() and not lib_file.suffix in ['.a', '.lib']:
+                if lib_file.is_file() and not lib_file.suffix in [".a", ".lib"]:
                     print(f"Copying {lib_file.name} to {native_dir}")
                     shutil.copy2(lib_file, native_dir / lib_file.name)
 
         # Copy PG library
         for pattern in ["libfasterapi_pg.*", "fasterapi_pg.*"]:
             for lib_file in build_dir.rglob(pattern):
-                if lib_file.is_file() and not lib_file.suffix in ['.a', '.lib']:
+                if lib_file.is_file() and not lib_file.suffix in [".a", ".lib"]:
                     print(f"Copying {lib_file.name} to {native_dir}")
                     shutil.copy2(lib_file, native_dir / lib_file.name)
 
         # Copy HTTP library
         for pattern in ["libfasterapi_http.*", "fasterapi_http.*"]:
             for lib_file in build_dir.rglob(pattern):
-                if lib_file.is_file() and not lib_file.suffix in ['.a', '.lib']:
+                if lib_file.is_file() and not lib_file.suffix in [".a", ".lib"]:
                     print(f"Copying {lib_file.name} to {native_dir}")
                     shutil.copy2(lib_file, native_dir / lib_file.name)
 
         # Copy CoroIO library
         for pattern in ["libcoroio.*", "coroio.*"]:
             for lib_file in build_dir.rglob(pattern):
-                if lib_file.is_file() and not lib_file.suffix in ['.a', '.lib']:
+                if lib_file.is_file() and not lib_file.suffix in [".a", ".lib"]:
                     print(f"Copying {lib_file.name} to {native_dir}")
                     shutil.copy2(lib_file, native_dir / lib_file.name)
 
+
+# Platform-specific rpath for finding native libraries at runtime
+if sys.platform == "darwin":
+    # macOS: use -rpath flag (not -Wl,-rpath which doesn't work with Apple clang)
+    # @loader_path is relative to the .so file location
+    rpath_link_args = ["-rpath", "@loader_path/_native"]
+elif sys.platform.startswith("linux"):
+    # Linux: $ORIGIN is relative to the .so file location
+    rpath_link_args = ["-Wl,-rpath,$ORIGIN/_native"]
+else:
+    rpath_link_args = []
 
 # Cython extensions
 extensions = []
@@ -119,10 +131,18 @@ if HAS_CYTHON:
             "fasterapi.http.server_cy",
             sources=["fasterapi/http/server_cy.pyx"],
             include_dirs=[".", "src/cpp", "external/coroio"],
-            library_dirs=["fasterapi/_native", "build/lib", "build/external/coroio/coroio"],
+            library_dirs=[
+                "fasterapi/_native",
+                "build/lib",
+                "build/external/coroio/coroio",
+            ],
             libraries=["fasterapi_http", "coroio"],
             language="c++",
-            extra_compile_args=["-std=c++20", "-fexceptions"],  # CoroIO needs exceptions
+            extra_compile_args=[
+                "-std=c++20",
+                "-fexceptions",
+            ],  # CoroIO needs exceptions
+            extra_link_args=rpath_link_args,  # Find native libs at runtime
         )
     )
 
@@ -135,7 +155,11 @@ if HAS_CYTHON:
             library_dirs=["fasterapi/_native", "build/lib"],
             libraries=["fasterapi_http"],
             language="c++",
-            extra_compile_args=["-std=c++20", "-fexceptions"],  # Cython needs exceptions for error handling
+            extra_compile_args=[
+                "-std=c++20",
+                "-fexceptions",
+            ],  # Cython needs exceptions for error handling
+            extra_link_args=rpath_link_args,  # Find native libs at runtime
         )
     )
 
@@ -154,11 +178,7 @@ if HAS_CYTHON:
 
     # Cythonize extensions
     extensions = cythonize(
-        extensions,
-        compiler_directives={
-            'language_level': 3,
-            'embedsignature': True
-        }
+        extensions, compiler_directives={"language_level": 3, "embedsignature": True}
     )
 
 
