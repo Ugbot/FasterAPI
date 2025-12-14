@@ -1203,7 +1203,12 @@ class FastAPIApp:
                 dep_kwargs[dep_param_name] = dep_default
 
         # Call the dependency function
-        if inspect.iscoroutinefunction(dep_func):
+        # Check if it's async (either a coroutine function or a class with async __call__)
+        is_async = inspect.iscoroutinefunction(dep_func)
+        if not is_async and hasattr(dep_func, "__call__"):
+            is_async = inspect.iscoroutinefunction(dep_func.__call__)
+
+        if is_async:
             result = await dep_func(**dep_kwargs)
         else:
             result = dep_func(**dep_kwargs)

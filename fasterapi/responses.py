@@ -397,6 +397,100 @@ class FileResponse(Response):
                 yield chunk
 
 
+class EventSourceResponse(StreamingResponse):
+    """
+    Response class for Server-Sent Events (SSE).
+
+    Usage:
+        async def event_generator():
+            for i in range(10):
+                yield {"event": "message", "data": f"Event {i}", "id": str(i)}
+                await asyncio.sleep(1)
+
+        return EventSourceResponse(event_generator())
+
+    Event dict format:
+        - event: Event type (optional, default: "message")
+        - data: Event data (required)
+        - id: Event ID (optional)
+        - retry: Reconnection time in ms (optional)
+    """
+
+    media_type = "text/event-stream"
+    charset = "utf-8"
+
+    def __init__(
+        self,
+        content: Union[AsyncIterable[Any], Iterable[Any]],
+        status_code: int = 200,
+        headers: Optional[Mapping[str, str]] = None,
+        background: Optional[Any] = None,
+        ping_interval: Optional[float] = None,
+    ) -> None:
+        # Add SSE-specific headers
+        sse_headers = {
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        }
+        if headers:
+            sse_headers.update(headers)
+
+        super().__init__(
+            content=content,
+            status_code=status_code,
+            headers=sse_headers,
+            media_type=self.media_type,
+            background=background,
+        )
+        self.ping_interval = ping_interval
+
+    async def stream_response(self) -> AsyncIterable[bytes]:
+        """Iterate over the response body, formatting as SSE."""
+        if hasattr(self.body_iterator, "__aiter__"):
+            # Async iterator
+            async for event in self.body_iterator:
+                yield self._format_event(event)
+        else:
+            # Sync iterator
+            for event in self.body_iterator:
+                yield self._format_event(event)
+
+    def _format_event(self, event: Union[Dict[str, Any], str]) -> bytes:
+        """Format an event as SSE text."""
+        if isinstance(event, str):
+            # Simple string data
+            return f"data: {event}\n\n".encode(self.charset)
+
+        lines = []
+
+        # Event type
+        if "event" in event:
+            lines.append(f"event: {event['event']}")
+
+        # Event ID
+        if "id" in event:
+            lines.append(f"id: {event['id']}")
+
+        # Retry interval
+        if "retry" in event:
+            lines.append(f"retry: {event['retry']}")
+
+        # Data (can be multiline)
+        if "data" in event:
+            data = event["data"]
+            if isinstance(data, dict):
+                data = json.dumps(data)
+            for line in str(data).split("\n"):
+                lines.append(f"data: {line}")
+
+        # Add empty line to end event
+        lines.append("")
+        lines.append("")
+
+        return "\n".join(lines).encode(self.charset)
+
+
 class UJSONResponse(JSONResponse):
     """
     JSON response using ujson for faster serialization.
@@ -435,6 +529,7 @@ __all__ = [
     "RedirectResponse",
     "StreamingResponse",
     "FileResponse",
+    "EventSourceResponse",
     "UJSONResponse",
     "ORJSONResponse",
 ]
