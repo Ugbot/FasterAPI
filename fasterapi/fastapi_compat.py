@@ -641,6 +641,41 @@ class FastAPIApp:
             body_bytes=body,
         )
 
+        # Import dependency scope for yield dependency cleanup
+        from fasterapi.depends import DependencyScope, cleanup_dependencies
+
+        # Use DependencyScope to ensure yield dependencies are cleaned up
+        async with DependencyScope(request_obj):
+            await self._handle_http_inner(
+                scope, receive, send, handler, response_model,
+                path_params, query_params, body, body_data, form_data,
+                content_type, request_obj, sig, type_hints, has_param_classes
+            )
+
+    async def _handle_http_inner(
+        self, scope, receive, send, handler, response_model,
+        path_params, query_params, body, body_data, form_data,
+        content_type, request_obj, sig, type_hints, has_param_classes
+    ):
+        """Inner HTTP handler that runs within DependencyScope."""
+        import json as json_module
+
+        kwargs = {}
+
+        # Import param classes again (we're in a new method)
+        try:
+            from fasterapi.datastructures import UploadFile
+            from fasterapi.params import Body as BodyParam
+            from fasterapi.params import Depends as DependsParam
+            from fasterapi.params import File as FileParam
+            from fasterapi.params import Form as FormParam
+            from fasterapi.params import Path as PathParam
+            from fasterapi.params import Query as QueryParam
+        except ImportError:
+            UploadFile = None
+            DependsParam = None
+            has_param_classes = False
+
         # Process each parameter based on its type and default
         for param_name, param in sig.parameters.items():
             param_type = type_hints.get(param_name, str)
@@ -677,9 +712,10 @@ class FastAPIApp:
                     dep_func = default.dependency
                     if dep_func is not None:
                         try:
-                            # Resolve dependency (with recursive support for nested Depends)
-                            resolved = await self._resolve_dependency(
-                                dep_func, request_obj, query_params, DependsParam
+                            # Resolve dependency using depends.py module (supports yield cleanup)
+                            from fasterapi.depends import resolve_dependency as resolve_dep
+                            resolved = await resolve_dep(
+                                default, request_obj, path_params, query_params
                             )
                             kwargs[param_name] = resolved
                         except HTTPException as e:
@@ -1284,6 +1320,15 @@ class FastAPIApp:
 
         def decorator(func: Callable) -> Callable:
             self._exception_handlers[exc_class] = func
+
+            # Register with C++ exception handler registry for native dispatch
+            try:
+                from fasterapi._fastapi_native import register_exception_handler
+                is_async = asyncio.iscoroutinefunction(func)
+                register_exception_handler(exc_class, func, is_async)
+            except ImportError:
+                pass  # Native module not available, fallback to Python-only handling
+
             return func
 
         return decorator
@@ -1299,6 +1344,14 @@ class FastAPIApp:
             handler: Handler function
         """
         self._exception_handlers[exc_class] = handler
+
+        # Register with C++ exception handler registry for native dispatch
+        try:
+            from fasterapi._fastapi_native import register_exception_handler
+            is_async = asyncio.iscoroutinefunction(handler)
+            register_exception_handler(exc_class, handler, is_async)
+        except ImportError:
+            pass  # Native module not available, fallback to Python-only handling
 
     def on_event(self, event_type: str) -> Callable[[Callable], Callable]:
         """

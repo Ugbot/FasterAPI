@@ -1,6 +1,7 @@
 #include "python_callback_bridge.h"
 #include "route_metadata.h"
 #include "validation_error_formatter.h"
+#include "exception_handler.h"
 #include "../python/process_pool_executor.h"
 #include "../core/logger.h"
 #include <thread>
@@ -413,19 +414,19 @@ PythonCallbackBridge::HandlerResult PythonCallbackBridge::invoke_handler(
         }
     }
 
+    // Always extract query parameters from URL
+    auto query_params = fasterapi::http::ParameterExtractor::get_query_params(path);
+    DEBUG_LOG(PARAMS, "Extracted %zu query params from URL: %s", query_params.size(), path.c_str());
+
     // Extract and add parameters if metadata is available
-    if (metadata) {
-        LOG_WARN("PythonCallback", "Extracting params from URL: %s", path.c_str());
+    if (metadata && !metadata->parameters.empty()) {
+        LOG_WARN("PythonCallback", "Extracting params using metadata for URL: %s", path.c_str());
 
         // 1. Extract path parameters using CompiledRoutePattern
         auto path_params = metadata->compiled_pattern.extract(route_path);
         LOG_WARN("PythonCallback", "Extracted %zu path params", path_params.size());
 
-        // 2. Extract query parameters from URL
-        auto query_params = fasterapi::http::ParameterExtractor::get_query_params(path);
-        LOG_WARN("PythonCallback", "Extracted %zu query params", query_params.size());
-
-        // 3. Build kwargs from parameters metadata
+        // 2. Build kwargs from parameters metadata
         for (const auto& param_info : metadata->parameters) {
             PyObject* py_value = nullptr;
 
@@ -454,6 +455,18 @@ PythonCallbackBridge::HandlerResult PythonCallbackBridge::invoke_handler(
             if (py_value) {
                 PyDict_SetItemString(kwargs, param_info.name.c_str(), py_value);
                 Py_DECREF(py_value);  // Dict took a reference
+            }
+        }
+    } else {
+        // No metadata or empty parameters - add all query params directly as strings
+        DEBUG_LOG(PARAMS, "No parameter metadata, adding %zu query params as strings", query_params.size());
+
+        // Add all query params to kwargs as strings
+        for (const auto& [param_name, param_value] : query_params) {
+            PyObject* py_value = PyUnicode_FromString(param_value.c_str());
+            if (py_value) {
+                PyDict_SetItemString(kwargs, param_name.c_str(), py_value);
+                Py_DECREF(py_value);
             }
         }
     }
@@ -493,6 +506,24 @@ PythonCallbackBridge::HandlerResult PythonCallbackBridge::invoke_handler(
             }
             Py_DECREF(json_module);
         }
+    } else if (!metadata && !body.empty()) {
+        // No metadata but body present - parse JSON and add as "body"
+        DEBUG_LOG(PARAMS, "No metadata but body present, parsing JSON body");
+        PyObject* json_module = PyImport_ImportModule("json");
+        if (json_module) {
+            PyObject* loads = PyObject_GetAttrString(json_module, "loads");
+            if (loads) {
+                PyObject* py_body = PyObject_CallFunction(loads, "s", body.c_str());
+                if (py_body) {
+                    PyDict_SetItemString(kwargs, "body", py_body);
+                    Py_DECREF(py_body);
+                } else {
+                    PyErr_Clear();
+                }
+                Py_DECREF(loads);
+            }
+            Py_DECREF(json_module);
+        }
     }
 
     // Call handler with kwargs
@@ -502,11 +533,19 @@ PythonCallbackBridge::HandlerResult PythonCallbackBridge::invoke_handler(
     Py_DECREF(kwargs);
 
     if (py_result == nullptr) {
-        // Python exception occurred
-        PyErr_Print();
-        result.status_code = 500;
-        result.content_type = "application/json";
-        result.body = "{\"error\":\"Internal Server Error\"}";
+        // Python exception occurred - extract info and dispatch to handler
+        auto exc_info = fasterapi::http::ExceptionHandlerRegistry::extract_exception_info();
+
+        // Handle via registry (calls custom or default handler)
+        auto exc_response = fasterapi::http::ExceptionHandlerRegistry::instance()
+            .handle_exception_sync(exc_info);
+
+        result.status_code = exc_response.status_code;
+        result.content_type = exc_response.content_type;
+        result.body = std::move(exc_response.body);
+        for (const auto& [k, v] : exc_response.headers) {
+            result.headers[k] = v;
+        }
     } else {
         // Handle different FastAPI-style return types:
 
@@ -720,19 +759,19 @@ PythonCallbackBridge::invoke_handler_async(
         return future<result<HandlerResult>>::make_ready(ok(std::move(error_result)));
     }
 
-    // Extract and add parameters if route metadata is available
-    if (route_meta) {
-        LOG_DEBUG("PythonCallback", "Extracting params from URL: %s", path.c_str());
+    // Always extract query parameters from URL
+    auto query_params = fasterapi::http::ParameterExtractor::get_query_params(path);
+    DEBUG_LOG(PARAMS, "ASYNC: Extracted %zu query params from URL: %s", query_params.size(), path.c_str());
+
+    // Extract and add parameters if route metadata is available with parameter info
+    if (route_meta && !route_meta->parameters.empty()) {
+        LOG_DEBUG("PythonCallback", "ASYNC: Extracting params using metadata for URL: %s", path.c_str());
 
         // 1. Extract path parameters using CompiledRoutePattern
         auto path_params = route_meta->compiled_pattern.extract(route_path);
-        LOG_DEBUG("PythonCallback", "Extracted %zu path params", path_params.size());
+        LOG_DEBUG("PythonCallback", "ASYNC: Extracted %zu path params", path_params.size());
 
-        // 2. Extract query parameters from URL
-        auto query_params = fasterapi::http::ParameterExtractor::get_query_params(path);
-        LOG_DEBUG("PythonCallback", "Extracted %zu query params", query_params.size());
-
-        // 3. Parse JSON body once for BODY parameter extraction
+        // 2. Parse JSON body once for BODY parameter extraction
         PyObject* parsed_body = nullptr;
         if (!body.empty()) {
             PyObject* json_module = PyImport_ImportModule("json");
@@ -806,6 +845,37 @@ PythonCallbackBridge::invoke_handler_async(
 
         // Cleanup parsed body
         Py_XDECREF(parsed_body);
+    } else {
+        // No route metadata or empty parameters - add all query params as strings
+        DEBUG_LOG(PARAMS, "ASYNC: No parameter metadata, adding %zu query params as strings", query_params.size());
+
+        // Add all query params to kwargs as strings
+        for (const auto& [param_name, param_value] : query_params) {
+            PyObject* py_value = PyUnicode_FromString(param_value.c_str());
+            if (py_value) {
+                PyDict_SetItemString(kwargs, param_name.c_str(), py_value);
+                Py_DECREF(py_value);
+            }
+        }
+
+        // Also parse body as JSON if present and add as "body" kwarg
+        if (!body.empty()) {
+            PyObject* json_module = PyImport_ImportModule("json");
+            if (json_module) {
+                PyObject* loads = PyObject_GetAttrString(json_module, "loads");
+                if (loads) {
+                    PyObject* py_body = PyObject_CallFunction(loads, "s", body.c_str());
+                    if (py_body) {
+                        PyDict_SetItemString(kwargs, "body", py_body);
+                        Py_DECREF(py_body);
+                    } else {
+                        PyErr_Clear();
+                    }
+                    Py_DECREF(loads);
+                }
+                Py_DECREF(json_module);
+            }
+        }
     }
 
     PyObject* empty_args = PyTuple_New(0);

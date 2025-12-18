@@ -21,7 +21,8 @@ from fasterapi._fastapi_native cimport (
     ParameterLocation, ParameterInfo, RouteMetadata, RouteRegistry,
     param_location_from_int, param_location_to_int,
     OpenAPIGenerator, StaticDocs, ValidationErrorFormatter,
-    ValidationResult, ValidationError
+    ValidationResult, ValidationError,
+    ExceptionHandlerRegistry
 )
 
 import sys
@@ -585,3 +586,82 @@ def url_decode(str encoded):
     """
     cdef string decoded = ParameterExtractor.url_decode(encoded.encode('utf-8'))
     return decoded.decode('utf-8')
+
+
+# ============================================================================
+# Exception Handler Registry
+# ============================================================================
+
+def register_exception_handler(object exc_class, object handler, bint is_async = False):
+    """
+    Register a custom exception handler with the C++ registry.
+
+    This allows custom handlers to intercept exceptions raised during
+    request processing and return custom responses.
+
+    Args:
+        exc_class: The exception class to handle (e.g., HTTPException, ValueError)
+        handler: Python callable that takes (request, exc) and returns a Response
+        is_async: Whether the handler is an async function
+
+    Example:
+        @app.exception_handler(CustomError)
+        async def handle_custom(request, exc):
+            return JSONResponse({"error": str(exc)}, status_code=418)
+    """
+    cdef PyObject* exc_class_ptr = <PyObject*>exc_class
+    cdef PyObject* handler_ptr = <PyObject*>handler
+
+    # Increment reference to keep handler alive
+    Py_INCREF(handler)
+
+    # Register by exception class (allows base class matching)
+    ExceptionHandlerRegistry.instance().register_handler_for_class(
+        exc_class_ptr,
+        handler_ptr,
+        is_async
+    )
+
+
+def register_exception_handler_by_name(str exc_type, object handler, bint is_async = False):
+    """
+    Register a custom exception handler by type name.
+
+    Args:
+        exc_type: Qualified exception type name (e.g., "myapp.CustomError")
+        handler: Python callable that takes (request, exc) and returns a Response
+        is_async: Whether the handler is an async function
+    """
+    cdef PyObject* handler_ptr = <PyObject*>handler
+    cdef bytes b = exc_type.encode('utf-8')
+
+    # Increment reference to keep handler alive
+    Py_INCREF(handler)
+
+    ExceptionHandlerRegistry.instance().register_handler(
+        b,
+        handler_ptr,
+        is_async
+    )
+
+
+def has_exception_handler(str exc_type) -> bool:
+    """
+    Check if an exception handler is registered for a type.
+
+    Args:
+        exc_type: Qualified exception type name
+
+    Returns:
+        True if a handler is registered
+    """
+    return ExceptionHandlerRegistry.instance().has_handler(exc_type.encode('utf-8'))
+
+
+def clear_exception_handlers():
+    """
+    Clear all registered exception handlers.
+
+    Warning: This should only be used during testing or cleanup.
+    """
+    ExceptionHandlerRegistry.instance().clear()

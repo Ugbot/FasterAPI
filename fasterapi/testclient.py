@@ -142,6 +142,7 @@ class TestClient:
         self.base_url = base_url.rstrip("/")
         self.raise_server_exceptions = raise_server_exceptions
         self.cookies: Dict[str, str] = cookies or {}
+        self._lifespan_started = False
 
     def _build_scope(
         self,
@@ -484,9 +485,78 @@ class TestClient:
         return self._make_request(method, url, **kwargs)
 
     def __enter__(self) -> "TestClient":
-        """Context manager entry."""
+        """Context manager entry - triggers lifespan startup."""
+        self._run_lifespan("startup")
+        self._lifespan_started = True
         return self
 
     def __exit__(self, *args) -> None:
-        """Context manager exit."""
-        pass
+        """Context manager exit - triggers lifespan shutdown."""
+        if self._lifespan_started:
+            self._run_lifespan("shutdown")
+            self._lifespan_started = False
+
+    def _run_lifespan(self, phase: str) -> None:
+        """
+        Run ASGI lifespan startup or shutdown.
+
+        Args:
+            phase: Either "startup" or "shutdown"
+        """
+        # Check if app has lifespan handling capability
+        if not (hasattr(self.app, '_lifespan') or hasattr(self.app, '_on_startup')):
+            return
+
+        # For startup, check if there are handlers
+        if phase == "startup":
+            has_lifespan = getattr(self.app, '_lifespan', None) is not None
+            has_handlers = bool(getattr(self.app, '_on_startup', []))
+            if not has_lifespan and not has_handlers:
+                return
+        else:
+            # For shutdown, only run if startup was done
+            has_lifespan_context = getattr(self.app, '_lifespan_context', None) is not None
+            has_handlers = bool(getattr(self.app, '_on_shutdown', []))
+            if not has_lifespan_context and not has_handlers:
+                return
+
+        # Build lifespan scope
+        scope = {
+            "type": "lifespan",
+            "asgi": {"version": "3.0"},
+        }
+
+        # Track state
+        phase_complete = False
+        phase_failed = False
+        failure_message = ""
+        messages_sent = 0
+
+        async def receive():
+            nonlocal messages_sent
+            messages_sent += 1
+            if messages_sent == 1:
+                return {"type": f"lifespan.{phase}"}
+            # After startup/shutdown, app will wait for next message
+            # We raise an exception to break out of the while loop
+            raise asyncio.CancelledError("Lifespan phase complete")
+
+        async def send(message):
+            nonlocal phase_complete, phase_failed, failure_message
+            if message["type"] == f"lifespan.{phase}.complete":
+                phase_complete = True
+            elif message["type"] == f"lifespan.{phase}.failed":
+                phase_failed = True
+                failure_message = message.get("message", f"{phase.title()} failed")
+
+        try:
+            asyncio.run(self.app(scope, receive, send))
+        except asyncio.CancelledError:
+            # Expected - we cancel after phase completes
+            pass
+        except Exception as e:
+            if not phase_complete and phase == "startup":
+                raise RuntimeError(f"Lifespan {phase} failed: {e}") from e
+
+        if phase_failed and phase == "startup":
+            raise RuntimeError(f"Lifespan startup failed: {failure_message}")

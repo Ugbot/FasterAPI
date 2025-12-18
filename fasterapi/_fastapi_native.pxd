@@ -125,3 +125,12 @@ cdef extern from "http/validation_error_formatter.h" namespace "fasterapi::http"
         string format_as_json(const ValidationResult& result) except +
         @staticmethod
         string format_as_http_response(const ValidationResult& result) except +
+
+cdef extern from "http/exception_handler.h" namespace "fasterapi::http":
+    cdef cppclass ExceptionHandlerRegistry:
+        @staticmethod
+        ExceptionHandlerRegistry& instance()
+        void register_handler(const string& exc_type, PyObject* handler, bool_t is_async) except +
+        void register_handler_for_class(PyObject* exc_class, PyObject* handler, bool_t is_async) except +
+        bool_t has_handler(const string& exc_type) except +
+        void clear() except +

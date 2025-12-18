@@ -624,6 +624,9 @@ if (FA_BUILD_HTTP)
     # Add Python callback bridge
     list(APPEND HTTP_SOURCES src/cpp/http/python_callback_bridge.cpp)
 
+    # Add exception handler registry
+    list(APPEND HTTP_SOURCES src/cpp/http/exception_handler.cpp)
+
     # Add HTTP/2 native server (with Python integration)
     if (FA_ENABLE_HTTP2)
         list(APPEND HTTP_SOURCES src/cpp/http/http2_server.cpp)
@@ -820,6 +823,25 @@ if (FA_BUILD_HTTP)
         PREFIX "lib"
         SUFFIX ".${LIB_EXTENSION}"
     )
+
+    # Deploy library to Python package's _native directory after build
+    # This ensures Python can load the library without manual copying
+    set(NATIVE_LIB_DIR "${CMAKE_SOURCE_DIR}/fasterapi/_native")
+    add_custom_command(TARGET fasterapi_http POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${NATIVE_LIB_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:fasterapi_http>"
+            "${NATIVE_LIB_DIR}/"
+        COMMENT "Deploying libfasterapi_http to ${NATIVE_LIB_DIR}"
+    )
+
+    # Code sign on macOS (required for ad-hoc signature)
+    if(APPLE)
+        add_custom_command(TARGET fasterapi_http POST_BUILD
+            COMMAND codesign -s - -f "${NATIVE_LIB_DIR}/libfasterapi_http.${LIB_EXTENSION}"
+            COMMENT "Code signing deployed library for macOS"
+        )
+    endif()
 
     # Strip symbols in release build
     # TEMP: Disabled for debugging
