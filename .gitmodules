@@ -22,3 +22,6 @@
 [submodule "external/FrameworkBenchmarks"]
 	path = external/FrameworkBenchmarks
 	url = https://github.com/TechEmpower/FrameworkBenchmarks.git
+[submodule "external/autobahn-testsuite"]
+	path = external/autobahn-testsuite
+	url = https://github.com/crossbario/autobahn-testsuite
