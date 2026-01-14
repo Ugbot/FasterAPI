@@ -147,6 +147,15 @@ bool ZmqIPC::initialize() {
 }
 
 void ZmqIPC::cleanup() {
+    // Close per-worker WebSocket sockets first
+    for (size_t i = 0; i < ws_worker_sockets_.size(); i++) {
+        if (ws_worker_sockets_[i]) {
+            zmq_close(ws_worker_sockets_[i]);
+            ws_worker_sockets_[i] = nullptr;
+        }
+    }
+    ws_worker_sockets_.clear();
+
     if (request_socket_) {
         zmq_close(request_socket_);
         request_socket_ = nullptr;
@@ -168,7 +177,14 @@ void ZmqIPC::cleanup() {
         std::string resp_file = "/tmp/" + ipc_prefix_ + "_resp";
         unlink(req_file.c_str());
         unlink(resp_file.c_str());
+
+        // Clean up per-worker WebSocket IPC files
+        for (size_t i = 0; i < ws_worker_ipc_paths_.size(); i++) {
+            std::string ws_file = "/tmp/" + ipc_prefix_ + "_ws_" + std::to_string(i);
+            unlink(ws_file.c_str());
+        }
     }
+    ws_worker_ipc_paths_.clear();
 }
 
 std::vector<uint8_t> ZmqIPC::serialize_request(
@@ -718,6 +734,98 @@ bool ZmqIPC::parse_ws_response(const std::vector<uint8_t>& data,
 
     LOG_DEBUG("ZmqIPC", "Parsed WS response: type=%d conn=%lu payload_len=%zu",
               static_cast<int>(header.type), connection_id, payload.size());
+
+    return true;
+}
+
+// =============================================================================
+// Per-worker WebSocket IPC methods
+// =============================================================================
+
+bool ZmqIPC::init_ws_worker_sockets(uint32_t num_workers) {
+    if (!is_master_) {
+        LOG_ERROR("ZmqIPC", "init_ws_worker_sockets called on worker (not master)");
+        return false;
+    }
+
+    if (num_workers == 0) {
+        LOG_ERROR("ZmqIPC", "init_ws_worker_sockets: num_workers is 0");
+        return false;
+    }
+
+    num_workers_ = num_workers;
+    ws_worker_sockets_.resize(num_workers, nullptr);
+    ws_worker_ipc_paths_.resize(num_workers);
+
+    for (uint32_t i = 0; i < num_workers; i++) {
+        // Create unique IPC path for this worker's WebSocket channel
+        ws_worker_ipc_paths_[i] = "ipc:///tmp/" + ipc_prefix_ + "_ws_" + std::to_string(i);
+
+        // Create PUSH socket for this worker
+        ws_worker_sockets_[i] = zmq_socket(zmq_context_, ZMQ_PUSH);
+        if (!ws_worker_sockets_[i]) {
+            LOG_ERROR("ZmqIPC", "Failed to create WS worker socket %d: %s", i, zmq_strerror(errno));
+            return false;
+        }
+
+        // Bind (master binds, workers connect)
+        if (zmq_bind(ws_worker_sockets_[i], ws_worker_ipc_paths_[i].c_str()) != 0) {
+            LOG_ERROR("ZmqIPC", "Failed to bind WS worker socket %d to %s: %s",
+                     i, ws_worker_ipc_paths_[i].c_str(), zmq_strerror(errno));
+            return false;
+        }
+
+        LOG_INFO("ZmqIPC", "Created WS worker channel %d: %s", i, ws_worker_ipc_paths_[i].c_str());
+    }
+
+    return true;
+}
+
+bool ZmqIPC::write_ws_event_to_worker(uint32_t worker_id,
+                                       MessageType type,
+                                       uint64_t connection_id,
+                                       const std::string& path,
+                                       const std::string& payload,
+                                       bool is_binary) {
+    if (!is_master_) {
+        LOG_ERROR("ZmqIPC", "write_ws_event_to_worker called on non-master");
+        return false;
+    }
+
+    if (worker_id >= num_workers_ || !ws_worker_sockets_[worker_id]) {
+        LOG_ERROR("ZmqIPC", "Invalid worker_id %u (num_workers=%u)", worker_id, num_workers_);
+        return false;
+    }
+
+    // Build WebSocket message (same format as write_ws_event)
+    WebSocketMessageHeader header;
+    header.type = type;
+    header.connection_id = connection_id;
+    header.path_len = static_cast<uint32_t>(path.size());
+    header.payload_len = static_cast<uint32_t>(payload.size());
+    header.is_binary = is_binary ? 1 : 0;
+    header.total_length = sizeof(WebSocketMessageHeader) + header.path_len + header.payload_len;
+
+    // Serialize: header + path + payload
+    std::vector<uint8_t> message(header.total_length);
+    memcpy(message.data(), &header, sizeof(WebSocketMessageHeader));
+    if (!path.empty()) {
+        memcpy(message.data() + sizeof(WebSocketMessageHeader), path.data(), path.size());
+    }
+    if (!payload.empty()) {
+        memcpy(message.data() + sizeof(WebSocketMessageHeader) + path.size(), payload.data(), payload.size());
+    }
+
+    // Send to specific worker's socket
+    int rc = zmq_send(ws_worker_sockets_[worker_id], message.data(), message.size(), ZMQ_DONTWAIT);
+    if (rc < 0) {
+        LOG_ERROR("ZmqIPC", "write_ws_event_to_worker send failed for worker %u: %s",
+                  worker_id, zmq_strerror(zmq_errno()));
+        return false;
+    }
+
+    LOG_DEBUG("ZmqIPC", "Sent WS event type=%d to worker %u conn=%lu path=%s payload_len=%zu",
+              static_cast<int>(type), worker_id, connection_id, path.c_str(), payload.size());
 
     return true;
 }

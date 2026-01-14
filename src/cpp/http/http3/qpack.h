@@ -22,6 +22,7 @@
 #include <vector>
 #include <utility>
 #include "../quic/quic_varint.h"
+#include "../huffman.h"
 
 namespace fasterapi {
 namespace qpack {
@@ -493,9 +494,18 @@ private:
         if (len < pos + str_len) return -1;
 
         if (huffman) {
-            // Huffman decoding not implemented - treat as raw
-            // In production, implement RFC 7541 Huffman decoding
-            out.assign(reinterpret_cast<const char*>(data + pos), str_len);
+            // Huffman decoding using RFC 7541 table
+            uint8_t decoded_buf[8192];  // Max header size
+            size_t decoded_len;
+
+            if (http::HuffmanDecoder::decode(
+                    data + pos, str_len,
+                    decoded_buf, sizeof(decoded_buf),
+                    decoded_len) != 0) {
+                return -1;  // Decode failure
+            }
+
+            out.assign(reinterpret_cast<char*>(decoded_buf), decoded_len);
         } else {
             out.assign(reinterpret_cast<const char*>(data + pos), str_len);
         }

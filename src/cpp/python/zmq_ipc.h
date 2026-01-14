@@ -169,6 +169,34 @@ public:
      */
     const std::string& get_ipc_prefix() const { return ipc_prefix_; }
 
+    // ========================================================================
+    // Per-worker WebSocket routing (for affinity)
+    // ========================================================================
+
+    /**
+     * Initialize per-worker WebSocket sockets.
+     * Must be called after constructor, before workers start.
+     * @param num_workers Number of workers to create channels for
+     */
+    bool init_ws_worker_sockets(uint32_t num_workers);
+
+    /**
+     * Write WebSocket event to a specific worker.
+     * Used for WS_MESSAGE and WS_DISCONNECT to maintain affinity.
+     * @param worker_id Target worker ID (0-based)
+     */
+    bool write_ws_event_to_worker(uint32_t worker_id,
+                                   MessageType type,
+                                   uint64_t connection_id,
+                                   const std::string& path,
+                                   const std::string& payload = "",
+                                   bool is_binary = false);
+
+    /**
+     * Get number of workers for WebSocket routing.
+     */
+    uint32_t get_num_workers() const { return num_workers_; }
+
     /**
      * Check if this is the master (bind) or worker (connect).
      */
@@ -202,6 +230,11 @@ private:
     std::string response_ipc_path_;
 
     std::atomic<bool> shutdown_;
+
+    // Per-worker WebSocket sockets for affinity routing
+    uint32_t num_workers_ = 0;
+    std::vector<void*> ws_worker_sockets_;  // One PUSH socket per worker
+    std::vector<std::string> ws_worker_ipc_paths_;  // IPC paths for cleanup
 
     // Private constructor for attach()
     ZmqIPC(const std::string& ipc_prefix, bool is_master);

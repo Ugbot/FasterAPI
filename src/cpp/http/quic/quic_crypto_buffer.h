@@ -82,50 +82,94 @@ public:
             return -1;  // Would overflow buffer
         }
 
-        // Check for duplicate/old data
+        // Track highest byte for data_size
+        data_size_ = std::max(data_size_, static_cast<size_t>(end_offset));
+
+        // Check for duplicate - if we've already received contiguous data past this
         if (end_offset <= recv_offset_) {
-            return 0;  // Already received, ignore
+            return 0;  // Already received contiguously, ignore
         }
 
-        // Handle overlapping data (partial duplicate)
-        size_t copy_offset = 0;
+        // Handle partial overlap with contiguous data
+        size_t copy_start = 0;
+        uint64_t write_offset = offset;
+        size_t write_length = length;
+
         if (offset < recv_offset_) {
-            copy_offset = recv_offset_ - offset;
-            offset = recv_offset_;
-            length -= copy_offset;
+            // Partial overlap - skip already received part
+            copy_start = static_cast<size_t>(recv_offset_ - offset);
+            write_offset = recv_offset_;
+            write_length = length - copy_start;
         }
 
-        // Copy data to buffer
-        std::memcpy(buffer_ + offset, data + copy_offset, length);
+        // Copy data to buffer at the correct offset
+        std::memcpy(buffer_ + write_offset, data + copy_start, write_length);
 
         // Update gap tracking
-        if (offset == recv_offset_) {
-            // Contiguous data - advance recv_offset
+        if (write_offset == recv_offset_) {
+            // Contiguous with current recv_offset - advance it
             recv_offset_ = end_offset;
 
-            // Check if any gaps are now filled
-            while (!gaps_.empty()) {
-                auto& gap = gaps_.front();
-                if (gap.start <= recv_offset_) {
-                    if (gap.end > recv_offset_) {
-                        recv_offset_ = gap.end;
-                    }
-                    gaps_.erase(gaps_.begin());
-                } else {
-                    break;
-                }
-            }
+            // Check if we can coalesce with any recorded segments
+            coalesce_from_recv_offset();
         } else {
-            // Out of order - record gap
-            insert_gap(recv_offset_, offset);
-            // Update recv_offset if this extends contiguous data
-            if (recv_offset_ < end_offset) {
-                recv_offset_ = end_offset;
+            // Out of order - record this segment and a gap
+            // Gap from recv_offset_ to write_offset
+            if (write_offset > recv_offset_) {
+                insert_gap(recv_offset_, write_offset);
+            }
+            // Record the segment we just received
+            record_segment(write_offset, end_offset);
+        }
+
+        return 0;
+    }
+
+    /**
+     * Coalesce segments that are now contiguous with recv_offset_.
+     */
+    void coalesce_from_recv_offset() noexcept {
+        // Check segments_ for data that extends recv_offset_
+        bool progress = true;
+        while (progress) {
+            progress = false;
+            for (auto it = segments_.begin(); it != segments_.end(); ) {
+                if (it->start <= recv_offset_ && it->end > recv_offset_) {
+                    recv_offset_ = it->end;
+                    it = segments_.erase(it);
+                    progress = true;
+                } else {
+                    ++it;
+                }
             }
         }
 
-        data_size_ = std::max(data_size_, static_cast<size_t>(recv_offset_));
-        return 0;
+        // Also update gaps - remove any that are now before recv_offset_
+        while (!gaps_.empty() && gaps_.front().end <= recv_offset_) {
+            gaps_.erase(gaps_.begin());
+        }
+        if (!gaps_.empty() && gaps_.front().start < recv_offset_) {
+            gaps_.front().start = recv_offset_;
+        }
+    }
+
+    /**
+     * Record a received segment for out-of-order data.
+     */
+    void record_segment(uint64_t start, uint64_t end) noexcept {
+        // Merge with existing segments if possible
+        for (auto& seg : segments_) {
+            if (start <= seg.end && end >= seg.start) {
+                // Overlaps - extend
+                seg.start = std::min(seg.start, start);
+                seg.end = std::max(seg.end, end);
+                return;
+            }
+        }
+        // New segment
+        if (segments_.size() < 64) {  // Limit segment tracking
+            segments_.push_back({start, end});
+        }
     }
 
     /**
@@ -253,6 +297,7 @@ public:
         recv_offset_ = 0;
         data_size_ = 0;
         gaps_.clear();
+        segments_.clear();
     }
 
     /**
@@ -278,6 +323,11 @@ public:
 
 private:
     struct Gap {
+        uint64_t start;
+        uint64_t end;
+    };
+
+    struct Segment {
         uint64_t start;
         uint64_t end;
     };
@@ -319,8 +369,9 @@ private:
     uint8_t buffer_[kMaxBufferSize];
     uint64_t read_offset_;     // Next byte to read
     uint64_t recv_offset_;     // Highest contiguous byte received
-    size_t data_size_;         // Total data size received
+    size_t data_size_;         // Highest byte received (may include gaps)
     std::vector<Gap> gaps_;    // Gaps in received data
+    std::vector<Segment> segments_;  // Out-of-order segments received
 
     // Send buffer (for outgoing CRYPTO data)
     uint8_t send_buffer_[kMaxBufferSize];

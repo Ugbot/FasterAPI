@@ -252,12 +252,14 @@ void UnifiedServer::on_cleartext_connection(net::TcpSocket socket, net::EventLoo
     // Create HTTP/1.1 connection
     auto http1_conn = new Http1Connection(fd);
     
-    // Use ultra-fast callback if available (zero allocation path)
+    // Set ultra-fast callback if available (for paths that can bypass routing)
     if (s_ultra_fast_callback_) {
         http1_conn->set_ultra_fast_callback(s_ultra_fast_callback_);
-    } else {
-        // Use fast zero-copy callback for better performance
-        http1_conn->set_fast_request_callback([](const Http1RequestView& view) -> Http1Response {
+    }
+
+    // Always set fast_request_callback for App router fallback
+    // This handles paths not covered by ultra_fast_callback
+    http1_conn->set_fast_request_callback([](const Http1RequestView& view) -> Http1Response {
             Http1Response response;
 
             // Check for WebSocket upgrade request first
@@ -311,9 +313,16 @@ void UnifiedServer::on_cleartext_connection(net::TcpSocket socket, net::EventLoo
                 std::string response_body;
                 uint16_t status_code = 200;
 
+                // Reconstruct full URL with query string
+                std::string full_url(view.path);
+                if (!view.query_string.empty()) {
+                    full_url += '?';
+                    full_url += view.query_string;
+                }
+
                 s_request_handler_(
                     std::string(view.method),
-                    std::string(view.path),
+                    full_url,
                     headers,
                     std::string(view.body),
                     [&status_code, &response_headers, &response_body](
@@ -339,7 +348,6 @@ void UnifiedServer::on_cleartext_connection(net::TcpSocket socket, net::EventLoo
 
             return response;
         });
-    }
 
     t_http1_connections[fd] = std::unique_ptr<Http1Connection>(http1_conn);
 
@@ -644,6 +652,8 @@ void UnifiedServer::handle_http1_connection(
 
                     // Check for pure C++ handler first (bypasses ZMQ entirely)
                     WebSocketHandler* cpp_handler = UnifiedServer::get_websocket_handler(ws_path);
+                    fprintf(stderr, "[WS_HANDLER_CHECK] cpp_handler=%p for path=%s\n", (void*)cpp_handler, ws_path.c_str());
+                    fflush(stderr);
                     if (cpp_handler) {
                         // Pure C++ mode - no ZMQ involved
                         LOG_INFO("WebSocket", "Using pure C++ handler for %s (no ZMQ)", ws_path.c_str());
@@ -705,6 +715,11 @@ void UnifiedServer::handle_http1_connection(
 
                         // Send WS_CONNECT event to Python with handler metadata
                         auto* executor = python::ProcessPoolExecutor::get_instance();
+                        fprintf(stderr, "[WS_CONNECT] executor=%p path=%s conn_id=%lu\n",
+                                 (void*)executor, ws_path.c_str(), conn_id);
+                        fflush(stderr);
+                        LOG_INFO("WebSocket", "WS_CONNECT: executor=%p path=%s conn_id=%lu",
+                                 (void*)executor, ws_path.c_str(), conn_id);
                         if (executor) {
                             // Look up handler metadata for this WebSocket path
                             std::string payload;
@@ -713,17 +728,22 @@ void UnifiedServer::handle_http1_connection(
                                 // Build JSON payload with handler info
                                 payload = "{\"module\":\"" + ws_meta->module_name +
                                          "\",\"function\":\"" + ws_meta->function_name + "\"}";
-                                LOG_DEBUG("WebSocket", "WS_CONNECT with metadata: %s", payload.c_str());
+                                LOG_INFO("WebSocket", "WS_CONNECT with metadata: %s", payload.c_str());
                             } else {
                                 LOG_WARN("WebSocket", "No handler metadata for path: %s", ws_path.c_str());
                             }
-                            executor->send_ws_event(
+                            bool sent = executor->send_ws_event(
                                 python::MessageType::WS_CONNECT,
                                 conn_id,
                                 ws_path,
                                 payload,
                                 false
                             );
+                            fprintf(stderr, "[WS_CONNECT] send_ws_event returned %d\n", sent ? 1 : 0);
+                            fflush(stderr);
+                            LOG_INFO("WebSocket", "WS_CONNECT sent=%d", sent ? 1 : 0);
+                        } else {
+                            LOG_ERROR("WebSocket", "ProcessPoolExecutor instance is NULL!");
                         }
                     }
 
@@ -823,6 +843,125 @@ void UnifiedServer::handle_http1_connection(
         if (using_tls) t_tls_sockets.erase(tls_it);
         ::close(fd);
         do_track_connection_close();
+        return;
+    }
+
+    // Check for WebSocket upgrade transition (ultra-fast callback path)
+    // This catches WebSocket upgrades that were detected in the ultra-fast callback
+    // path where the 101 response is written directly to the buffer
+    if (http1_conn->is_websocket_upgrade() && !http1_conn->has_pending_output()) {
+        fprintf(stderr, "[WS_TRANSITION_END] fd=%d path=%s\n", fd, http1_conn->get_websocket_path().c_str());
+        fflush(stderr);
+        LOG_INFO("WebSocket", "Transitioning fd=%d to WebSocket mode (end of handler), path=%s",
+                 fd, http1_conn->get_websocket_path().c_str());
+
+        // Create WebSocket connection
+        static std::atomic<uint64_t> ws_connection_id_end{1000000};  // Start at high number to avoid conflicts
+        auto ws_conn = std::make_unique<WebSocketConnection>(++ws_connection_id_end);
+        ws_conn->set_socket_fd(fd);
+        ws_conn->set_path(http1_conn->get_websocket_path());
+
+        // Get connection ID and path for callbacks
+        uint64_t conn_id = ws_conn->get_id();
+        std::string ws_path = ws_conn->get_path();
+
+        // Check for pure C++ handler first (bypasses ZMQ entirely)
+        WebSocketHandler* cpp_handler = UnifiedServer::get_websocket_handler(ws_path);
+        fprintf(stderr, "[WS_HANDLER_CHECK_END] cpp_handler=%p for path=%s\n", (void*)cpp_handler, ws_path.c_str());
+        fflush(stderr);
+        if (cpp_handler) {
+            // Pure C++ mode - no ZMQ involved
+            LOG_INFO("WebSocket", "Using pure C++ handler for %s (no ZMQ)", ws_path.c_str());
+            (*cpp_handler)(*ws_conn);  // Let handler set up callbacks
+        } else {
+            // Fall back to ZMQ forwarding to Python
+            ws_conn->on_text_message = [fd, conn_id, ws_path](const std::string& message) {
+                LOG_DEBUG("WebSocket", "fd=%d Received text: %s", fd, message.c_str());
+
+                // Forward to Python handler via ZMQ
+                auto* executor = python::ProcessPoolExecutor::get_instance();
+                if (executor) {
+                    executor->send_ws_event(
+                        python::MessageType::WS_MESSAGE,
+                        conn_id,
+                        ws_path,
+                        message,
+                        false  // is_binary
+                    );
+                }
+            };
+
+            ws_conn->on_binary_message = [fd, conn_id, ws_path](const uint8_t* data, size_t len) {
+                LOG_DEBUG("WebSocket", "fd=%d Received binary: %zu bytes", fd, len);
+
+                // Forward to Python handler via ZMQ
+                auto* executor = python::ProcessPoolExecutor::get_instance();
+                if (executor) {
+                    std::string payload(reinterpret_cast<const char*>(data), len);
+                    executor->send_ws_event(
+                        python::MessageType::WS_MESSAGE,
+                        conn_id,
+                        ws_path,
+                        payload,
+                        true  // is_binary
+                    );
+                }
+            };
+
+            ws_conn->on_close = [fd, conn_id, ws_path](uint16_t code, const char* reason) {
+                LOG_INFO("WebSocket", "fd=%d Connection closed: %d %s", fd, code, reason ? reason : "");
+
+                // Notify Python of disconnect
+                auto* executor = python::ProcessPoolExecutor::get_instance();
+                if (executor) {
+                    executor->send_ws_event(
+                        python::MessageType::WS_DISCONNECT,
+                        conn_id,
+                        ws_path,
+                        "",
+                        false
+                    );
+                }
+            };
+
+            ws_conn->on_error = [fd](const char* error) {
+                LOG_ERROR("WebSocket", "fd=%d Error: %s", fd, error ? error : "unknown");
+            };
+
+            // Send WS_CONNECT event to Python with handler metadata
+            auto* executor = python::ProcessPoolExecutor::get_instance();
+            fprintf(stderr, "[WS_CONNECT_END] executor=%p path=%s conn_id=%lu\n",
+                     (void*)executor, ws_path.c_str(), conn_id);
+            fflush(stderr);
+            LOG_INFO("WebSocket", "WS_CONNECT: executor=%p path=%s conn_id=%lu",
+                     (void*)executor, ws_path.c_str(), conn_id);
+            if (executor) {
+                // Look up handler metadata for this WebSocket path
+                std::string payload;
+                auto* ws_meta = PythonCallbackBridge::get_websocket_handler_metadata(ws_path);
+                if (ws_meta) {
+                    // Build JSON payload with handler info
+                    payload = "{\"module\":\"" + ws_meta->module_name +
+                              "\",\"function\":\"" + ws_meta->function_name + "\"}";
+                }
+                executor->send_ws_event(
+                    python::MessageType::WS_CONNECT,
+                    conn_id,
+                    ws_path,
+                    payload,
+                    false
+                );
+            }
+        }
+
+        // Store WebSocket connection in thread-local map
+        t_websocket_connections[fd] = std::move(ws_conn);
+
+        // Remove HTTP1 connection - it's now a WebSocket
+        t_http1_connections.erase(it);
+
+        // Re-register for WebSocket events
+        event_loop->modify_fd(fd, net::IOEvent::READ | net::IOEvent::EDGE);
     }
 }
 

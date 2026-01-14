@@ -392,10 +392,13 @@ TEST(Http3FrameTest, StreamFrameRoundtrip) {
 
     EXPECT_GT(serialized_len, 0u);
 
-    // Parse
+    // Parse - serialize() writes type byte at position 0, parse() expects it consumed
     StreamFrame parsed;
     size_t consumed;
-    int result = parsed.parse(buffer, serialized_len, consumed);
+    // First byte of serialized buffer contains the frame type with flags
+    uint8_t frame_type = buffer[0];
+    // Pass buffer+1 since parse() expects data after type byte
+    int result = parsed.parse(frame_type, buffer + 1, serialized_len - 1, consumed);
 
     EXPECT_EQ(result, 0);
     EXPECT_EQ(parsed.stream_id, original.stream_id);
@@ -417,10 +420,11 @@ TEST(Http3FrameTest, AckFrameRoundtrip) {
 
     EXPECT_GT(serialized_len, 0u);
 
-    // Parse
+    // Parse - serialize() writes type byte at position 0, parse() expects it consumed
     AckFrame parsed;
     size_t consumed;
-    int result = parsed.parse(buffer, serialized_len, consumed);
+    // Skip the frame type byte (0x02) since parse expects it already consumed
+    int result = parsed.parse(buffer + 1, serialized_len - 1, consumed);
 
     EXPECT_EQ(result, 0);
     EXPECT_EQ(parsed.largest_acked, original.largest_acked);

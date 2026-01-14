@@ -174,6 +174,16 @@ struct FastResponseWriter {
         static constexpr char s[] = "HTTP/1.1 200 OK\r\n";
         return write(s, sizeof(s) - 1);
     }
+
+    bool write_status_201() noexcept {
+        static constexpr char s[] = "HTTP/1.1 201 Created\r\n";
+        return write(s, sizeof(s) - 1);
+    }
+
+    bool write_status_400() noexcept {
+        static constexpr char s[] = "HTTP/1.1 400 Bad Request\r\n";
+        return write(s, sizeof(s) - 1);
+    }
     
     // Write Content-Type: application/json
     bool write_content_type_json() noexcept {

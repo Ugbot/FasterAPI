@@ -284,11 +284,56 @@ jobs:
           retention-days: 30
 
   # ============================================================================
+  # h3i HTTP/3 Compliance Tests
+  # ============================================================================
+  h3i-tests:
+    name: h3i HTTP/3 Tests
+    needs: build
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-ubuntu-24.04-gcc-13
+          path: build
+
+      - name: Make binaries executable
+        run: chmod -R +x build/
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Install h3i
+        run: cargo install h3i
+
+      - name: Run h3i tests
+        run: |
+          python3 tests/h3i/run_h3i_tests.py \
+            --report json \
+            --timeout 60
+        continue-on-error: true
+
+      - name: Upload h3i results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: h3i-results
+          path: tests/h3i/reports/
+
+  # ============================================================================
   # Summary Job
   # ============================================================================
   ci-success:
     name: CI Success
-    needs: [build, test-gtest, test-legacy, sanitizers, benchmarks]
+    needs: [build, test-gtest, test-legacy, sanitizers, benchmarks, h3i-tests]
     runs-on: ubuntu-latest
     if: always()
     steps:

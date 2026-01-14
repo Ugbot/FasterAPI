@@ -263,18 +263,9 @@ result<size_t> Http1Connection::process_input(const uint8_t* data, size_t len) n
             slot.header_offsets[i].value_len = static_cast<uint16_t>(hdr.value.size());
         }
 
-        // Check for body
-        if (slot.has_body) {
-            // Need body data after headers
-            size_t body_available = input_buffer_.size() - slot.buffer_end;
-            if (body_available < slot.content_length) {
-                // Don't have full body yet - wait for more data
-                // Don't advance pipeline yet
-                break;
-            }
-            // Include body in buffer range
-            slot.buffer_end += slot.content_length;
-        }
+        // NOTE: Body is already handled by the parser - it returns -1 if body is incomplete,
+        // and 'consumed' already includes the body bytes. The body data is available via
+        // temp_request.body string_view. No additional body check needed here.
 
         // Update keep-alive based on first request (for connection state)
         if (pipeline_count_ == 0) {
@@ -482,9 +473,7 @@ result<void> Http1Connection::handle_request() noexcept {
 
     // Build response
     LOG_DEBUG("HTTP1", "Building response...");
-
     build_response(response);
-
     LOG_DEBUG("HTTP1", "Response built successfully, size=%zu bytes", output_buffer_.size());
 
     // Don't send here - let UnifiedServer handle sending through event loop
@@ -729,42 +718,56 @@ void Http1Connection::process_pending_requests() noexcept {
         }
         
         // Call the request handler
+        // Try ultra-fast callback first if set
+        bool handled_by_ultra_fast = false;
         if (ultra_fast_callback_) {
             // Ultra-fast path: write directly to pooled buffer, zero allocations
             size_t capacity = 0;
             uint8_t* buf = t_buffer_pool.acquire(capacity);
-            
+
             if (buf) {
                 FastResponseWriter writer(buf, capacity);
                 size_t written = ultra_fast_callback_(view, writer);
-                
+
                 if (written > 0) {
+                    handled_by_ultra_fast = true;
                     resp_slot.data = buf;
                     resp_slot.size = written;
                     resp_slot.capacity = capacity;
                     resp_slot.owns_buffer = true;
                     resp_slot.ready = true;
+
+                    // Check if this is a WebSocket upgrade response (HTTP/1.1 101)
+                    // Ultra-fast callback doesn't set websocket_upgrade flag, so detect it here
+                    static constexpr char ws_upgrade_prefix[] = "HTTP/1.1 101";
+                    if (written >= sizeof(ws_upgrade_prefix) - 1 &&
+                        memcmp(buf, ws_upgrade_prefix, sizeof(ws_upgrade_prefix) - 1) == 0) {
+                        pending_websocket_upgrade_ = true;
+                        pending_websocket_path_ = std::string(view.path);
+                        LOG_DEBUG("HTTP1", "Detected WebSocket upgrade via ultra-fast callback for path: %s",
+                                  pending_websocket_path_.c_str());
+                    }
+                    req_slot.processed = true;
                 } else {
-                    // Callback failed - return 500 using the pooled buffer
-                    static constexpr char err_resp[] = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 21\r\nConnection: keep-alive\r\n\r\nInternal Server Error";
-                    memcpy(buf, err_resp, sizeof(err_resp) - 1);
-                    resp_slot.data = buf;
-                    resp_slot.size = sizeof(err_resp) - 1;
-                    resp_slot.capacity = capacity;
-                    resp_slot.owns_buffer = true;
-                    resp_slot.ready = true;
+                    // Callback returned 0 - didn't handle this path
+                    // Release buffer and fall through to normal routing
+                    t_buffer_pool.release(buf);
                 }
             } else {
                 // Pool exhausted - use static error response
+                handled_by_ultra_fast = true;
                 static constexpr char err_resp[] = "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 19\r\nConnection: close\r\n\r\nService Unavailable";
                 resp_slot.data = const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(err_resp));
                 resp_slot.size = sizeof(err_resp) - 1;
                 resp_slot.capacity = 0;
                 resp_slot.owns_buffer = false;  // Don't release static buffer
                 resp_slot.ready = true;
+                req_slot.processed = true;
             }
-            req_slot.processed = true;
-        } else {
+        }
+
+        // Normal routing path (used when ultra_fast_callback_ is not set or returned 0)
+        if (!handled_by_ultra_fast) {
             Http1Response response;
             if (fast_request_callback_) {
                 response = fast_request_callback_(view);
@@ -774,9 +777,15 @@ void Http1Connection::process_pending_requests() noexcept {
                 for (size_t h = 0; h < view.header_count; h++) {
                     headers[std::string(view.headers[h].first)] = std::string(view.headers[h].second);
                 }
+                // Reconstruct full URL with query string
+                std::string full_url(view.path);
+                if (!view.query_string.empty()) {
+                    full_url += '?';
+                    full_url += view.query_string;
+                }
                 response = request_callback_(
                     std::string(view.method),
-                    std::string(view.path),
+                    full_url,
                     headers,
                     std::string(view.body)
                 );
@@ -789,6 +798,15 @@ void Http1Connection::process_pending_requests() noexcept {
             
             // Build response into the pipeline slot
             build_pipelined_response(response, resp_slot);
+
+            // Check if this is a WebSocket upgrade response (fast_request_callback path)
+            if (response.websocket_upgrade) {
+                pending_websocket_upgrade_ = true;
+                pending_websocket_path_ = response.websocket_path;
+                LOG_DEBUG("HTTP1", "WebSocket upgrade via fast_request_callback for path: %s",
+                          pending_websocket_path_.c_str());
+            }
+
             req_slot.processed = true;
         }
         

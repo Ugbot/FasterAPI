@@ -878,6 +878,113 @@ PythonCallbackBridge::invoke_handler_async(
         }
     }
 
+    // Build __request_data__ for Request injection in ZMQ workers
+    // This provides the raw HTTP request data needed to construct a Request object
+    PyObject* request_data = PyDict_New();
+    if (request_data) {
+        // method
+        PyObject* py_method = PyUnicode_FromString(method.c_str());
+        if (py_method) {
+            PyDict_SetItemString(request_data, "method", py_method);
+            Py_DECREF(py_method);
+        }
+
+        // path (without query string)
+        PyObject* py_path = PyUnicode_FromString(route_path.c_str());
+        if (py_path) {
+            PyDict_SetItemString(request_data, "path", py_path);
+            Py_DECREF(py_path);
+        }
+
+        // query string
+        std::string query_string;
+        if (query_pos != std::string::npos) {
+            query_string = path.substr(query_pos + 1);
+        }
+        PyObject* py_query = PyUnicode_FromString(query_string.c_str());
+        if (py_query) {
+            PyDict_SetItemString(request_data, "query", py_query);
+            Py_DECREF(py_query);
+        }
+
+        // headers dict
+        PyObject* py_headers = PyDict_New();
+        if (py_headers) {
+            for (const auto& [hdr_name, hdr_value] : headers) {
+                PyObject* py_val = PyUnicode_FromString(hdr_value.c_str());
+                if (py_val) {
+                    PyDict_SetItemString(py_headers, hdr_name.c_str(), py_val);
+                    Py_DECREF(py_val);
+                }
+            }
+            PyDict_SetItemString(request_data, "headers", py_headers);
+            Py_DECREF(py_headers);
+        }
+
+        // query_params dict
+        PyObject* py_query_params = PyDict_New();
+        if (py_query_params) {
+            for (const auto& [qp_name, qp_value] : query_params) {
+                PyObject* py_val = PyUnicode_FromString(qp_value.c_str());
+                if (py_val) {
+                    PyDict_SetItemString(py_query_params, qp_name.c_str(), py_val);
+                    Py_DECREF(py_val);
+                }
+            }
+            PyDict_SetItemString(request_data, "query_params", py_query_params);
+            Py_DECREF(py_query_params);
+        }
+
+        // path_params dict - extract if route_meta exists
+        PyObject* py_path_params = PyDict_New();
+        if (py_path_params) {
+            if (route_meta) {
+                auto extracted_path_params = route_meta->compiled_pattern.extract(route_path);
+                for (const auto& [pp_name, pp_value] : extracted_path_params) {
+                    PyObject* py_val = PyUnicode_FromString(pp_value.c_str());
+                    if (py_val) {
+                        PyDict_SetItemString(py_path_params, pp_name.c_str(), py_val);
+                        Py_DECREF(py_val);
+                    }
+                }
+            }
+            PyDict_SetItemString(request_data, "path_params", py_path_params);
+            Py_DECREF(py_path_params);
+        }
+
+        // body
+        PyObject* py_body = PyUnicode_FromString(body.c_str());
+        if (py_body) {
+            PyDict_SetItemString(request_data, "body", py_body);
+            Py_DECREF(py_body);
+        }
+
+        // client_ip - placeholder for now (TODO: pass from TCP connection)
+        PyObject* py_client_ip = PyUnicode_FromString("127.0.0.1");
+        if (py_client_ip) {
+            PyDict_SetItemString(request_data, "client_ip", py_client_ip);
+            Py_DECREF(py_client_ip);
+        }
+
+        // client_port - placeholder for now (TODO: pass from TCP connection)
+        PyObject* py_client_port = PyLong_FromLong(0);
+        if (py_client_port) {
+            PyDict_SetItemString(request_data, "client_port", py_client_port);
+            Py_DECREF(py_client_port);
+        }
+
+        // scope - empty dict for now (TODO: add ASGI scope data)
+        PyObject* py_scope = PyDict_New();
+        if (py_scope) {
+            PyDict_SetItemString(request_data, "scope", py_scope);
+            Py_DECREF(py_scope);
+        }
+
+        // Add __request_data__ to kwargs
+        PyDict_SetItemString(kwargs, "__request_data__", request_data);
+        Py_DECREF(request_data);
+    }
+
     PyObject* empty_args = PyTuple_New(0);
 
     PyGILState_Release(gstate);
@@ -908,6 +1015,60 @@ PythonCallbackBridge::invoke_handler_async(
 
         // handlers_ value is std::pair<int, PyObject*>, get the PyObject*
         PyObject* handler = handler_it->second.second;
+
+        // Call fasterapi.core.param_resolver.resolve_params(handler, kwargs)
+        // This handles filtering __ keys, type coercion, and Request injection
+        PyObject* param_resolver_module = PyImport_ImportModule("fasterapi.core.param_resolver");
+        PyObject* resolved_kwargs = nullptr;
+
+        if (param_resolver_module) {
+            PyObject* resolve_params_func = PyObject_GetAttrString(param_resolver_module, "resolve_params");
+            if (resolve_params_func) {
+                resolved_kwargs = PyObject_CallFunctionObjArgs(resolve_params_func, handler, kwargs, nullptr);
+                if (!resolved_kwargs) {
+                    // Check if it's a validation error (ValueError with JSON)
+                    if (PyErr_ExceptionMatches(PyExc_ValueError)) {
+                        PyObject *type, *value, *traceback;
+                        PyErr_Fetch(&type, &value, &traceback);
+                        const char* error_msg = PyUnicode_AsUTF8(value);
+                        std::string error_body = error_msg ? error_msg : "{\"detail\":\"Validation error\"}";
+
+                        Py_XDECREF(type);
+                        Py_XDECREF(value);
+                        Py_XDECREF(traceback);
+                        Py_DECREF(resolve_params_func);
+                        Py_DECREF(param_resolver_module);
+                        Py_DECREF(empty_args);
+                        Py_DECREF(kwargs);
+                        PyGILState_Release(exec_gstate);
+
+                        HandlerResult error_result;
+                        error_result.status_code = 422;
+                        error_result.content_type = "application/json";
+                        error_result.body = error_body;
+                        return future<result<HandlerResult>>::make_ready(ok(std::move(error_result)));
+                    }
+                    PyErr_Print();
+                    PyErr_Clear();
+                    // Fallback: use original kwargs
+                    resolved_kwargs = kwargs;
+                    Py_INCREF(resolved_kwargs);
+                }
+                Py_DECREF(resolve_params_func);
+            } else {
+                PyErr_Clear();
+                // Fallback: use original kwargs
+                resolved_kwargs = kwargs;
+                Py_INCREF(resolved_kwargs);
+            }
+            Py_DECREF(param_resolver_module);
+        } else {
+            PyErr_Clear();
+            LOG_WARN("PythonCallback", "Failed to import param_resolver, using raw kwargs");
+            // Fallback: use original kwargs
+            resolved_kwargs = kwargs;
+            Py_INCREF(resolved_kwargs);
+        }
 
         // Check if handler is async using inspect.iscoroutinefunction()
         PyObject* inspect_module = PyImport_ImportModule("inspect");
@@ -953,7 +1114,7 @@ PythonCallbackBridge::invoke_handler_async(
 
         if (is_async) {
             // Async handler: call it to get coroutine, then use asyncio.run() to execute
-            PyObject* coro = PyObject_Call(handler, empty_args, kwargs);
+            PyObject* coro = PyObject_Call(handler, empty_args, resolved_kwargs);
 
             if (!coro) {
                 PyErr_Print();
@@ -1012,7 +1173,7 @@ PythonCallbackBridge::invoke_handler_async(
             }
         } else {
             // Sync handler: call directly
-            result_obj = PyObject_Call(handler, empty_args, kwargs);
+            result_obj = PyObject_Call(handler, empty_args, resolved_kwargs);
 
             if (!result_obj) {
                 PyErr_Print();
@@ -1064,6 +1225,7 @@ PythonCallbackBridge::invoke_handler_async(
         Py_DECREF(result_obj);
         Py_DECREF(empty_args);
         Py_DECREF(kwargs);
+        Py_DECREF(resolved_kwargs);
         PyGILState_Release(exec_gstate);
 
         return future<result<HandlerResult>>::make_ready(ok(std::move(final_result)));

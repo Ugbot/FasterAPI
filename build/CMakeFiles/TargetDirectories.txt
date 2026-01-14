@@ -39,6 +39,7 @@
 /Users/bengamble/FasterAPI/build/CMakeFiles/1mrc_cpp_server.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/1mrc_async_server.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/1mrc_native_lockfree.dir
+/Users/bengamble/FasterAPI/build/CMakeFiles/1mrc_app_server.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/bench_gil_strategies.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/bench_queue_performance.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/fasterapi_mcp.dir
@@ -60,6 +61,7 @@
 /Users/bengamble/FasterAPI/build/CMakeFiles/test_quic_handshake.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/webtransport_chat_h3.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/test_pure_cpp_websocket_server.dir
+/Users/bengamble/FasterAPI/build/CMakeFiles/websocket_echo_server.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/http2.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/webtransport.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/gtest_ring_buffer.dir
@@ -84,6 +86,7 @@
 /Users/bengamble/FasterAPI/build/CMakeFiles/gtest_quic_congestion.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/gtest_quic_frames.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/gtest_quic_ack_tracker.dir
+/Users/bengamble/FasterAPI/build/CMakeFiles/gtest_stream_reassembly.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/gtest_http3_integration.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/gtest_metrics.dir
 /Users/bengamble/FasterAPI/build/CMakeFiles/gtest_logger.dir

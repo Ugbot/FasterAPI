@@ -20493,3 +20493,83 @@ events:
         
       exitCode: 0
 ...
+
+---
+events:
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/opt/homebrew/share/cmake/Modules/Internal/CheckSourceCompiles.cmake:104 (try_compile)"
+      - "/opt/homebrew/share/cmake/Modules/Internal/CheckCompilerFlag.cmake:18 (cmake_check_source_compiles)"
+      - "/opt/homebrew/share/cmake/Modules/CheckCCompilerFlag.cmake:105 (cmake_check_compiler_flag)"
+      - "build/cpm-cache/zstd/5375622b5fd73dea578f509561685c3376dce674/build/cmake/CMakeModules/AddZstdCompilationFlags.cmake:20 (CHECK_C_COMPILER_FLAG)"
+      - "build/cpm-cache/zstd/5375622b5fd73dea578f509561685c3376dce674/build/cmake/CMakeModules/AddZstdCompilationFlags.cmake:75 (EnableCompilerFlag)"
+      - "build/cpm-cache/zstd/5375622b5fd73dea578f509561685c3376dce674/build/cmake/CMakeLists.txt:58 (ADD_ZSTD_COMPILATION_FLAGS)"
+    checks:
+      - "Performing Test C_FLAG_DDEBUGLEVEL_1"
+    directories:
+      source: "/Users/bengamble/FasterAPI/build/CMakeFiles/CMakeScratch/TryCompile-nyLmYL"
+      binary: "/Users/bengamble/FasterAPI/build/CMakeFiles/CMakeScratch/TryCompile-nyLmYL"
+    cmakeVariables:
+      CMAKE_C_FLAGS: " -Wall -Wextra -Wundef -Wshadow -Wcast-align -Wcast-qual -Wstrict-prototypes"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/Users/bengamble/FasterAPI/build/CPM_modules;;/Users/bengamble/FasterAPI/build/cpm-cache/zstd/5375622b5fd73dea578f509561685c3376dce674/build/cmake/CMakeModules"
+      CMAKE_OSX_ARCHITECTURES: "arm64"
+      CMAKE_OSX_DEPLOYMENT_TARGET: ""
+      CMAKE_OSX_SYSROOT: ""
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "C_FLAG_DDEBUGLEVEL_1"
+      cached: true
+      stdout: |
+        Change Dir: '/Users/bengamble/FasterAPI/build/CMakeFiles/CMakeScratch/TryCompile-nyLmYL'
+        
+        Run Build Command(s): /opt/homebrew/bin/cmake -E env VERBOSE=1 /usr/bin/make -f Makefile cmTC_59dba/fast
+        /Library/Developer/CommandLineTools/usr/bin/make  -f CMakeFiles/cmTC_59dba.dir/build.make CMakeFiles/cmTC_59dba.dir/build
+        Building C object CMakeFiles/cmTC_59dba.dir/src.c.o
+        /usr/bin/cc -DC_FLAG_DDEBUGLEVEL_1 -DDEBUGLEVEL=1  -Wall -Wextra -Wundef -Wshadow -Wcast-align -Wcast-qual -Wstrict-prototypes  -std=gnu11 -arch arm64 -fPIE -MD -MT CMakeFiles/cmTC_59dba.dir/src.c.o -MF CMakeFiles/cmTC_59dba.dir/src.c.o.d -o CMakeFiles/cmTC_59dba.dir/src.c.o -c /Users/bengamble/FasterAPI/build/CMakeFiles/CMakeScratch/TryCompile-nyLmYL/src.c
+        Linking C executable cmTC_59dba
+        /opt/homebrew/bin/cmake -E cmake_link_script CMakeFiles/cmTC_59dba.dir/link.txt --verbose=1
+        /usr/bin/cc  -Wall -Wextra -Wundef -Wshadow -Wcast-align -Wcast-qual -Wstrict-prototypes  -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/cmTC_59dba.dir/src.c.o -o cmTC_59dba
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/opt/homebrew/share/cmake/Modules/Internal/CheckSourceCompiles.cmake:104 (try_compile)"
+      - "/opt/homebrew/share/cmake/Modules/Internal/CheckCompilerFlag.cmake:18 (cmake_check_source_compiles)"
+      - "/opt/homebrew/share/cmake/Modules/CheckCXXCompilerFlag.cmake:103 (cmake_check_compiler_flag)"
+      - "build/cpm-cache/zstd/5375622b5fd73dea578f509561685c3376dce674/build/cmake/CMakeModules/AddZstdCompilationFlags.cmake:26 (CHECK_CXX_COMPILER_FLAG)"
+      - "build/cpm-cache/zstd/5375622b5fd73dea578f509561685c3376dce674/build/cmake/CMakeModules/AddZstdCompilationFlags.cmake:75 (EnableCompilerFlag)"
+      - "build/cpm-cache/zstd/5375622b5fd73dea578f509561685c3376dce674/build/cmake/CMakeLists.txt:58 (ADD_ZSTD_COMPILATION_FLAGS)"
+    checks:
+      - "Performing Test CXX_FLAG_DDEBUGLEVEL_1"
+    directories:
+      source: "/Users/bengamble/FasterAPI/build/CMakeFiles/CMakeScratch/TryCompile-cOPIHo"
+      binary: "/Users/bengamble/FasterAPI/build/CMakeFiles/CMakeScratch/TryCompile-cOPIHo"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: " -Wall -Wextra -Wundef -Wshadow -Wcast-align -Wcast-qual"
+      CMAKE_CXX_FLAGS_DEBUG: "-O0 -g -fno-exceptions -fno-rtti "
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/Users/bengamble/FasterAPI/build/CPM_modules;;/Users/bengamble/FasterAPI/build/cpm-cache/zstd/5375622b5fd73dea578f509561685c3376dce674/build/cmake/CMakeModules"
+      CMAKE_OSX_ARCHITECTURES: "arm64"
+      CMAKE_OSX_DEPLOYMENT_TARGET: ""
+      CMAKE_OSX_SYSROOT: ""
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "CXX_FLAG_DDEBUGLEVEL_1"
+      cached: true
+      stdout: |
+        Change Dir: '/Users/bengamble/FasterAPI/build/CMakeFiles/CMakeScratch/TryCompile-cOPIHo'
+        
+        Run Build Command(s): /opt/homebrew/bin/cmake -E env VERBOSE=1 /usr/bin/make -f Makefile cmTC_21490/fast
+        /Library/Developer/CommandLineTools/usr/bin/make  -f CMakeFiles/cmTC_21490.dir/build.make CMakeFiles/cmTC_21490.dir/build
+        Building CXX object CMakeFiles/cmTC_21490.dir/src.cxx.o
+        /usr/bin/c++ -DCXX_FLAG_DDEBUGLEVEL_1 -DDEBUGLEVEL=1  -Wall -Wextra -Wundef -Wshadow -Wcast-align -Wcast-qual  -std=gnu++20 -arch arm64 -fPIE -MD -MT CMakeFiles/cmTC_21490.dir/src.cxx.o -MF CMakeFiles/cmTC_21490.dir/src.cxx.o.d -o CMakeFiles/cmTC_21490.dir/src.cxx.o -c /Users/bengamble/FasterAPI/build/CMakeFiles/CMakeScratch/TryCompile-cOPIHo/src.cxx
+        Linking CXX executable cmTC_21490
+        /opt/homebrew/bin/cmake -E cmake_link_script CMakeFiles/cmTC_21490.dir/link.txt --verbose=1
+        /usr/bin/c++  -Wall -Wextra -Wundef -Wshadow -Wcast-align -Wcast-qual  -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/cmTC_21490.dir/src.cxx.o -o cmTC_21490
+        
+      exitCode: 0
+...

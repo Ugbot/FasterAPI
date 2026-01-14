@@ -82,7 +82,7 @@ int Http3Handler::process_datagram(const uint8_t* data, size_t length,
     // For each bidirectional stream, check if we have HTTP/3 data
     for (size_t stream_id = 0; stream_id < 1000; stream_id += 4) {
         quic::QUICStream* stream = conn->get_stream(stream_id);
-        if (stream && stream->recv_buffer().available() > 0) {
+        if (stream && stream->recv_available() > 0) {
             process_http3_stream(conn, stream_id, now);
         }
     }

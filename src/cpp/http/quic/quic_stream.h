@@ -1,6 +1,7 @@
 #pragma once
 
 #include "quic_frames.h"
+#include "stream_reassembly_buffer.h"
 #include "../../core/ring_buffer.h"
 #include <cstdint>
 #include <atomic>
@@ -52,7 +53,7 @@ public:
           fin_sent_(false),
           fin_received_(false),
           send_buffer_(64 * 1024),  // 64KB send buffer
-          recv_buffer_(64 * 1024)   // 64KB receive buffer
+          reassembly_buffer_()      // 64KB receive buffer with reassembly
     {
         // Determine stream type from ID
         uint8_t type_bits = stream_id & 0x03;
@@ -120,22 +121,27 @@ public:
     
     /**
      * Read data from stream (QUIC -> application).
-     * 
+     *
      * @param data Output buffer
      * @param max_length Maximum bytes to read
      * @return Number of bytes read, or -1 on error
      */
     ssize_t read(uint8_t* data, size_t max_length) noexcept {
         if (state_ == StreamState::RECV_CLOSED || state_ == StreamState::CLOSED) {
-            return 0;  // No more data
+            // Check if there's still data to deliver
+            if (reassembly_buffer_.contiguous_available() == 0) {
+                return 0;  // No more data
+            }
         }
-        
-        return recv_buffer_.read(data, max_length);
+
+        return reassembly_buffer_.read(data, max_length);
     }
     
     /**
      * Receive STREAM frame data.
-     * 
+     *
+     * Handles in-order and out-of-order delivery via reassembly buffer.
+     *
      * @param frame STREAM frame
      * @return 0 on success, -1 on error
      */
@@ -144,29 +150,31 @@ public:
         if (frame.offset + frame.length > max_recv_offset_) {
             return -1;  // Flow control violation
         }
-        
-        // Handle out-of-order delivery
-        if (frame.offset == recv_offset_) {
-            // In-order data
-            recv_buffer_.write(frame.data, frame.length);
-            recv_offset_ += frame.length;
-        } else if (frame.offset > recv_offset_) {
-            // Out-of-order: store for later
-            // TODO: Implement reassembly buffer
-            return -1;  // Simplified: reject out-of-order for now
+
+        // Write to reassembly buffer (handles in-order and out-of-order)
+        if (frame.length > 0) {
+            ssize_t written = reassembly_buffer_.write_at(frame.offset, frame.data, frame.length);
+            if (written < 0) {
+                return -1;  // Buffer error (capacity or too many gaps)
+            }
         }
-        // Ignore duplicate/old data
-        
+
+        // Update recv_offset to track highest contiguous offset
+        recv_offset_ = reassembly_buffer_.bytes_consumed() +
+                       reassembly_buffer_.contiguous_available();
+
         // Handle FIN
         if (frame.fin) {
             fin_received_ = true;
+            reassembly_buffer_.set_fin_offset(frame.offset + frame.length);
+
             if (state_ == StreamState::OPEN) {
                 state_ = StreamState::RECV_CLOSED;
             } else if (state_ == StreamState::SEND_CLOSED) {
                 state_ = StreamState::CLOSED;
             }
         }
-        
+
         return 0;
     }
     
@@ -249,7 +257,7 @@ public:
     void reset() noexcept {
         state_ = StreamState::RESET;
         send_buffer_.clear();
-        recv_buffer_.clear();
+        reassembly_buffer_.clear();
     }
     
     /**
@@ -258,9 +266,16 @@ public:
     core::RingBuffer& send_buffer() noexcept { return send_buffer_; }
 
     /**
-     * Get receive buffer reference (for zero-copy writes).
+     * Get receive reassembly buffer reference.
      */
-    core::RingBuffer& recv_buffer() noexcept { return recv_buffer_; }
+    StreamReassemblyBuffer& reassembly_buffer() noexcept { return reassembly_buffer_; }
+
+    /**
+     * Get amount of contiguous data available to read.
+     */
+    size_t recv_available() const noexcept {
+        return reassembly_buffer_.contiguous_available();
+    }
 
     /**
      * Check if there's data to send.
@@ -364,9 +379,9 @@ private:
     bool fin_sent_;
     bool fin_received_;
     
-    // Buffers (using pre-allocated ring buffers)
-    core::RingBuffer send_buffer_;
-    core::RingBuffer recv_buffer_;
+    // Buffers
+    core::RingBuffer send_buffer_;         // Send buffer (application -> network)
+    StreamReassemblyBuffer reassembly_buffer_;  // Receive buffer with out-of-order support
     
     bool should_send_fin() const noexcept {
         return !fin_sent_ && (state_ == StreamState::SEND_CLOSED || 

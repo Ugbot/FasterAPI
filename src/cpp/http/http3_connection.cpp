@@ -107,7 +107,7 @@ int Http3Connection::process_datagram(const uint8_t* data, size_t length, uint64
         // Collect streams that need processing
         for (auto& [stream_id, stream_state] : stream_states_) {
             quic::QUICStream* stream = quic_conn_->get_stream(stream_id);
-            if (stream && stream->recv_buffer().available() > 0) {
+            if (stream && stream->recv_available() > 0) {
                 streams_to_process.push_back(stream_id);
             }
         }
@@ -117,7 +117,7 @@ int Http3Connection::process_datagram(const uint8_t* data, size_t length, uint64
         if (is_server_) {
             for (uint64_t stream_id = 0; stream_id < 1000; stream_id += 4) {
                 quic::QUICStream* stream = quic_conn_->get_stream(stream_id);
-                if (stream && stream->recv_buffer().available() > 0) {
+                if (stream && stream->recv_available() > 0) {
                     if (stream_states_.find(stream_id) == stream_states_.end()) {
                         // New stream
                         streams_to_process.push_back(stream_id);

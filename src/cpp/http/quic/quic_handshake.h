@@ -57,6 +57,35 @@ inline const char* handshake_state_name(HandshakeState state) noexcept {
 }
 
 /**
+ * Detect AEAD algorithm from TLS cipher suite.
+ *
+ * @param ssl SSL connection object
+ * @return Detected algorithm (defaults to AES_128_GCM if detection fails)
+ */
+inline AeadAlgorithm detect_cipher_from_ssl(SSL* ssl) noexcept {
+    if (!ssl) return AeadAlgorithm::AES_128_GCM;
+
+    const SSL_CIPHER* cipher = SSL_get_current_cipher(ssl);
+    if (!cipher) return AeadAlgorithm::AES_128_GCM;
+
+    // TLS 1.3 cipher suite IDs (RFC 8446)
+    // 0x1301 = TLS_AES_128_GCM_SHA256
+    // 0x1302 = TLS_AES_256_GCM_SHA384
+    // 0x1303 = TLS_CHACHA20_POLY1305_SHA256
+    uint32_t cipher_id = SSL_CIPHER_get_id(cipher) & 0xFFFF;
+
+    switch (cipher_id) {
+        case 0x1302:
+            return AeadAlgorithm::AES_256_GCM;
+        case 0x1303:
+            return AeadAlgorithm::CHACHA20_POLY1305;
+        case 0x1301:
+        default:
+            return AeadAlgorithm::AES_128_GCM;
+    }
+}
+
+/**
  * QUIC Handshake Manager.
  *
  * Coordinates:
@@ -452,9 +481,15 @@ private:
                               bool is_write) noexcept {
         size_t idx = static_cast<size_t>(level);
 
+        // Detect cipher suite from TLS (for HANDSHAKE and 1-RTT levels)
+        // Initial level always uses AES-128-GCM per RFC 9001
+        AeadAlgorithm algo = (level == EncryptionLevel::INITIAL)
+            ? AeadAlgorithm::AES_128_GCM
+            : detect_cipher_from_ssl(tls_.ssl());
+
         // Derive packet keys from secret
         PacketProtectionKeys keys;
-        if (derive_packet_keys(secret, secret_len, AeadAlgorithm::AES_128_GCM, keys) != 0) {
+        if (derive_packet_keys(secret, secret_len, algo, keys) != 0) {
             state_ = HandshakeState::FAILED;
             return;
         }

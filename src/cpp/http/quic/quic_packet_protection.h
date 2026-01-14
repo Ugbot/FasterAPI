@@ -826,9 +826,14 @@ inline uint64_t decode_packet_number(uint64_t truncated, size_t pn_len,
     // candidate_pn = (expected_pn & ~pn_mask) | truncated
     uint64_t candidate = (expected_pn & ~pn_mask) | truncated;
 
-    if (candidate <= expected_pn - pn_hwin && candidate < (1ULL << 62) - pn_win) {
+    // If the candidate is too far below expected, add a window
+    // NOTE: Must check expected_pn >= pn_hwin to avoid unsigned underflow
+    if (expected_pn >= pn_hwin &&
+        candidate <= expected_pn - pn_hwin &&
+        candidate < (1ULL << 62) - pn_win) {
         return candidate + pn_win;
     }
+    // If the candidate is too far above expected, subtract a window
     if (candidate > expected_pn + pn_hwin && candidate >= pn_win) {
         return candidate - pn_win;
     }

@@ -241,6 +241,13 @@ private:
     // Using SPSC since only response_reader_loop pushes and event loop pops
     std::unique_ptr<AeronSPSCQueue<WsResponse>> ws_response_queue_;
 
+    // WebSocket connection_id -> worker_id affinity tracking
+    // When a WS_CONNECT is sent, we record which worker (round-robin) received it.
+    // Subsequent WS_MESSAGE and WS_DISCONNECT must go to the same worker.
+    std::unordered_map<uint64_t, uint32_t> ws_conn_to_worker_;
+    std::mutex ws_conn_mutex_;
+    std::atomic<uint32_t> ws_next_worker_{0};  // Round-robin counter for WS_CONNECT
+
     // Singleton
     static std::unique_ptr<ProcessPoolExecutor> instance_;
     static std::mutex instance_mutex_;

@@ -1420,6 +1420,16 @@ if (FA_BUILD_HTTP)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks"
     )
 
+    # 1MRC - App Server version (uses fasterapi::App with pure_cpp_mode)
+    # This is the recommended way to build 1MRC with the full FasterAPI framework
+    add_executable(1mrc_app_server benchmarks/1mrc/cpp/1mrc_app_server.cpp)
+    target_include_directories(1mrc_app_server PRIVATE ${CMAKE_SOURCE_DIR})
+    target_compile_options(1mrc_app_server PRIVATE -O3 -pthread)
+    target_link_libraries(1mrc_app_server PRIVATE fasterapi_http)
+    set_target_properties(1mrc_app_server PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks"
+    )
+
     # Python interop benchmarks
     add_executable(bench_gil_strategies benchmarks/python_interop/bench_gil_strategies.cpp
         ${PYTHON_SOURCES}
@@ -1658,6 +1668,14 @@ if (FA_BUILD_EXAMPLES AND FA_BUILD_HTTP)
     target_include_directories(test_pure_cpp_websocket_server PRIVATE ${CMAKE_SOURCE_DIR})
     target_link_libraries(test_pure_cpp_websocket_server PRIVATE fasterapi_http)
     set_target_properties(test_pure_cpp_websocket_server PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+    )
+
+    # WebSocket Echo Server - for Autobahn testsuite compliance testing
+    add_executable(websocket_echo_server tests/autobahn/websocket_echo_server.cpp)
+    target_include_directories(websocket_echo_server PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(websocket_echo_server PRIVATE fasterapi_http)
+    set_target_properties(websocket_echo_server PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
     )
 
@@ -1973,6 +1991,12 @@ if(FA_BUILD_GTEST AND TARGET gtest)
         tests/gtest/gtest_quic_ack_tracker.cpp
     )
     target_link_libraries(gtest_quic_ack_tracker PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    # QUIC Stream Reassembly Buffer tests
+    add_gtest_test(gtest_stream_reassembly
+        tests/gtest/gtest_stream_reassembly.cpp
+    )
+    target_link_libraries(gtest_stream_reassembly PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
 
     # HTTP/3 integration tests
     add_gtest_test(gtest_http3_integration

@@ -70,6 +70,7 @@ async def resolve_dependency(
     request: Any,
     path_params: Dict[str, Any],
     query_params: Dict[str, Any],
+    dependency_overrides: Optional[Dict[Callable, Callable]] = None,
 ) -> Any:
     """
     Resolve a single dependency.
@@ -81,6 +82,7 @@ async def resolve_dependency(
         request: The HTTP request object
         path_params: Extracted path parameters
         query_params: Extracted query parameters
+        dependency_overrides: Optional dict mapping original deps to overrides (for testing)
 
     Returns:
         The resolved dependency value
@@ -98,14 +100,19 @@ async def resolve_dependency(
         cleanup_stack = []
         _cleanup_stack.set(cleanup_stack)
 
-    # Check cache
-    cache_key = id(depends.dependency)
-    if depends.use_cache and cache_key in cache:
-        return cache[cache_key]
-
     dep_func = depends.dependency
     if dep_func is None:
         raise DependencyError("Dependency callable is None")
+
+    # Check for dependency override (FastAPI-compatible testing pattern)
+    original_dep_func = dep_func
+    if dependency_overrides and dep_func in dependency_overrides:
+        dep_func = dependency_overrides[dep_func]
+
+    # Check cache (use original func as key for consistency)
+    cache_key = id(original_dep_func)
+    if depends.use_cache and cache_key in cache:
+        return cache[cache_key]
 
     # Get the dependency function's signature
     try:
@@ -134,6 +141,7 @@ async def resolve_dependency(
                     request,
                     path_params,
                     query_params,
+                    dependency_overrides,
                 )
             # Check path params
             elif dep_param_name in path_params:

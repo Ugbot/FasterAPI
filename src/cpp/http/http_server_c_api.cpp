@@ -143,6 +143,7 @@ int http_add_route(
         // Build full URL with query string for parameter extraction
         std::string full_url = req->get_path();
         const std::string& query = req->get_query();
+
         if (!query.empty()) {
             full_url += "?" + query;
         }

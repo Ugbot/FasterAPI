@@ -560,3 +560,262 @@ class TestClient:
 
         if phase_failed and phase == "startup":
             raise RuntimeError(f"Lifespan startup failed: {failure_message}")
+
+    def websocket_connect(
+        self,
+        url: str,
+        subprotocols: Optional[List[str]] = None,
+        headers: Optional[Dict[str, str]] = None,
+    ) -> "WebSocketTestSession":
+        """
+        Connect to a WebSocket endpoint for testing.
+
+        Usage:
+            with client.websocket_connect("/ws/chat") as ws:
+                ws.send_text("Hello")
+                response = ws.receive_text()
+                assert response == "Echo: Hello"
+
+        Args:
+            url: WebSocket URL path (e.g., "/ws/echo")
+            subprotocols: List of WebSocket subprotocols
+            headers: Additional headers to send
+
+        Returns:
+            WebSocketTestSession context manager
+        """
+        return WebSocketTestSession(
+            self.app,
+            url,
+            subprotocols=subprotocols,
+            headers=headers,
+            base_url=self.base_url,
+        )
+
+
+class WebSocketTestSession:
+    """
+    WebSocket test session for simulating WebSocket connections.
+
+    Provides send/receive methods that work with ASGI WebSocket protocol.
+    Used as a context manager.
+    """
+
+    def __init__(
+        self,
+        app: Any,
+        url: str,
+        subprotocols: Optional[List[str]] = None,
+        headers: Optional[Dict[str, str]] = None,
+        base_url: str = "http://testserver",
+    ):
+        self.app = app
+        self.url = url
+        self.subprotocols = subprotocols or []
+        self.headers = headers or {}
+        self.base_url = base_url
+
+        # Message queues
+        self._receive_queue: List[Dict[str, Any]] = []
+        self._send_queue: List[Dict[str, Any]] = []
+        self._closed = False
+        self._accepted = False
+        self._close_code: Optional[int] = None
+        self._close_reason: Optional[str] = None
+        self._task: Optional[asyncio.Task] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def _build_scope(self) -> dict:
+        """Build ASGI WebSocket scope."""
+        from urllib.parse import urlparse, parse_qs
+
+        parsed = urlparse(self.url)
+        path = parsed.path or "/"
+        query_string = parsed.query or ""
+
+        # Build headers
+        header_list = [
+            (b"host", b"testserver"),
+            (b"connection", b"upgrade"),
+            (b"upgrade", b"websocket"),
+            (b"sec-websocket-version", b"13"),
+            (b"sec-websocket-key", b"testkey123456789012345678"),
+        ]
+
+        if self.subprotocols:
+            header_list.append(
+                (b"sec-websocket-protocol", ", ".join(self.subprotocols).encode())
+            )
+
+        for key, value in self.headers.items():
+            header_list.append((key.lower().encode(), value.encode()))
+
+        return {
+            "type": "websocket",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "scheme": "ws",
+            "path": path,
+            "raw_path": path.encode(),
+            "query_string": query_string.encode(),
+            "root_path": "",
+            "headers": header_list,
+            "server": ("testserver", 80),
+            "client": ("testclient", 50000),
+            "subprotocols": self.subprotocols,
+        }
+
+    async def _run_app(self):
+        """Run the ASGI app with WebSocket scope."""
+        scope = self._build_scope()
+
+        # Send initial connect message
+        self._receive_queue.append({"type": "websocket.connect"})
+
+        async def receive():
+            """ASGI receive callable."""
+            while True:
+                if self._receive_queue:
+                    return self._receive_queue.pop(0)
+                # Wait for messages
+                await asyncio.sleep(0.001)
+
+        async def send(message):
+            """ASGI send callable."""
+            self._send_queue.append(message)
+
+            if message["type"] == "websocket.accept":
+                self._accepted = True
+            elif message["type"] == "websocket.close":
+                self._closed = True
+                self._close_code = message.get("code", 1000)
+                self._close_reason = message.get("reason", "")
+
+        try:
+            await self.app(scope, receive, send)
+        except Exception as e:
+            # App raised an exception - close the connection
+            self._closed = True
+            self._close_code = 1011
+            self._close_reason = str(e)
+
+    def __enter__(self) -> "WebSocketTestSession":
+        """Start the WebSocket connection."""
+        # Create new event loop for this session
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+
+        # Start the app task
+        self._task = self._loop.create_task(self._run_app())
+
+        # Wait for accept or close
+        start_time = asyncio.get_event_loop().time()
+        while not self._accepted and not self._closed:
+            self._loop.run_until_complete(asyncio.sleep(0.001))
+            if asyncio.get_event_loop().time() - start_time > 5.0:
+                raise TimeoutError("WebSocket connection timed out")
+            # Process any pending messages
+            self._loop.run_until_complete(asyncio.sleep(0))
+
+        if self._closed and not self._accepted:
+            raise RuntimeError(
+                f"WebSocket connection rejected with code {self._close_code}"
+            )
+
+        return self
+
+    def __exit__(self, *args) -> None:
+        """Close the WebSocket connection."""
+        if not self._closed:
+            self.close()
+
+        # Cancel the task
+        if self._task and not self._task.done():
+            self._task.cancel()
+            try:
+                self._loop.run_until_complete(self._task)
+            except asyncio.CancelledError:
+                pass
+
+        # Close the loop
+        if self._loop:
+            self._loop.close()
+            self._loop = None
+
+    def send(self, message: Dict[str, Any]) -> None:
+        """Send a raw ASGI WebSocket message."""
+        if self._closed:
+            raise RuntimeError("WebSocket is closed")
+        self._receive_queue.append(message)
+        # Process the message
+        self._loop.run_until_complete(asyncio.sleep(0.01))
+
+    def send_text(self, data: str) -> None:
+        """Send a text message."""
+        self.send({"type": "websocket.receive", "text": data})
+
+    def send_bytes(self, data: bytes) -> None:
+        """Send a binary message."""
+        self.send({"type": "websocket.receive", "bytes": data})
+
+    def send_json(self, data: Any) -> None:
+        """Send a JSON message."""
+        self.send_text(json_module.dumps(data))
+
+    def receive(self, timeout: float = 5.0) -> Dict[str, Any]:
+        """Receive a raw ASGI WebSocket message."""
+        start_time = asyncio.get_event_loop().time()
+
+        while True:
+            # Check for messages (skip accept messages)
+            for msg in self._send_queue:
+                if msg["type"] in ("websocket.send", "websocket.close"):
+                    self._send_queue.remove(msg)
+                    if msg["type"] == "websocket.close":
+                        self._closed = True
+                        self._close_code = msg.get("code", 1000)
+                    return msg
+
+            if self._closed:
+                return {"type": "websocket.close", "code": self._close_code}
+
+            # Wait for messages
+            self._loop.run_until_complete(asyncio.sleep(0.01))
+
+            if asyncio.get_event_loop().time() - start_time > timeout:
+                raise TimeoutError("Timed out waiting for WebSocket message")
+
+    def receive_text(self, timeout: float = 5.0) -> str:
+        """Receive a text message."""
+        msg = self.receive(timeout)
+        if msg["type"] == "websocket.close":
+            raise RuntimeError(f"WebSocket closed with code {msg.get('code', 1000)}")
+        if "text" not in msg:
+            raise RuntimeError(f"Expected text message, got: {msg}")
+        return msg["text"]
+
+    def receive_bytes(self, timeout: float = 5.0) -> bytes:
+        """Receive a binary message."""
+        msg = self.receive(timeout)
+        if msg["type"] == "websocket.close":
+            raise RuntimeError(f"WebSocket closed with code {msg.get('code', 1000)}")
+        if "bytes" not in msg:
+            raise RuntimeError(f"Expected bytes message, got: {msg}")
+        return msg["bytes"]
+
+    def receive_json(self, timeout: float = 5.0) -> Any:
+        """Receive a JSON message."""
+        text = self.receive_text(timeout)
+        return json_module.loads(text)
+
+    def close(self, code: int = 1000, reason: str = "") -> None:
+        """Close the WebSocket connection."""
+        if not self._closed:
+            self._receive_queue.append({
+                "type": "websocket.disconnect",
+                "code": code,
+            })
+            self._closed = True
+            self._close_code = code
+            # Give the app time to process
+            self._loop.run_until_complete(asyncio.sleep(0.01))

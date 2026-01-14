@@ -596,7 +596,7 @@ void QUICConnection::cleanup_closed_streams() noexcept {
 
         if (stream->is_closed() &&
             stream->send_buffer().available() == 0 &&
-            stream->recv_buffer().available() == 0) {
+            stream->recv_available() == 0) {
             it = streams_.erase(it);
         } else {
             ++it;

@@ -124,12 +124,17 @@ void handle_websocket_connection(
             bool connection_closed = false;
             bool received_data = false;
 
+            fprintf(stderr, "[WS_HANDLER] fd=%d handle_websocket_connection READ event\n", fd);
+            fflush(stderr);
+
             // Loop to drain all available data (required for edge-triggered mode)
             while (true) {
                 ssize_t n = ::recv(fd, buffer, sizeof(buffer), MSG_DONTWAIT);
 
                 if (n < 0) {
                     if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                        fprintf(stderr, "[WS_HANDLER] fd=%d recv returned EAGAIN - no more data\n", fd);
+                        fflush(stderr);
                         break;
                     }
                     LOG_ERROR("WebSocket", "Read error on fd=%d: errno=%d", fd, errno);
@@ -141,13 +146,20 @@ void handle_websocket_connection(
 
                 if (n == 0) {
                     connection_closed = true;
+                    fprintf(stderr, "[WS_HANDLER] fd=%d recv returned 0 - connection closed\n", fd);
+                    fflush(stderr);
                     break;
                 }
+
+                fprintf(stderr, "[WS_HANDLER] fd=%d recv got %zd bytes\n", fd, n);
+                fflush(stderr);
 
                 received_data = true;
 
                 // Process WebSocket frames
                 int result = ws_conn->handle_frame(reinterpret_cast<uint8_t*>(buffer), n);
+                fprintf(stderr, "[WS_HANDLER] fd=%d handle_frame returned %d\n", fd, result);
+                fflush(stderr);
                 if (result < 0) {
                     LOG_ERROR("WebSocket", "Frame handling error on fd=%d: %d", fd, result);
                 }

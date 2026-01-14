@@ -70,6 +70,82 @@ PYTHON_TYPE_MAP = {
 }
 
 
+def coerce_query_value(
+    value: Union[str, List[str]],
+    target_type: Any,
+    param_name: str,
+    query_params_multi: Optional[Dict[str, List[str]]] = None,
+) -> tuple:
+    """
+    Coerce a query parameter value to the target type.
+
+    Returns:
+        Tuple of (coerced_value, error_detail) where error_detail is None on success
+    """
+    # Check if target_type is List[T]
+    origin = get_origin(target_type)
+    if origin is list:
+        # Get the list element type
+        args = get_args(target_type)
+        element_type = args[0] if args else str
+
+        # Get all values for this param from multi-value dict
+        if query_params_multi and param_name in query_params_multi:
+            values = query_params_multi[param_name]
+        elif isinstance(value, list):
+            values = value
+        else:
+            values = [value] if value else []
+
+        # Coerce each element
+        result = []
+        for v in values:
+            coerced, err = coerce_query_value(v, element_type, param_name, None)
+            if err:
+                return None, err
+            result.append(coerced)
+        return result, None
+
+    # Handle Optional[T] - unwrap to T
+    if origin is type(None):
+        return None, None
+    if str(origin) in ("typing.Union", "types.UnionType"):
+        args = get_args(target_type)
+        if len(args) == 2 and type(None) in args:
+            # Optional[T] - get the non-None type
+            inner = args[0] if args[1] is type(None) else args[1]
+            if value is None or value == "":
+                return None, None
+            return coerce_query_value(value, inner, param_name, query_params_multi)
+
+    # If value is a list but we expect single, take last value
+    if isinstance(value, list):
+        value = value[-1] if value else ""
+
+    # Coerce to target type
+    try:
+        if target_type == int:
+            return int(value), None
+        elif target_type == float:
+            return float(value), None
+        elif target_type == bool:
+            return value.lower() in ("true", "1", "yes", "on"), None
+        elif target_type == str:
+            return value, None
+        elif isinstance(target_type, type) and issubclass(target_type, Enum):
+            return target_type(value), None
+        else:
+            # Default: return as-is
+            return value, None
+    except (ValueError, TypeError) as e:
+        return None, {
+            "loc": ["query", param_name],
+            "msg": f"value is not a valid {target_type.__name__ if hasattr(target_type, '__name__') else str(target_type)}",
+            "type": "type_error",
+            "input": value,
+        }
+
+
 def python_type_to_string(type_hint: Any) -> str:
     """Convert Python type hint to schema type string."""
     # Handle Optional types
@@ -465,6 +541,12 @@ class FastAPIApp:
         self._routes: Dict[str, Dict[str, Callable]] = {}  # {path: {method: handler}}
         self._websocket_routes: Dict[str, Callable] = {}
 
+        # Named routes for url_path_for() lookups: {name: path}
+        self._named_routes: Dict[str, str] = {}
+
+        # Dependency overrides for testing (FastAPI-compatible)
+        self.dependency_overrides: Dict[Callable, Callable] = {}
+
         # Mounted sub-applications {path_prefix: app}
         self._mounted_apps: Dict[str, Any] = {}
 
@@ -518,6 +600,7 @@ class FastAPIApp:
         # Find matching route
         handler = None
         response_model = None
+        model_options = {}  # Default empty options
         path_params = {}
 
         for route_path, methods in self._routes.items():
@@ -526,7 +609,10 @@ class FastAPIApp:
                 if route_path == path:
                     route_info = methods[method]
                     if isinstance(route_info, tuple):
-                        handler, response_model = route_info
+                        if len(route_info) == 3:
+                            handler, response_model, model_options = route_info
+                        else:
+                            handler, response_model = route_info
                     else:
                         handler = route_info
                     break
@@ -538,7 +624,10 @@ class FastAPIApp:
                 if match:
                     route_info = methods[method]
                     if isinstance(route_info, tuple):
-                        handler, response_model = route_info
+                        if len(route_info) == 3:
+                            handler, response_model, model_options = route_info
+                        else:
+                            handler, response_model = route_info
                     else:
                         handler = route_info
                     path_params = match.groupdict()
@@ -557,16 +646,14 @@ class FastAPIApp:
             if not message.get("more_body", False):
                 break
 
-        # Parse query params
-        from urllib.parse import unquote
+        # Parse query params (support multi-value: ?tag=a&tag=b -> {"tag": ["a", "b"]})
+        from urllib.parse import parse_qs
 
         query_string = scope.get("query_string", b"").decode()
-        query_params = {}
-        if query_string:
-            for param in query_string.split("&"):
-                if "=" in param:
-                    key, value = param.split("=", 1)
-                    query_params[key] = unquote(value)
+        # parse_qs returns Dict[str, List[str]] - each key maps to a list of values
+        query_params_multi = parse_qs(query_string, keep_blank_values=True)
+        # For backwards compatibility, also create single-value dict (last value wins)
+        query_params = {k: v[-1] for k, v in query_params_multi.items()}
 
         # Parse body based on content type
         body_data = None
@@ -647,14 +734,14 @@ class FastAPIApp:
         # Use DependencyScope to ensure yield dependencies are cleaned up
         async with DependencyScope(request_obj):
             await self._handle_http_inner(
-                scope, receive, send, handler, response_model,
-                path_params, query_params, body, body_data, form_data,
+                scope, receive, send, handler, response_model, model_options,
+                path_params, query_params, query_params_multi, body, body_data, form_data,
                 content_type, request_obj, sig, type_hints, has_param_classes
             )
 
     async def _handle_http_inner(
-        self, scope, receive, send, handler, response_model,
-        path_params, query_params, body, body_data, form_data,
+        self, scope, receive, send, handler, response_model, model_options,
+        path_params, query_params, query_params_multi, body, body_data, form_data,
         content_type, request_obj, sig, type_hints, has_param_classes
     ):
         """Inner HTTP handler that runs within DependencyScope."""
@@ -825,27 +912,24 @@ class FastAPIApp:
                 # Extract value from query params or use default
                 if param_name in query_params:
                     value = query_params[param_name]
-                    # Convert to appropriate type
-                    if param_type == int:
-                        value = int(value)
-                    elif param_type == float:
-                        value = float(value)
-                    elif param_type == bool:
-                        value = value.lower() in ("true", "1", "yes")
-                    kwargs[param_name] = value
+                    # Use coerce_query_value for type coercion with proper error handling
+                    coerced, err = coerce_query_value(value, param_type, param_name, query_params_multi)
+                    if err:
+                        await self._send_json_response(send, {"detail": [err]}, 422)
+                        return
+                    kwargs[param_name] = coerced
                 elif actual_default is not ...:
                     # Use the actual default (can be None for Optional params)
                     kwargs[param_name] = actual_default
-            elif param_name in query_params:
-                # Regular query parameter
-                value = query_params[param_name]
-                if param_type == int:
-                    value = int(value)
-                elif param_type == float:
-                    value = float(value)
-                elif param_type == bool:
-                    value = value.lower() in ("true", "1", "yes")
-                kwargs[param_name] = value
+            elif param_name in query_params or param_name in query_params_multi:
+                # Regular query parameter - check multi-value dict for List types
+                value = query_params.get(param_name, "")
+                # Use coerce_query_value for type coercion with proper error handling
+                coerced, err = coerce_query_value(value, param_type, param_name, query_params_multi)
+                if err:
+                    await self._send_json_response(send, {"detail": [err]}, 422)
+                    return
+                kwargs[param_name] = coerced
             elif default is not inspect.Parameter.empty:
                 # Use default value if no query param provided
                 kwargs[param_name] = default
@@ -869,6 +953,17 @@ class FastAPIApp:
             # Apply response_model validation/filtering if specified
             if response_model is not None and HAS_PYDANTIC:
                 try:
+                    # Build model_dump kwargs from model_options
+                    model_dump_kwargs = {}
+                    if model_options.get("exclude_unset"):
+                        model_dump_kwargs["exclude_unset"] = True
+                    if model_options.get("exclude_defaults"):
+                        model_dump_kwargs["exclude_defaults"] = True
+                    if model_options.get("exclude_none"):
+                        model_dump_kwargs["exclude_none"] = True
+                    if model_options.get("by_alias"):
+                        model_dump_kwargs["by_alias"] = True
+
                     # Check if response_model is a generic like List[Model]
                     origin = get_origin(response_model)
                     inner_model = None
@@ -890,11 +985,11 @@ class FastAPIApp:
                                 # Convert to dict first, then validate through response model
                                 item_dict = item.model_dump()
                                 validated.append(
-                                    inner_model.model_validate(item_dict).model_dump()
+                                    inner_model.model_validate(item_dict).model_dump(**model_dump_kwargs)
                                 )
                             elif isinstance(item, dict):
                                 validated.append(
-                                    inner_model.model_validate(item).model_dump()
+                                    inner_model.model_validate(item).model_dump(**model_dump_kwargs)
                                 )
                             else:
                                 validated.append(item)
@@ -905,13 +1000,20 @@ class FastAPIApp:
                         # Validate and filter through response_model
                         # This handles both BaseModel instances and dicts
                         if isinstance(result, BaseModel):
-                            # Convert to dict first to allow field filtering
-                            result_dict = result.model_dump()
+                            # For exclude_unset, we need to call model_dump on the original
+                            # instance to preserve "unset" tracking. Only re-validate if
+                            # the result is not already the correct type.
+                            if isinstance(result, response_model):
+                                # Already the correct type - dump directly with options
+                                result = result.model_dump(**model_dump_kwargs)
+                            else:
+                                # Different model type - need to convert through response_model
+                                result_dict = result.model_dump()
+                                result = response_model.model_validate(result_dict).model_dump(**model_dump_kwargs)
                         elif isinstance(result, dict):
-                            result_dict = result
+                            result = response_model.model_validate(result).model_dump(**model_dump_kwargs)
                         else:
-                            result_dict = result
-                        result = response_model.model_validate(result_dict).model_dump()
+                            result = response_model.model_validate(result).model_dump(**model_dump_kwargs)
                 except PydanticValidationError as e:
                     # Response validation failed
                     errors = convert_pydantic_validation_error(
@@ -1185,8 +1287,13 @@ class FastAPIApp:
         if _resolved_cache is None:
             _resolved_cache = {}
 
-        # Check cache to avoid duplicate resolution
-        cache_key = id(dep_func)
+        # Check for dependency override (FastAPI-compatible testing pattern)
+        original_dep_func = dep_func
+        if dep_func in self.dependency_overrides:
+            dep_func = self.dependency_overrides[dep_func]
+
+        # Check cache to avoid duplicate resolution (use original func as key)
+        cache_key = id(original_dep_func)
         if cache_key in _resolved_cache:
             return _resolved_cache[cache_key]
 
@@ -1466,6 +1573,50 @@ class FastAPIApp:
         def redoc():
             return generate_redoc_response(self.openapi_url, self.title)
 
+    def url_path_for(self, name: str, **path_params: Any) -> str:
+        """
+        Generate URL path for a named route (FastAPI-compatible).
+
+        Args:
+            name: Name of the route (from name= parameter or function name)
+            **path_params: Path parameters to substitute in the URL
+
+        Returns:
+            URL path string with parameters substituted
+
+        Raises:
+            RuntimeError: If no route with that name exists
+
+        Example:
+            @app.get("/users/{user_id}", name="get_user")
+            def get_user(user_id: int):
+                ...
+
+            path = app.url_path_for("get_user", user_id=123)
+            # Returns: "/users/123"
+        """
+        import re
+
+        if name not in self._named_routes:
+            raise RuntimeError(f"No route found with name '{name}'")
+
+        path = self._named_routes[name]
+
+        # Substitute path parameters
+        for param_name, param_value in path_params.items():
+            # Replace {param_name} with actual value
+            pattern = r"\{" + param_name + r"\}"
+            path = re.sub(pattern, str(param_value), path)
+
+        # Check for any remaining unsubstituted parameters
+        remaining = re.findall(r"\{(\w+)\}", path)
+        if remaining:
+            raise RuntimeError(
+                f"Missing path parameters for route '{name}': {remaining}"
+            )
+
+        return path
+
     def _register_route(
         self,
         method: str,
@@ -1478,16 +1629,33 @@ class FastAPIApp:
         operation_id: Optional[str] = None,
         deprecated: bool = False,
         openapi_extra: Optional[Dict[str, Any]] = None,
+        name: Optional[str] = None,
+        response_model_exclude_unset: bool = False,
+        response_model_exclude_defaults: bool = False,
+        response_model_exclude_none: bool = False,
+        response_model_by_alias: bool = False,
         **kwargs,
     ):
         """Internal method to register a route and return decorator."""
         app = self  # Capture self for the decorator
+        route_name = name  # Capture name for closure
+        # Capture response model options for closure
+        model_options = {
+            "exclude_unset": response_model_exclude_unset,
+            "exclude_defaults": response_model_exclude_defaults,
+            "exclude_none": response_model_exclude_none,
+            "by_alias": response_model_by_alias,
+        }
 
         def decorator(func: Callable) -> Callable:
-            # Store route for ASGI fallback mode (handler, response_model)
+            # Store route for ASGI fallback mode (handler, response_model, model_options)
             if path not in app._routes:
                 app._routes[path] = {}
-            app._routes[path][method.upper()] = (func, response_model)
+            app._routes[path][method.upper()] = (func, response_model, model_options)
+
+            # Store named route for url_path_for() lookups
+            final_name = route_name or func.__name__
+            app._named_routes[final_name] = path
 
             # If native bindings available, also register with C++
             if HAS_NATIVE:
@@ -1522,6 +1690,11 @@ class FastAPIApp:
         operation_id: Optional[str] = None,
         deprecated: bool = False,
         openapi_extra: Optional[Dict[str, Any]] = None,
+        name: Optional[str] = None,
+        response_model_exclude_unset: bool = False,
+        response_model_exclude_defaults: bool = False,
+        response_model_exclude_none: bool = False,
+        response_model_by_alias: bool = False,
         **kwargs,
     ):
         """GET route decorator."""
@@ -1536,6 +1709,11 @@ class FastAPIApp:
             operation_id=operation_id,
             deprecated=deprecated,
             openapi_extra=openapi_extra,
+            name=name,
+            response_model_exclude_unset=response_model_exclude_unset,
+            response_model_exclude_defaults=response_model_exclude_defaults,
+            response_model_exclude_none=response_model_exclude_none,
+            response_model_by_alias=response_model_by_alias,
             **kwargs,
         )
 
@@ -1550,6 +1728,11 @@ class FastAPIApp:
         operation_id: Optional[str] = None,
         deprecated: bool = False,
         openapi_extra: Optional[Dict[str, Any]] = None,
+        name: Optional[str] = None,
+        response_model_exclude_unset: bool = False,
+        response_model_exclude_defaults: bool = False,
+        response_model_exclude_none: bool = False,
+        response_model_by_alias: bool = False,
         **kwargs,
     ):
         """POST route decorator."""
@@ -1564,6 +1747,11 @@ class FastAPIApp:
             operation_id=operation_id,
             deprecated=deprecated,
             openapi_extra=openapi_extra,
+            name=name,
+            response_model_exclude_unset=response_model_exclude_unset,
+            response_model_exclude_defaults=response_model_exclude_defaults,
+            response_model_exclude_none=response_model_exclude_none,
+            response_model_by_alias=response_model_by_alias,
             **kwargs,
         )
 
@@ -1578,6 +1766,11 @@ class FastAPIApp:
         operation_id: Optional[str] = None,
         deprecated: bool = False,
         openapi_extra: Optional[Dict[str, Any]] = None,
+        name: Optional[str] = None,
+        response_model_exclude_unset: bool = False,
+        response_model_exclude_defaults: bool = False,
+        response_model_exclude_none: bool = False,
+        response_model_by_alias: bool = False,
         **kwargs,
     ):
         """PUT route decorator."""
@@ -1592,6 +1785,11 @@ class FastAPIApp:
             operation_id=operation_id,
             deprecated=deprecated,
             openapi_extra=openapi_extra,
+            name=name,
+            response_model_exclude_unset=response_model_exclude_unset,
+            response_model_exclude_defaults=response_model_exclude_defaults,
+            response_model_exclude_none=response_model_exclude_none,
+            response_model_by_alias=response_model_by_alias,
             **kwargs,
         )
 
@@ -1606,6 +1804,11 @@ class FastAPIApp:
         operation_id: Optional[str] = None,
         deprecated: bool = False,
         openapi_extra: Optional[Dict[str, Any]] = None,
+        name: Optional[str] = None,
+        response_model_exclude_unset: bool = False,
+        response_model_exclude_defaults: bool = False,
+        response_model_exclude_none: bool = False,
+        response_model_by_alias: bool = False,
         **kwargs,
     ):
         """DELETE route decorator."""
@@ -1620,6 +1823,11 @@ class FastAPIApp:
             operation_id=operation_id,
             deprecated=deprecated,
             openapi_extra=openapi_extra,
+            name=name,
+            response_model_exclude_unset=response_model_exclude_unset,
+            response_model_exclude_defaults=response_model_exclude_defaults,
+            response_model_exclude_none=response_model_exclude_none,
+            response_model_by_alias=response_model_by_alias,
             **kwargs,
         )
 
@@ -1634,6 +1842,11 @@ class FastAPIApp:
         operation_id: Optional[str] = None,
         deprecated: bool = False,
         openapi_extra: Optional[Dict[str, Any]] = None,
+        name: Optional[str] = None,
+        response_model_exclude_unset: bool = False,
+        response_model_exclude_defaults: bool = False,
+        response_model_exclude_none: bool = False,
+        response_model_by_alias: bool = False,
         **kwargs,
     ):
         """PATCH route decorator."""
@@ -1648,6 +1861,11 @@ class FastAPIApp:
             operation_id=operation_id,
             deprecated=deprecated,
             openapi_extra=openapi_extra,
+            name=name,
+            response_model_exclude_unset=response_model_exclude_unset,
+            response_model_exclude_defaults=response_model_exclude_defaults,
+            response_model_exclude_none=response_model_exclude_none,
+            response_model_by_alias=response_model_by_alias,
             **kwargs,
         )
 
@@ -1662,6 +1880,10 @@ class FastAPIApp:
         operation_id: Optional[str] = None,
         deprecated: bool = False,
         openapi_extra: Optional[Dict[str, Any]] = None,
+        response_model_exclude_unset: bool = False,
+        response_model_exclude_defaults: bool = False,
+        response_model_exclude_none: bool = False,
+        response_model_by_alias: bool = False,
         **kwargs,
     ):
         """OPTIONS route decorator."""
@@ -1676,6 +1898,10 @@ class FastAPIApp:
             operation_id=operation_id,
             deprecated=deprecated,
             openapi_extra=openapi_extra,
+            response_model_exclude_unset=response_model_exclude_unset,
+            response_model_exclude_defaults=response_model_exclude_defaults,
+            response_model_exclude_none=response_model_exclude_none,
+            response_model_by_alias=response_model_by_alias,
             **kwargs,
         )
 
@@ -1690,6 +1916,10 @@ class FastAPIApp:
         operation_id: Optional[str] = None,
         deprecated: bool = False,
         openapi_extra: Optional[Dict[str, Any]] = None,
+        response_model_exclude_unset: bool = False,
+        response_model_exclude_defaults: bool = False,
+        response_model_exclude_none: bool = False,
+        response_model_by_alias: bool = False,
         **kwargs,
     ):
         """HEAD route decorator."""
@@ -1704,6 +1934,10 @@ class FastAPIApp:
             operation_id=operation_id,
             deprecated=deprecated,
             openapi_extra=openapi_extra,
+            response_model_exclude_unset=response_model_exclude_unset,
+            response_model_exclude_defaults=response_model_exclude_defaults,
+            response_model_exclude_none=response_model_exclude_none,
+            response_model_by_alias=response_model_by_alias,
             **kwargs,
         )
 
@@ -1739,7 +1973,23 @@ class FastAPIApp:
 
             # Register with native if available
             if HAS_NATIVE:
-                register_route("WEBSOCKET", path, func.__name__, "", "", [])
+                import json as _json
+                import inspect
+                # Get module and function names for ZMQ worker handler lookup
+                module_name = getattr(func, '__module__', '__main__')
+                func_name = getattr(func, '__qualname__', getattr(func, '__name__', 'unknown'))
+                # If module is __main__, include file path so worker can import it
+                metadata = {"module": module_name, "function": func_name}
+                if module_name == '__main__':
+                    try:
+                        source_file = inspect.getfile(func)
+                        if source_file:
+                            metadata["file"] = source_file
+                    except (TypeError, OSError):
+                        pass
+                # Store handler metadata in openapi_extra for ZMQ worker to import handler
+                ws_metadata = _json.dumps(metadata)
+                register_route("WEBSOCKET", path, func, openapi_extra=ws_metadata)
 
             return func
 
@@ -2070,6 +2320,30 @@ class FastAPIApp:
         lib.http_server_destroy.restype = ctypes.c_int
         lib.http_server_destroy.argtypes = [ctypes.c_void_p]
 
+        # Serialize named routes to environment variable for ZMQ workers
+        # This enables url_for() to work in separate worker processes
+        if self._named_routes:
+            import json as json_module
+            os.environ["FASTERAPI_NAMED_ROUTES"] = json_module.dumps(self._named_routes)
+
+        # Serialize WebSocket handlers using cloudpickle for ZMQ workers
+        # This is needed because handlers defined in __main__ cannot be imported
+        # by workers via normal import mechanism
+        if hasattr(self, "_websocket_routes") and self._websocket_routes:
+            try:
+                import cloudpickle
+                import base64 as base64_module
+
+                # Serialize handlers dict: {path: handler_callable}
+                pickled = cloudpickle.dumps(self._websocket_routes)
+                encoded = base64_module.b64encode(pickled).decode("ascii")
+                os.environ["FASTERAPI_WS_HANDLERS"] = encoded
+            except ImportError:
+                print(
+                    "Warning: cloudpickle not installed. WebSocket handlers may not work."
+                )
+                print("Install with: pip install cloudpickle")
+
         # Initialize library
         result = lib.http_lib_init()
         if result != 0:
@@ -2127,6 +2401,29 @@ class FastAPIApp:
                     print(f"Warning: Failed to register route {method} {path}")
 
                 handler_id += 1
+
+        # Register WebSocket handler metadata with C++ for ZMQ worker lookup
+        if hasattr(self, "_websocket_routes") and self._websocket_routes:
+            # Define the C API function for registering WebSocket handler metadata
+            lib.http_register_websocket_handler_metadata.restype = None
+            lib.http_register_websocket_handler_metadata.argtypes = [
+                ctypes.c_char_p,  # path
+                ctypes.c_char_p,  # module_name
+                ctypes.c_char_p,  # function_name
+            ]
+
+            for ws_path, ws_handler in self._websocket_routes.items():
+                module_name = getattr(ws_handler, "__module__", "__main__")
+                func_name = getattr(
+                    ws_handler, "__qualname__", getattr(ws_handler, "__name__", "unknown")
+                )
+
+                lib.http_register_websocket_handler_metadata(
+                    ws_path.encode("utf-8"),
+                    module_name.encode("utf-8"),
+                    func_name.encode("utf-8"),
+                )
+                print(f"Registered WebSocket handler: {ws_path} -> {module_name}.{func_name}")
 
         # Setup graceful shutdown
         def signal_handler(signum, frame):

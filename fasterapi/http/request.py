@@ -153,6 +153,38 @@ class Request:
                 result[key.strip()] = value.strip()
         return result
 
+    @property
+    def app(self) -> Any:
+        """Get application instance from scope."""
+        return self.scope.get("app")
+
+    def url_for(self, name: str, **path_params: Any) -> URL:
+        """
+        Generate URL for a named route (FastAPI-compatible).
+
+        Args:
+            name: Name of the route (set via name parameter in decorator)
+            **path_params: Path parameters to substitute
+
+        Returns:
+            Full URL for the named route
+
+        Raises:
+            RuntimeError: If no app in scope or route not found
+        """
+        app = self.scope.get("app")
+        if not app:
+            raise RuntimeError("No app in request scope - url_for requires app context")
+
+        if hasattr(app, "url_path_for"):
+            path = app.url_path_for(name, **path_params)
+            # Build full URL
+            scheme = "https" if self.secure else "http"
+            host = self.get_header("host") or "localhost"
+            return URL(f"{scheme}://{host}{path}")
+
+        raise RuntimeError(f"Route '{name}' not found in application")
+
     # =========================================================================
     # Header access methods
     # =========================================================================

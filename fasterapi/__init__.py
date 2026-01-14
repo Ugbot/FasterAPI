@@ -112,7 +112,12 @@ from fasterapi.responses import (
 from fasterapi.routing import APIRouter
 
 # WebSocket
-from fasterapi.websockets import WebSocket, WebSocketDisconnect, WebSocketState
+from fasterapi.websockets import (
+    ConnectionManager,
+    WebSocket,
+    WebSocketDisconnect,
+    WebSocketState,
+)
 
 
 class App:
@@ -404,6 +409,7 @@ __all__ = [
     "WebSocket",
     "WebSocketDisconnect",
     "WebSocketState",
+    "ConnectionManager",
     # Request/Response (native)
     "Request",
     # PostgreSQL

@@ -155,6 +155,120 @@ private:
 } // namespace fasterapi
 
 // ============================================================================
+// Keyed Debug Logging (compile-time controlled)
+// ============================================================================
+
+/**
+ * Keyed debug logging - enable specific debug categories via compile defines.
+ * 
+ * Usage:
+ *   DEBUG_LOG(HTTP1, "Connection fd=%d", fd);
+ *   DEBUG_LOG(PARAMS, "Query param: %s=%s", key, value);
+ *   DEBUG_LOG(ROUTING, "Matched route: %s", pattern);
+ * 
+ * Enable at compile time by defining:
+ *   -DDEBUG_HTTP1=1      Enable HTTP/1.1 connection debugging
+ *   -DDEBUG_PARAMS=1     Enable parameter extraction debugging  
+ *   -DDEBUG_ROUTING=1    Enable route matching debugging
+ *   -DDEBUG_BODY=1       Enable request body debugging
+ *   -DDEBUG_ZMQ=1        Enable ZeroMQ IPC debugging
+ *   -DDEBUG_CALLBACK=1   Enable Python callback debugging
+ *   -DDEBUG_ALL=1        Enable ALL debug categories
+ * 
+ * When not defined, DEBUG_LOG compiles to nothing (zero overhead).
+ * Output goes directly to stderr with file:line info.
+ */
+
+// Helper macro for conditional debug output
+#define _DEBUG_LOG_IMPL(key, fmt, ...) \
+    do { \
+        fprintf(stderr, "[DEBUG:%s] %s:%d: " fmt "\n", \
+                #key, __FILE__, __LINE__, ##__VA_ARGS__); \
+        fflush(stderr); \
+    } while(0)
+
+// Enable all debug keys if DEBUG_ALL is set
+#ifdef DEBUG_ALL
+    #ifndef DEBUG_HTTP1
+        #define DEBUG_HTTP1 1
+    #endif
+    #ifndef DEBUG_PARAMS
+        #define DEBUG_PARAMS 1
+    #endif
+    #ifndef DEBUG_ROUTING
+        #define DEBUG_ROUTING 1
+    #endif
+    #ifndef DEBUG_BODY
+        #define DEBUG_BODY 1
+    #endif
+    #ifndef DEBUG_ZMQ
+        #define DEBUG_ZMQ 1
+    #endif
+    #ifndef DEBUG_CALLBACK
+        #define DEBUG_CALLBACK 1
+    #endif
+    #ifndef DEBUG_SERVER
+        #define DEBUG_SERVER 1
+    #endif
+    #ifndef DEBUG_CONN
+        #define DEBUG_CONN 1
+    #endif
+#endif
+
+// Per-key debug macros - compile to nothing when not enabled
+#if DEBUG_HTTP1
+    #define DEBUG_LOG_HTTP1(fmt, ...) _DEBUG_LOG_IMPL(HTTP1, fmt, ##__VA_ARGS__)
+#else
+    #define DEBUG_LOG_HTTP1(fmt, ...) ((void)0)
+#endif
+
+#if DEBUG_PARAMS
+    #define DEBUG_LOG_PARAMS(fmt, ...) _DEBUG_LOG_IMPL(PARAMS, fmt, ##__VA_ARGS__)
+#else
+    #define DEBUG_LOG_PARAMS(fmt, ...) ((void)0)
+#endif
+
+#if DEBUG_ROUTING
+    #define DEBUG_LOG_ROUTING(fmt, ...) _DEBUG_LOG_IMPL(ROUTING, fmt, ##__VA_ARGS__)
+#else
+    #define DEBUG_LOG_ROUTING(fmt, ...) ((void)0)
+#endif
+
+#if DEBUG_BODY
+    #define DEBUG_LOG_BODY(fmt, ...) _DEBUG_LOG_IMPL(BODY, fmt, ##__VA_ARGS__)
+#else
+    #define DEBUG_LOG_BODY(fmt, ...) ((void)0)
+#endif
+
+#if DEBUG_ZMQ
+    #define DEBUG_LOG_ZMQ(fmt, ...) _DEBUG_LOG_IMPL(ZMQ, fmt, ##__VA_ARGS__)
+#else
+    #define DEBUG_LOG_ZMQ(fmt, ...) ((void)0)
+#endif
+
+#if DEBUG_CALLBACK
+    #define DEBUG_LOG_CALLBACK(fmt, ...) _DEBUG_LOG_IMPL(CALLBACK, fmt, ##__VA_ARGS__)
+#else
+    #define DEBUG_LOG_CALLBACK(fmt, ...) ((void)0)
+#endif
+
+#if DEBUG_SERVER
+    #define DEBUG_LOG_SERVER(fmt, ...) _DEBUG_LOG_IMPL(SERVER, fmt, ##__VA_ARGS__)
+#else
+    #define DEBUG_LOG_SERVER(fmt, ...) ((void)0)
+#endif
+
+#if DEBUG_CONN
+    #define DEBUG_LOG_CONN(fmt, ...) _DEBUG_LOG_IMPL(CONN, fmt, ##__VA_ARGS__)
+#else
+    #define DEBUG_LOG_CONN(fmt, ...) ((void)0)
+#endif
+
+// Generic DEBUG_LOG macro that takes key as first argument
+// Usage: DEBUG_LOG(PARAMS, "value=%s", val)
+#define DEBUG_LOG(key, fmt, ...) DEBUG_LOG_##key(fmt, ##__VA_ARGS__)
+
+// ============================================================================
 // Logging Macros
 // ============================================================================
 

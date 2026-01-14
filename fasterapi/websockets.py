@@ -146,6 +146,7 @@ class WebSocket:
         Accept the WebSocket connection.
 
         Must be called before sending or receiving messages.
+        Consumes the websocket.connect message and sends websocket.accept.
         """
         if self._state != WebSocketState.CONNECTING:
             raise RuntimeError(f"Cannot accept in state {self._state}")
@@ -157,8 +158,15 @@ class WebSocket:
                     await self._native_ws.accept(subprotocol=subprotocol)
                 else:
                     self._native_ws.accept(subprotocol=subprotocol)
-        elif self._send:
-            # ASGI interface
+        elif self._receive and self._send:
+            # ASGI interface - first consume the connect message
+            connect_message = await self._receive()
+            if connect_message["type"] != "websocket.connect":
+                raise RuntimeError(
+                    f"Expected websocket.connect, got {connect_message['type']}"
+                )
+
+            # Send accept message
             message: Dict[str, Any] = {"type": "websocket.accept"}
             if subprotocol:
                 message["subprotocol"] = subprotocol
@@ -392,9 +400,165 @@ class WebSocketClose:
     TLS_HANDSHAKE = 1015
 
 
+class ConnectionManager:
+    """
+    WebSocket connection manager for broadcast/pub-sub patterns.
+
+    Usage:
+        manager = ConnectionManager()
+
+        @app.websocket("/ws/{client_id}")
+        async def websocket_endpoint(websocket: WebSocket, client_id: str):
+            await manager.connect(websocket)
+            try:
+                while True:
+                    data = await websocket.receive_text()
+                    await manager.broadcast(f"Client {client_id}: {data}")
+            except WebSocketDisconnect:
+                manager.disconnect(websocket)
+                await manager.broadcast(f"Client {client_id} left")
+    """
+
+    def __init__(self) -> None:
+        """Initialize connection manager with empty connection list."""
+        self._active_connections: list[WebSocket] = []
+
+    @property
+    def active_connections(self) -> list[WebSocket]:
+        """Get list of active connections (read-only copy)."""
+        return list(self._active_connections)
+
+    def __len__(self) -> int:
+        """Get number of active connections."""
+        return len(self._active_connections)
+
+    async def connect(self, websocket: WebSocket, accept: bool = True) -> None:
+        """
+        Add a WebSocket connection to the manager.
+
+        Args:
+            websocket: WebSocket to add
+            accept: If True, also accepts the connection
+        """
+        if accept:
+            await websocket.accept()
+        self._active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket) -> None:
+        """
+        Remove a WebSocket connection from the manager.
+
+        Args:
+            websocket: WebSocket to remove
+        """
+        try:
+            self._active_connections.remove(websocket)
+        except ValueError:
+            pass  # Already removed
+
+    async def broadcast(self, message: str) -> None:
+        """
+        Broadcast a text message to all connected clients.
+
+        Args:
+            message: Text message to broadcast
+        """
+        disconnected = []
+        for connection in self._active_connections:
+            try:
+                await connection.send_text(message)
+            except Exception:
+                disconnected.append(connection)
+
+        # Clean up disconnected clients
+        for conn in disconnected:
+            self.disconnect(conn)
+
+    async def broadcast_bytes(self, data: bytes) -> None:
+        """
+        Broadcast binary data to all connected clients.
+
+        Args:
+            data: Binary data to broadcast
+        """
+        disconnected = []
+        for connection in self._active_connections:
+            try:
+                await connection.send_bytes(data)
+            except Exception:
+                disconnected.append(connection)
+
+        # Clean up disconnected clients
+        for conn in disconnected:
+            self.disconnect(conn)
+
+    async def broadcast_json(self, data: Any) -> None:
+        """
+        Broadcast JSON data to all connected clients.
+
+        Args:
+            data: Data to serialize as JSON and broadcast
+        """
+        disconnected = []
+        for connection in self._active_connections:
+            try:
+                await connection.send_json(data)
+            except Exception:
+                disconnected.append(connection)
+
+        # Clean up disconnected clients
+        for conn in disconnected:
+            self.disconnect(conn)
+
+    async def send_personal_message(
+        self,
+        message: str,
+        websocket: WebSocket,
+    ) -> bool:
+        """
+        Send a personal text message to a specific client.
+
+        Args:
+            message: Text message to send
+            websocket: Target WebSocket
+
+        Returns:
+            True if message was sent, False if connection was dead
+        """
+        try:
+            await websocket.send_text(message)
+            return True
+        except Exception:
+            self.disconnect(websocket)
+            return False
+
+    async def send_personal_json(
+        self,
+        data: Any,
+        websocket: WebSocket,
+    ) -> bool:
+        """
+        Send personal JSON data to a specific client.
+
+        Args:
+            data: Data to serialize as JSON
+            websocket: Target WebSocket
+
+        Returns:
+            True if message was sent, False if connection was dead
+        """
+        try:
+            await websocket.send_json(data)
+            return True
+        except Exception:
+            self.disconnect(websocket)
+            return False
+
+
 __all__ = [
     "WebSocket",
     "WebSocketState",
     "WebSocketDisconnect",
     "WebSocketClose",
+    "ConnectionManager",
 ]

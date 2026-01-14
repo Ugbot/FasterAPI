@@ -72,6 +72,20 @@ ProcessPoolExecutor::ProcessPoolExecutor(const Config& config)
     // 4096 should handle burst traffic without blocking
     ws_response_queue_ = std::make_unique<AeronSPSCQueue<WsResponse>>(4096);
 
+#ifdef FASTERAPI_USE_ZMQ
+    // Initialize per-worker WebSocket channels for affinity routing
+    // Must be done BEFORE starting workers so they can connect
+    if (zmq_ipc_ && config_.num_workers > 0) {
+        if (!zmq_ipc_->init_ws_worker_sockets(config_.num_workers)) {
+            LOG_WARN("ProcessPoolExecutor", "Failed to initialize per-worker WS channels, "
+                     "falling back to round-robin routing");
+        } else {
+            LOG_INFO("ProcessPoolExecutor", "Initialized %u per-worker WebSocket channels",
+                     config_.num_workers);
+        }
+    }
+#endif
+
     // Start worker processes
     start_workers();
 
@@ -730,9 +744,74 @@ bool ProcessPoolExecutor::send_ws_event(MessageType type,
                                         const std::string& path,
                                         const std::string& payload,
                                         bool is_binary) {
+    LOG_DEBUG("ProcessPoolExecutor", "send_ws_event type=%d conn=%lu path=%s zmq_ipc_=%p",
+             static_cast<int>(type), connection_id, path.c_str(), (void*)zmq_ipc_.get());
 #ifdef FASTERAPI_USE_ZMQ
     if (zmq_ipc_) {
-        return zmq_ipc_->write_ws_event(type, connection_id, path, payload, is_binary);
+        // Check if we have per-worker WebSocket channels available
+        uint32_t num_workers = zmq_ipc_->get_num_workers();
+
+        if (num_workers > 0) {
+            // Per-worker routing is available
+            if (type == MessageType::WS_CONNECT) {
+                // New connection: assign to next worker (round-robin) and record mapping.
+                // WS_CONNECT is now routed through the per-worker WS socket to ensure
+                // the same worker that receives WS_CONNECT also receives WS_MESSAGE/WS_DISCONNECT.
+                // This fixes the affinity issue where WS_CONNECT could be picked up by any worker
+                // from the shared queue, but subsequent messages went to a different worker.
+                uint32_t worker_id = ws_next_worker_.fetch_add(1, std::memory_order_relaxed) % num_workers;
+
+                {
+                    std::lock_guard<std::mutex> lock(ws_conn_mutex_);
+                    ws_conn_to_worker_[connection_id] = worker_id;
+                }
+
+                LOG_DEBUG("ProcessPoolExecutor", "WS_CONNECT conn=%lu assigned to worker %u (via per-worker socket)",
+                          connection_id, worker_id);
+
+                // Send WS_CONNECT through the per-worker WS socket for guaranteed affinity.
+                bool result = zmq_ipc_->write_ws_event_to_worker(worker_id, type, connection_id, path, payload, is_binary);
+                return result;
+
+            } else if (type == MessageType::WS_MESSAGE || type == MessageType::WS_DISCONNECT) {
+                // Route to the worker that owns this connection
+                uint32_t worker_id = 0;
+                bool found = false;
+
+                {
+                    std::lock_guard<std::mutex> lock(ws_conn_mutex_);
+                    auto it = ws_conn_to_worker_.find(connection_id);
+                    if (it != ws_conn_to_worker_.end()) {
+                        worker_id = it->second;
+                        found = true;
+
+                        // Clean up mapping on disconnect
+                        if (type == MessageType::WS_DISCONNECT) {
+                            ws_conn_to_worker_.erase(it);
+                        }
+                    }
+                }
+
+                if (found) {
+                    LOG_DEBUG("ProcessPoolExecutor", "Routing %s conn=%lu to worker %u",
+                              type == MessageType::WS_MESSAGE ? "WS_MESSAGE" : "WS_DISCONNECT",
+                              connection_id, worker_id);
+
+                    bool result = zmq_ipc_->write_ws_event_to_worker(worker_id, type, connection_id, path, payload, is_binary);
+                    return result;
+                } else {
+                    LOG_WARN("ProcessPoolExecutor", "No worker mapping for conn=%lu, falling back to shared queue",
+                             connection_id);
+                    // Fallback to shared queue
+                    return zmq_ipc_->write_ws_event(type, connection_id, path, payload, is_binary);
+                }
+            }
+        }
+
+        // Fallback: no per-worker channels, use shared request queue
+        bool result = zmq_ipc_->write_ws_event(type, connection_id, path, payload, is_binary);
+        LOG_DEBUG("ProcessPoolExecutor", "write_ws_event returned %d", result ? 1 : 0);
+        return result;
     }
 #endif
     LOG_WARN("ProcessPoolExecutor", "send_ws_event called but ZMQ IPC not available");
