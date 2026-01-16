@@ -35,6 +35,7 @@
 #include "websocket.h"
 #include "sse.h"
 #include "http1_connection.h"
+#include "../core/coro_task.h"
 
 #include <functional>
 #include <memory>
@@ -42,6 +43,7 @@
 #include <vector>
 #include <map>
 #include <optional>
+#include <regex>
 
 namespace fasterapi {
 
@@ -149,12 +151,32 @@ public:
 private:
     HttpResponse* res_;
     bool sent_{false};
+    bool content_type_set_{false};
 };
 
 /**
  * Handler function type - takes Request and Response by reference.
  */
 using Handler = std::function<void(Request&, Response&)>;
+
+/**
+ * Async handler function type - returns a coroutine task.
+ *
+ * Use this for handlers that need to `co_await` async operations.
+ * The coroutine will be suspended when it yields and resumed when
+ * the async operation completes.
+ *
+ * Example:
+ * @code
+ * app.get_async("/users/{id}", [](Request& req, Response& res) -> core::coro_task<void> {
+ *     auto id = req.path_param("id");
+ *     auto user = co_await fetch_user_async(id);  // Yields here
+ *     res.json(user.to_json());
+ *     co_return;
+ * });
+ * @endcode
+ */
+using AsyncHandler = std::function<core::coro_task<void>(Request&, Response&)>;
 
 /**
  * WebSocket handler type.
@@ -397,6 +419,73 @@ public:
     RouteBuilder route(const std::string& method, const std::string& path);
 
     // =========================================================================
+    // Async Route Registration - Coroutine Handlers
+    // =========================================================================
+
+    /**
+     * Register an async GET route.
+     *
+     * Async handlers can use co_await for non-blocking I/O operations.
+     * The coroutine will be suspended when it yields and resumed when
+     * the async operation completes.
+     *
+     * @param path Route path (supports {param} and *wildcard)
+     * @param handler Async request handler (returns coro_task<void>)
+     *
+     * Example:
+     * @code
+     * app.get_async("/users/{id}", [](auto& req, auto& res) -> core::coro_task<void> {
+     *     auto id = req.path_param("id");
+     *     auto user = co_await db.get_user_async(id);
+     *     res.json(user.to_json());
+     *     co_return;
+     * });
+     * @endcode
+     */
+    App& get_async(const std::string& path, AsyncHandler handler);
+
+    /**
+     * Register an async POST route.
+     */
+    App& post_async(const std::string& path, AsyncHandler handler);
+
+    /**
+     * Register an async PUT route.
+     */
+    App& put_async(const std::string& path, AsyncHandler handler);
+
+    /**
+     * Register an async DELETE route.
+     */
+    App& del_async(const std::string& path, AsyncHandler handler);
+
+    /**
+     * Register an async PATCH route.
+     */
+    App& patch_async(const std::string& path, AsyncHandler handler);
+
+    /**
+     * Check if a route has an async handler registered.
+     *
+     * @param method HTTP method (GET, POST, etc.)
+     * @param path Request path
+     * @return True if an async handler exists for this route
+     */
+    bool has_async_route(const std::string& method, const std::string& path) const;
+
+    /**
+     * Dispatch to async handler and return coroutine task.
+     *
+     * Called by UnifiedServer/Http2Server when handling async routes.
+     * The caller is responsible for keeping the coroutine alive until completion.
+     *
+     * @param req Request object
+     * @param res Response object (will be populated by handler)
+     * @return Coroutine task that executes the async handler
+     */
+    core::coro_task<void> dispatch_async(Request& req, Response& res);
+
+    // =========================================================================
     // WebSocket & SSE
     // =========================================================================
 
@@ -596,6 +685,49 @@ private:
 
     // Ultra-fast callback for maximum performance (bypasses routing)
     http::Http1Connection::UltraFastCallback ultra_fast_callback_ = nullptr;
+
+    // =========================================================================
+    // Async Route Storage
+    // =========================================================================
+
+    /**
+     * Async route entry - stores compiled regex and handler.
+     */
+    struct AsyncRouteEntry {
+        std::regex pattern;
+        std::string path_template;  // Original path with {params}
+        AsyncHandler handler;
+        std::vector<std::string> param_names;  // Parameter names in order
+    };
+
+    /**
+     * Async routes by method (GET, POST, PUT, DELETE, PATCH).
+     * Routes are tried in order of registration.
+     */
+    std::map<std::string, std::vector<AsyncRouteEntry>> async_routes_;
+
+    /**
+     * Register an async route internally.
+     *
+     * Converts path template like "/users/{id}" to regex and stores handler.
+     */
+    void register_async_route(const std::string& method, const std::string& path, AsyncHandler handler);
+
+    /**
+     * Match async route and extract parameters.
+     *
+     * @param method HTTP method
+     * @param path Request path
+     * @param[out] handler Matched handler (if found)
+     * @param[out] params Extracted route parameters
+     * @return True if route matched
+     */
+    bool match_async_route(
+        const std::string& method,
+        const std::string& path,
+        AsyncHandler* handler,
+        http::RouteParams* params
+    ) const;
 
     // Route metadata for OpenAPI generation
     struct RouteMetadata {

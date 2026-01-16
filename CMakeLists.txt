@@ -1317,6 +1317,16 @@ if (FA_BUILD_HTTP)
         CXX_STANDARD_REQUIRED YES
     )
 
+    # Test async route handlers (C++20 coroutines)
+    add_executable(test_async_handlers tests/test_async_handlers.cpp)
+    target_include_directories(test_async_handlers PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(test_async_handlers PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+    set_target_properties(test_async_handlers PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED YES
+    )
+
     # Note: test_cpp_routes removed - used old CoroIO backend
     # Use native HTTP/2 server with Cython bindings instead
 

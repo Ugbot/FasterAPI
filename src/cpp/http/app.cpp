@@ -126,12 +126,17 @@ Response& Response::header(const std::string& name, const std::string& value) {
 
 Response& Response::content_type(const std::string& type) {
     res_->content_type(type);
+    content_type_set_ = true;
     return *this;
 }
 
 Response& Response::send(const std::string& body) {
-    res_->content_type("text/plain");
-    res_->text(body);
+    // Only set default content-type if not already set by caller
+    if (!content_type_set_) {
+        res_->content_type("text/plain");
+    }
+    // Use body() not text() to avoid overriding content-type
+    res_->body(body);
     res_->send();
     sent_ = true;
     return *this;
@@ -452,6 +457,166 @@ App& App::options(const std::string& path, Handler handler) {
 
 RouteBuilder App::route(const std::string& method, const std::string& path) {
     return RouteBuilder(this, method, path);
+}
+
+// =============================================================================
+// Async Route Registration Methods
+// =============================================================================
+
+App& App::get_async(const std::string& path, AsyncHandler handler) {
+    register_async_route("GET", path, std::move(handler));
+    return *this;
+}
+
+App& App::post_async(const std::string& path, AsyncHandler handler) {
+    register_async_route("POST", path, std::move(handler));
+    return *this;
+}
+
+App& App::put_async(const std::string& path, AsyncHandler handler) {
+    register_async_route("PUT", path, std::move(handler));
+    return *this;
+}
+
+App& App::del_async(const std::string& path, AsyncHandler handler) {
+    register_async_route("DELETE", path, std::move(handler));
+    return *this;
+}
+
+App& App::patch_async(const std::string& path, AsyncHandler handler) {
+    register_async_route("PATCH", path, std::move(handler));
+    return *this;
+}
+
+void App::register_async_route(const std::string& method, const std::string& path, AsyncHandler handler) {
+    LOG_DEBUG("Router", "Registering async: %s %s", method.c_str(), path.c_str());
+
+    // Convert path template to regex
+    // Supports {param} for path parameters and * for wildcards
+    std::string regex_pattern = "^";
+    std::vector<std::string> param_names;
+
+    size_t i = 0;
+    while (i < path.length()) {
+        if (path[i] == '{') {
+            // Find closing brace
+            size_t end = path.find('}', i);
+            if (end != std::string::npos) {
+                // Extract parameter name
+                std::string param_name = path.substr(i + 1, end - i - 1);
+                param_names.push_back(param_name);
+                // Add regex capture group for parameter (matches anything except /)
+                regex_pattern += "([^/]+)";
+                i = end + 1;
+                continue;
+            }
+        } else if (path[i] == '*') {
+            // Wildcard - matches everything
+            regex_pattern += "(.*)";
+            param_names.push_back("wildcard");
+            i++;
+            continue;
+        } else if (path[i] == '.' || path[i] == '+' || path[i] == '?' ||
+                   path[i] == '(' || path[i] == ')' || path[i] == '[' ||
+                   path[i] == ']' || path[i] == '\\' || path[i] == '^' ||
+                   path[i] == '$' || path[i] == '|') {
+            // Escape regex special characters
+            regex_pattern += '\\';
+        }
+        regex_pattern += path[i];
+        i++;
+    }
+    regex_pattern += "$";
+
+    // Compile regex
+    std::regex compiled_pattern(regex_pattern);
+
+    // Store async route entry
+    AsyncRouteEntry entry;
+    entry.pattern = std::move(compiled_pattern);
+    entry.path_template = path;
+    entry.handler = std::move(handler);
+    entry.param_names = std::move(param_names);
+
+    async_routes_[method].push_back(std::move(entry));
+}
+
+bool App::has_async_route(const std::string& method, const std::string& path) const {
+    auto it = async_routes_.find(method);
+    if (it == async_routes_.end()) {
+        return false;
+    }
+
+    for (const auto& entry : it->second) {
+        std::smatch match;
+        if (std::regex_match(path, match, entry.pattern)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool App::match_async_route(
+    const std::string& method,
+    const std::string& path,
+    AsyncHandler* handler,
+    http::RouteParams* params
+) const {
+    auto it = async_routes_.find(method);
+    if (it == async_routes_.end()) {
+        return false;
+    }
+
+    for (const auto& entry : it->second) {
+        std::smatch match;
+        if (std::regex_match(path, match, entry.pattern)) {
+            // Extract parameters
+            if (params) {
+                for (size_t i = 0; i < entry.param_names.size() && i + 1 < match.size(); ++i) {
+                    params->add(entry.param_names[i], match[i + 1].str());
+                }
+            }
+            if (handler) {
+                *handler = entry.handler;
+            }
+            return true;
+        }
+    }
+
+    return false;
+}
+
+core::coro_task<void> App::dispatch_async(Request& req, Response& res) {
+    // Get method and path
+    std::string method = req.method();
+    std::string path = req.path();
+
+    // Match async route
+    AsyncHandler handler;
+    http::RouteParams params;
+
+    if (!match_async_route(method, path, &handler, &params)) {
+        // No async route found - return 404
+        res.not_found().json("{\"error\":\"Not Found\"}");
+        co_return;
+    }
+
+    // Apply global middleware (sync for now)
+    // TODO: Support async middleware chain
+
+    // Create new Request wrapper with extracted params
+    Request request_with_params(req.raw(), params);
+
+    // Call the async handler with params-populated request
+    co_await handler(request_with_params, res);
+
+    // Apply CORS if enabled
+    if (config_.enable_cors) {
+        res.cors(config_.cors_origin);
+    }
+
+    co_return;
 }
 
 App& App::websocket(const std::string& path, WSHandler handler) {
