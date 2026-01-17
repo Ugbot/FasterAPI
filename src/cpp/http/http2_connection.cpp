@@ -683,6 +683,14 @@ core::result<void> Http2Connection::handle_goaway_frame(
         return err<void>(parse_result.error());
     }
 
+    std::cerr << "[HTTP/2] GOAWAY received: last_stream_id=" << last_stream_id
+              << " error_code=" << static_cast<uint32_t>(error_code_val)
+              << " debug_data_len=" << debug_data.size();
+    if (!debug_data.empty()) {
+        std::cerr << " debug_data=\"" << debug_data << "\"";
+    }
+    std::cerr << std::endl;
+
     state_ = ConnectionState::GOAWAY_RECEIVED;
     return ok();
 }
@@ -727,7 +735,8 @@ core::result<void> Http2Connection::apply_settings(
 core::result<void> Http2Connection::send_settings() noexcept {
     std::vector<SettingsParameter> params;
     params.push_back({SettingsId::HEADER_TABLE_SIZE, local_settings_.header_table_size});
-    params.push_back({SettingsId::ENABLE_PUSH, local_settings_.enable_push ? 1u : 0u});
+    // Note: ENABLE_PUSH is a client-only setting per RFC 7540 Section 8.2
+    // Servers indicate push capability by sending (or not) PUSH_PROMISE frames
     params.push_back({SettingsId::MAX_CONCURRENT_STREAMS, local_settings_.max_concurrent_streams});
     params.push_back({SettingsId::INITIAL_WINDOW_SIZE, local_settings_.initial_window_size});
     params.push_back({SettingsId::MAX_FRAME_SIZE, local_settings_.max_frame_size});
