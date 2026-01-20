@@ -50,8 +50,7 @@ UnifiedServer* UnifiedServer::s_instance_ = nullptr;
 // Ultra-fast callback for maximum performance (zero allocation)
 Http1Connection::UltraFastCallback s_ultra_fast_callback_ = nullptr;
 
-// Global request handler (for internal use)
-HttpRequestHandler s_request_handler_;
+// NOTE: Removed duplicate namespace-level s_request_handler_ - use UnifiedServer::s_request_handler_ instead
 
 // ============================================================================
 // Thread-Local Storage Definitions
@@ -122,8 +121,6 @@ UnifiedServer::~UnifiedServer() {
 
 void UnifiedServer::set_request_handler(HttpRequestHandler handler) {
     s_request_handler_ = std::move(handler);
-    // Also update the internal copy
-    fasterapi::http::s_request_handler_ = s_request_handler_;
 }
 
 void UnifiedServer::add_websocket_handler(const std::string& path, WebSocketHandler handler) {
@@ -284,50 +281,34 @@ int UnifiedServer::start() {
     // Create TLS context if enabled
     if (config_.enable_tls) {
         net::TlsContextConfig tls_config;
-        tls_config.cert_file = config_.cert_file;
-        tls_config.key_file = config_.key_file;
-        tls_config.cert_data = config_.cert_data;
-        tls_config.key_data = config_.key_data;
         tls_config.alpn_protocols = config_.alpn_protocols;
 
-        bool has_cert_file = !config_.cert_file.empty() && !config_.key_file.empty();
-        bool has_cert_data = !config_.cert_data.empty() && !config_.key_data.empty();
+        // Generate self-signed certificate (always - simple and works)
+        net::CertGeneratorConfig cert_config;
+        cert_config.common_name = "localhost";
+        cert_config.organization = "FasterAPI";
+        cert_config.validity_days = 365;
 
-        if (!has_cert_file && !has_cert_data) {
-            LOG_INFO("Server", "No TLS certificates provided, generating self-signed certificate...");
-
-            net::CertGeneratorConfig cert_config;
-            cert_config.common_name = "localhost";
-            cert_config.organization = "FasterAPI";
-            cert_config.validity_days = 365;
-
-            auto generated = net::TlsCertGenerator::generate(cert_config);
-            if (!generated.success) {
-                error_message_ = "Failed to generate self-signed certificate: " + generated.error;
-                LOG_ERROR("Server", "%s", error_message_.c_str());
-                return -1;
-            }
-
-            tls_config.cert_data = generated.cert_pem;
-            tls_config.key_data = generated.key_pem;
-
-            LOG_INFO("Server", "Self-signed certificate generated successfully");
-        } else if (has_cert_file) {
-            LOG_INFO("Server", "Using TLS certificates from files: %s, %s",
-                     config_.cert_file.c_str(), config_.key_file.c_str());
-        } else {
-            LOG_INFO("Server", "Using TLS certificates from memory");
+        auto generated = net::TlsCertGenerator::generate(cert_config);
+        if (!generated.success) {
+            error_message_ = "Failed to generate self-signed certificate: " + generated.error;
+            LOG_ERROR("Server", "%s", error_message_.c_str());
+            return -1;
         }
+
+        tls_config.cert_data = generated.cert_pem;
+        tls_config.key_data = generated.key_pem;
 
         tls_context_ = net::TlsContext::create_server(tls_config);
         if (!tls_context_ || !tls_context_->is_valid()) {
             error_message_ = "Failed to create TLS context: " +
-                           (tls_context_ ? tls_context_->get_error() : "null context");
-            LOG_ERROR("Server", "Failed to create TLS context: %s", error_message_.c_str());
+                (tls_context_ ? tls_context_->get_error() : "null context");
+            LOG_ERROR("Server", "%s", error_message_.c_str());
             return -1;
         }
 
-        LOG_INFO("Server", "TLS context created with ALPN protocols: %zu configured", config_.alpn_protocols.size());
+        LOG_INFO("Server", "TLS enabled with self-signed certificate, ALPN: %zu protocols",
+                 config_.alpn_protocols.size());
 
         // Create TLS listener
         net::TcpListenerConfig tls_listener_config;

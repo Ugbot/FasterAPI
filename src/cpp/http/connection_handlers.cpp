@@ -30,8 +30,12 @@ void UnifiedServer::handle_tls_connection(
     net::EventLoop* event_loop,
     std::shared_ptr<net::TlsContext> tls_context
 ) {
+    DEBUG_LOG_TLS("handle_tls_connection called, fd=%d, tls_context=%p",
+                  socket.fd(), (void*)tls_context.get());
+
     // Set non-blocking
     if (socket.set_nonblocking() < 0) {
+        DEBUG_LOG_TLS("Failed to set non-blocking on fd=%d", socket.fd());
         LOG_ERROR("Server", "Failed to set non-blocking on TLS connection");
         return;
     }
@@ -41,19 +45,25 @@ void UnifiedServer::handle_tls_connection(
     int fd = socket.fd();
 
     // Create TLS socket
+    DEBUG_LOG_TLS("Creating TLS socket for fd=%d", fd);
     auto tls_socket = net::TlsSocket::accept(std::move(socket), tls_context);
     if (!tls_socket) {
+        DEBUG_LOG_TLS("Failed to create TLS socket for fd=%d", fd);
         LOG_ERROR("Server", "Failed to create TLS socket");
         return;
     }
+    DEBUG_LOG_TLS("TLS socket created for fd=%d", fd);
 
     // Store TLS socket
     t_tls_sockets[fd] = std::move(tls_socket);
 
     // Add to event loop for TLS handshake
     auto handshake_handler = [](int fd, net::IOEvent events, void* user_data) {
+        DEBUG_LOG_TLS("handshake_handler called fd=%d events=%d", fd, static_cast<int>(events));
+
         auto it = t_tls_sockets.find(fd);
         if (it == t_tls_sockets.end()) {
+            DEBUG_LOG_TLS("fd=%d not found in t_tls_sockets", fd);
             return;
         }
 
@@ -62,6 +72,7 @@ void UnifiedServer::handle_tls_connection(
 
         // Handle errors
         if (events & net::IOEvent::ERROR) {
+            DEBUG_LOG_TLS("ERROR event on fd=%d", fd);
             LOG_ERROR("Server", "TLS socket error on fd=%d", fd);
             loop->remove_fd(fd);
             t_tls_sockets.erase(it);
@@ -71,8 +82,11 @@ void UnifiedServer::handle_tls_connection(
 
         // Process incoming data for handshake
         if (events & net::IOEvent::READ) {
+            DEBUG_LOG_TLS("READ event on fd=%d, calling process_incoming", fd);
             ssize_t result = tls_sock->process_incoming();
+            DEBUG_LOG_TLS("process_incoming returned %zd", result);
             if (result < 0) {
+                DEBUG_LOG_TLS("process_incoming failed fd=%d", fd);
                 LOG_ERROR("Server", "TLS process_incoming failed on fd=%d", fd);
                 loop->remove_fd(fd);
                 t_tls_sockets.erase(it);
@@ -82,7 +96,10 @@ void UnifiedServer::handle_tls_connection(
         }
 
         // Perform handshake
+        DEBUG_LOG_TLS("Calling handshake for fd=%d", fd);
         int hs_result = tls_sock->handshake();
+        DEBUG_LOG_TLS("handshake returned %d for fd=%d, error: %s",
+                      hs_result, fd, tls_sock->get_error().c_str());
 
         if (hs_result == 0) {
             // Handshake complete! Get ALPN protocol
@@ -99,9 +116,108 @@ void UnifiedServer::handle_tls_connection(
                 // HTTP/2
                 LOG_DEBUG("Server", "Routing fd=%d to HTTP/2", fd);
 
-                // Create HTTP/2 connection
+                // Create HTTP/2 connection (constructor queues initial SETTINGS frame)
                 auto http2_conn = new http2::Http2Connection(true);
                 t_http2_connections[fd] = std::unique_ptr<http2::Http2Connection>(http2_conn);
+
+                // Set request callback - routes requests through App or legacy handler
+                // Capture http2_conn pointer since Http2Stream doesn't track connection
+                http2_conn->set_request_callback([http2_conn](http2::Http2Stream* stream) {
+                    if (!stream) return;
+
+                    // Extract request details from stream
+                    std::string method, path;
+                    std::unordered_map<std::string, std::string> headers_map;
+
+                    for (const auto& [key, value] : stream->request_headers()) {
+                        DEBUG_LOG_H2("Callback header: '%s' = '%s'", key.c_str(), value.c_str());
+                        if (key == ":method") method = value;
+                        else if (key == ":path") path = value;
+                        else if (key.empty() || key[0] != ':') {  // Skip pseudo-headers
+                            headers_map[key] = value;
+                        }
+                    }
+
+                    std::string body = stream->request_body();
+                    uint32_t stream_id = stream->id();
+
+                    DEBUG_LOG_H2("Extracted: method='%s' path='%s' body_len=%zu stream=%u",
+                                 method.c_str(), path.c_str(), body.size(), stream_id);
+
+                    // Route request through registered handler
+                    std::unordered_map<std::string, std::string> response_headers;
+                    std::string response_body;
+                    uint16_t status_code = 200;
+
+                    // HTTP/2 handler priority: App instance (unified routing) > legacy callback > 503
+                    DEBUG_LOG_H2("HTTP/2 request: s_app_instance_=%p, s_request_handler_=%s",
+                                 (void*)s_app_instance_,
+                                 UnifiedServer::s_request_handler_ ? "valid" : "null");
+                    if (s_app_instance_) {
+                        // Use App's handle_http2_request for unified HTTP/1 and HTTP/2 routing
+                        s_app_instance_->handle_http2_request(
+                            method, path, headers_map, body,
+                            [&status_code, &response_headers, &response_body](
+                                uint16_t status,
+                                const std::unordered_map<std::string, std::string>& hdrs,
+                                const std::string& body
+                            ) {
+                                status_code = status;
+                                response_headers = hdrs;
+                                response_body = body;
+                            }
+                        );
+                    } else if (UnifiedServer::s_request_handler_) {
+                        // Fallback to legacy request handler callback
+                        UnifiedServer::s_request_handler_(
+                            method, path, headers_map, body,
+                            [&status_code, &response_headers, &response_body](
+                                uint16_t status,
+                                const std::unordered_map<std::string, std::string>& hdrs,
+                                const std::string& body
+                            ) {
+                                status_code = status;
+                                response_headers = hdrs;
+                                response_body = body;
+                            }
+                        );
+                    } else {
+                        status_code = 503;
+                        response_body = "Service Unavailable - No request handler registered\n";
+                        response_headers["content-type"] = "text/plain";
+                    }
+
+                    // Send HTTP/2 response
+                    auto result = http2_conn->send_response(stream_id, status_code, response_headers, response_body);
+                    if (result.is_err()) {
+                        LOG_ERROR("HTTP2", "Failed to send response for stream=%u", stream_id);
+                    }
+                });
+
+                // Send initial SETTINGS frame through TLS (server connection preface)
+                const uint8_t* initial_data;
+                size_t initial_len;
+                int initial_count = 0;
+                DEBUG_LOG_H2("Checking for initial output to send");
+                while (http2_conn->get_output(&initial_data, &initial_len)) {
+                    initial_count++;
+                    DEBUG_LOG_H2("get_output returned %zu bytes (call %d)", initial_len, initial_count);
+                    DEBUG_LOG_H2("Frame hex: %s", fasterapi::core::hex_dump(initial_data, initial_len, 20).c_str());
+
+                    if (initial_len == 0) break;
+
+                    ssize_t written = tls_sock->write(initial_data, initial_len);
+                    DEBUG_LOG_H2("tls_sock->write returned %zd", written);
+                    if (written > 0) {
+                        http2_conn->commit_output(written);
+                        if (written < (ssize_t)initial_len) break;
+                    } else {
+                        break;
+                    }
+                }
+                DEBUG_LOG_H2("Calling flush for initial SETTINGS");
+                bool init_flush = tls_sock->flush();
+                DEBUG_LOG_H2("Initial flush returned %d", init_flush);
 
                 // Add to event loop with HTTP/2 handler
                 loop->add_fd(fd, net::IOEvent::READ | net::IOEvent::EDGE,
@@ -109,6 +225,14 @@ void UnifiedServer::handle_tls_connection(
                                handle_http2_connection(fd, static_cast<net::EventLoop*>(data),
                                                      t_http2_connections[fd].get());
                            }, loop);
+
+                // CRITICAL: Check for pending decrypted data after TLS handshake
+                // (same fix as HTTP/1.1 - edge-triggered kqueue won't trigger for buffered data)
+                if (tls_sock->has_pending_input()) {
+                    LOG_DEBUG("Server", "fd=%d has pending TLS data after handshake - invoking HTTP/2 handler", fd);
+                    DEBUG_LOG_TLS("fd=%d has pending input after handshake, invoking HTTP/2 handler", fd);
+                    handle_http2_connection(fd, loop, http2_conn);
+                }
 
             } else {
                 // HTTP/1.1 (default fallback)
@@ -156,13 +280,31 @@ void UnifiedServer::handle_tls_connection(
                     }
 
                     // Regular HTTP request - invoke global request handler if registered
-                    if (s_request_handler_) {
+                    DEBUG_LOG_HTTP1("Checking handlers: s_app_instance_=%p s_request_handler_=%s",
+                                    (void*)s_app_instance_,
+                                    UnifiedServer::s_request_handler_ ? "valid" : "null");
+
+                    // Try App instance first (unified routing), then legacy handler
+                    if (s_app_instance_) {
+                        s_app_instance_->handle_http2_request(
+                            method, path, headers, body,
+                            [&response](
+                                uint16_t status,
+                                const std::unordered_map<std::string, std::string>& hdrs,
+                                const std::string& body
+                            ) {
+                                response.status = status;
+                                response.body = body;
+                                response.headers = hdrs;
+                            }
+                        );
+                    } else if (UnifiedServer::s_request_handler_) {
                         std::unordered_map<std::string, std::string> response_headers;
                         std::string response_body;
                         uint16_t status_code = 200;
 
                         // Call the handler with a send_response callback
-                        s_request_handler_(
+                        UnifiedServer::s_request_handler_(
                             method,
                             path,
                             headers,
@@ -202,6 +344,17 @@ void UnifiedServer::handle_tls_connection(
                            [conn_ptr](int fd, net::IOEvent events, void* data) {
                                handle_http1_connection(fd, events, static_cast<net::EventLoop*>(data), conn_ptr);
                            }, loop);
+
+                // CRITICAL: Check for pending decrypted data after TLS handshake
+                // With edge-triggered kqueue, we only get READ events when NEW data arrives.
+                // If HTTP request data arrived during the TLS handshake (same TCP segment),
+                // it's already decrypted and buffered - no new event will trigger!
+                if (tls_sock->has_pending_input()) {
+                    LOG_DEBUG("Server", "fd=%d has pending TLS data after handshake - invoking handler", fd);
+                    DEBUG_LOG_TLS("fd=%d has pending input after handshake, invoking HTTP handler", fd);
+                    // Immediately invoke the HTTP handler with a synthetic READ event
+                    handle_http1_connection(fd, net::IOEvent::READ, loop, conn_ptr);
+                }
             }
 
         } else if (hs_result > 0) {
@@ -294,11 +447,84 @@ void UnifiedServer::on_cleartext_connection(net::TcpSocket socket, net::EventLoo
 
             // Fast path: call App::handle_http1_fast() directly if available
             if (s_app_instance_) {
+                // Check if this is an async route first
+                std::string method(view.method);
+                std::string path(view.path);
+
+                if (s_app_instance_->has_async_route(method, path)) {
+                    // Async route - dispatch using coroutine
+                    // For now, run synchronously until coroutine completes
+
+                    // Build headers map
+                    std::unordered_map<std::string, std::string> headers;
+                    headers.reserve(view.header_count);
+                    for (size_t i = 0; i < view.header_count; ++i) {
+                        headers.emplace(
+                            std::string(view.headers[i].first),
+                            std::string(view.headers[i].second)
+                        );
+                    }
+
+                    // Reconstruct full URL with query string
+                    std::string full_path;
+                    if (!view.query_string.empty()) {
+                        full_path.reserve(path.size() + 1 + view.query_string.size());
+                        full_path = path;
+                        full_path += '?';
+                        full_path.append(view.query_string);
+                    } else {
+                        full_path = path;
+                    }
+
+                    // Create HttpRequest from parsed data
+                    HttpRequest req = HttpRequest::from_parsed_data(method, full_path, headers, std::string(view.body));
+
+                    // Create HttpResponse object
+                    HttpResponse res;
+
+                    // Create wrapper objects
+                    RouteParams params;
+                    Request request(&req, params);
+                    Response response_obj(&res);
+
+                    // Get async handler and dispatch
+                    auto coro = s_app_instance_->dispatch_async(request, response_obj);
+
+                    // Run coroutine to completion (synchronous for now)
+                    // This will execute all co_await operations until done
+                    while (coro.resume()) {
+                        // Keep resuming until coroutine completes
+                    }
+
+                    // Build Http1Response from HttpResponse
+                    Http1Response http1_response;
+                    http1_response.status = static_cast<uint16_t>(res.get_status_code());
+
+                    // Get status message
+                    switch (res.get_status_code()) {
+                        case HttpResponse::Status::OK: http1_response.status_message = "OK"; break;
+                        case HttpResponse::Status::CREATED: http1_response.status_message = "Created"; break;
+                        case HttpResponse::Status::NO_CONTENT: http1_response.status_message = "No Content"; break;
+                        case HttpResponse::Status::BAD_REQUEST: http1_response.status_message = "Bad Request"; break;
+                        case HttpResponse::Status::UNAUTHORIZED: http1_response.status_message = "Unauthorized"; break;
+                        case HttpResponse::Status::FORBIDDEN: http1_response.status_message = "Forbidden"; break;
+                        case HttpResponse::Status::NOT_FOUND: http1_response.status_message = "Not Found"; break;
+                        case HttpResponse::Status::INTERNAL_SERVER_ERROR: http1_response.status_message = "Internal Server Error"; break;
+                        default: http1_response.status_message = "OK"; break;
+                    }
+
+                    http1_response.headers = res.get_headers();
+                    http1_response.body = res.get_body();
+
+                    return http1_response;
+                }
+
+                // Sync route - use existing fast path
                 return s_app_instance_->handle_http1_fast(view);
             }
 
             // Fallback to old path if App not set (for backward compatibility)
-            if (s_request_handler_) {
+            if (UnifiedServer::s_request_handler_) {
                 // Build headers map for legacy handler
                 std::unordered_map<std::string, std::string> headers;
                 headers.reserve(view.header_count);
@@ -308,7 +534,7 @@ void UnifiedServer::on_cleartext_connection(net::TcpSocket socket, net::EventLoo
                         std::string(view.headers[i].second)
                     );
                 }
-                
+
                 std::unordered_map<std::string, std::string> response_headers;
                 std::string response_body;
                 uint16_t status_code = 200;
@@ -320,7 +546,7 @@ void UnifiedServer::on_cleartext_connection(net::TcpSocket socket, net::EventLoo
                     full_url += view.query_string;
                 }
 
-                s_request_handler_(
+                UnifiedServer::s_request_handler_(
                     std::string(view.method),
                     full_url,
                     headers,
@@ -377,9 +603,122 @@ void UnifiedServer::handle_http2_connection(
     net::EventLoop* event_loop,
     http2::Http2Connection* http2_conn
 ) {
-    // TODO: Implement HTTP/2 connection handling with TLS I/O
-    // This needs to read/write through the TLS socket
-    LOG_WARN("HTTP2", "HTTP/2 connection handling not yet implemented for fd=%d", fd);
+    LOG_DEBUG("HTTP2", "handle_http2_connection fd=%d", fd);
+
+    // Safety check
+    if (!http2_conn) {
+        LOG_ERROR("HTTP2", "null http2_conn pointer for fd=%d", fd);
+        return;
+    }
+
+    // HTTP/2 over TLS only - look up TLS socket
+    auto tls_it = t_tls_sockets.find(fd);
+    if (tls_it == t_tls_sockets.end()) {
+        LOG_ERROR("HTTP2", "TLS socket not found for fd=%d", fd);
+        // Clean up
+        auto conn_it = t_http2_connections.find(fd);
+        if (conn_it != t_http2_connections.end()) {
+            t_http2_connections.erase(conn_it);
+        }
+        event_loop->remove_fd(fd);
+        ::close(fd);
+        do_track_connection_close();
+        return;
+    }
+
+    net::TlsSocket* tls_sock = tls_it->second.get();
+
+    // Process incoming data through TLS
+    ssize_t incoming_result = tls_sock->process_incoming();
+    if (incoming_result < 0) {
+        LOG_ERROR("HTTP2", "TLS process_incoming failed for fd=%d", fd);
+        event_loop->remove_fd(fd);
+        t_http2_connections.erase(fd);
+        t_tls_sockets.erase(tls_it);
+        ::close(fd);
+        do_track_connection_close();
+        return;
+    }
+
+    // Read decrypted data and feed to HTTP/2 connection
+    char buffer[16384];  // Max HTTP/2 frame size is 16KB
+    ssize_t n = tls_sock->read(buffer, sizeof(buffer));
+
+    if (n < 0) {
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            LOG_ERROR("HTTP2", "TLS read error for fd=%d: errno=%d", fd, errno);
+            event_loop->remove_fd(fd);
+            t_http2_connections.erase(fd);
+            t_tls_sockets.erase(tls_it);
+            ::close(fd);
+            do_track_connection_close();
+        }
+        return;
+    }
+
+    if (n == 0) {
+        // Connection closed
+        LOG_DEBUG("HTTP2", "Connection closed for fd=%d", fd);
+        event_loop->remove_fd(fd);
+        t_http2_connections.erase(fd);
+        t_tls_sockets.erase(tls_it);
+        ::close(fd);
+        do_track_connection_close();
+        return;
+    }
+
+    // Process HTTP/2 frames
+    LOG_DEBUG("HTTP2", "Processing %zd bytes for fd=%d", n, fd);
+    auto result = http2_conn->process_input(reinterpret_cast<const uint8_t*>(buffer), n);
+    if (result.is_err()) {
+        LOG_ERROR("HTTP2", "HTTP/2 frame processing error for fd=%d", fd);
+        event_loop->remove_fd(fd);
+        t_http2_connections.erase(fd);
+        t_tls_sockets.erase(tls_it);
+        ::close(fd);
+        do_track_connection_close();
+        return;
+    }
+
+    // Send any pending output
+    const uint8_t* out_data;
+    size_t out_len;
+    int output_count = 0;
+    while (http2_conn->get_output(&out_data, &out_len)) {
+        output_count++;
+        DEBUG_LOG_H2("get_output returned %zu bytes (call %d)", out_len, output_count);
+        DEBUG_LOG_H2("Frame hex: %s", fasterapi::core::hex_dump(out_data, out_len, 30).c_str());
+        // Write through TLS
+        ssize_t written = tls_sock->write(out_data, out_len);
+        DEBUG_LOG_H2("tls_sock->write returned %zd", written);
+        if (written <= 0) {
+            DEBUG_LOG_H2("write failed, breaking");
+            break;
+        }
+        http2_conn->commit_output(written);
+    }
+    if (output_count == 0) {
+        DEBUG_LOG_H2("No output data to send for fd=%d", fd);
+    }
+
+    // Flush TLS output
+    DEBUG_LOG_H2("Calling tls_sock->flush()");
+    bool flush_complete = tls_sock->flush();
+    DEBUG_LOG_H2("flush_complete=%d", flush_complete);
+    if (!flush_complete) {
+        // Register for WRITE events to complete flush
+        event_loop->modify_fd(fd, net::IOEvent::READ | net::IOEvent::WRITE | net::IOEvent::EDGE);
+    }
+
+    // Check if connection was closed via GOAWAY
+    if (!http2_conn->is_active()) {
+        LOG_DEBUG("HTTP2", "HTTP/2 connection closed for fd=%d", fd);
+        event_loop->remove_fd(fd);
+        t_http2_connections.erase(fd);
+        t_tls_sockets.erase(tls_it);
+        ::close(fd);
+        do_track_connection_close();
+    }
 }
 
 // ============================================================================
@@ -652,8 +991,7 @@ void UnifiedServer::handle_http1_connection(
 
                     // Check for pure C++ handler first (bypasses ZMQ entirely)
                     WebSocketHandler* cpp_handler = UnifiedServer::get_websocket_handler(ws_path);
-                    fprintf(stderr, "[WS_HANDLER_CHECK] cpp_handler=%p for path=%s\n", (void*)cpp_handler, ws_path.c_str());
-                    fflush(stderr);
+                    DEBUG_LOG_WS("cpp_handler=%p for path=%s", (void*)cpp_handler, ws_path.c_str());
                     if (cpp_handler) {
                         // Pure C++ mode - no ZMQ involved
                         LOG_INFO("WebSocket", "Using pure C++ handler for %s (no ZMQ)", ws_path.c_str());
@@ -715,9 +1053,8 @@ void UnifiedServer::handle_http1_connection(
 
                         // Send WS_CONNECT event to Python with handler metadata
                         auto* executor = python::ProcessPoolExecutor::get_instance();
-                        fprintf(stderr, "[WS_CONNECT] executor=%p path=%s conn_id=%lu\n",
-                                 (void*)executor, ws_path.c_str(), conn_id);
-                        fflush(stderr);
+                        DEBUG_LOG_WS("WS_CONNECT executor=%p path=%s conn_id=%lu",
+                                     (void*)executor, ws_path.c_str(), conn_id);
                         LOG_INFO("WebSocket", "WS_CONNECT: executor=%p path=%s conn_id=%lu",
                                  (void*)executor, ws_path.c_str(), conn_id);
                         if (executor) {
@@ -739,8 +1076,7 @@ void UnifiedServer::handle_http1_connection(
                                 payload,
                                 false
                             );
-                            fprintf(stderr, "[WS_CONNECT] send_ws_event returned %d\n", sent ? 1 : 0);
-                            fflush(stderr);
+                            DEBUG_LOG_WS("send_ws_event returned %d", sent ? 1 : 0);
                             LOG_INFO("WebSocket", "WS_CONNECT sent=%d", sent ? 1 : 0);
                         } else {
                             LOG_ERROR("WebSocket", "ProcessPoolExecutor instance is NULL!");
@@ -850,8 +1186,7 @@ void UnifiedServer::handle_http1_connection(
     // This catches WebSocket upgrades that were detected in the ultra-fast callback
     // path where the 101 response is written directly to the buffer
     if (http1_conn->is_websocket_upgrade() && !http1_conn->has_pending_output()) {
-        fprintf(stderr, "[WS_TRANSITION_END] fd=%d path=%s\n", fd, http1_conn->get_websocket_path().c_str());
-        fflush(stderr);
+        DEBUG_LOG_WS("WS_TRANSITION fd=%d path=%s", fd, http1_conn->get_websocket_path().c_str());
         LOG_INFO("WebSocket", "Transitioning fd=%d to WebSocket mode (end of handler), path=%s",
                  fd, http1_conn->get_websocket_path().c_str());
 
@@ -867,8 +1202,7 @@ void UnifiedServer::handle_http1_connection(
 
         // Check for pure C++ handler first (bypasses ZMQ entirely)
         WebSocketHandler* cpp_handler = UnifiedServer::get_websocket_handler(ws_path);
-        fprintf(stderr, "[WS_HANDLER_CHECK_END] cpp_handler=%p for path=%s\n", (void*)cpp_handler, ws_path.c_str());
-        fflush(stderr);
+        DEBUG_LOG_WS("cpp_handler=%p for path=%s", (void*)cpp_handler, ws_path.c_str());
         if (cpp_handler) {
             // Pure C++ mode - no ZMQ involved
             LOG_INFO("WebSocket", "Using pure C++ handler for %s (no ZMQ)", ws_path.c_str());
@@ -930,9 +1264,8 @@ void UnifiedServer::handle_http1_connection(
 
             // Send WS_CONNECT event to Python with handler metadata
             auto* executor = python::ProcessPoolExecutor::get_instance();
-            fprintf(stderr, "[WS_CONNECT_END] executor=%p path=%s conn_id=%lu\n",
-                     (void*)executor, ws_path.c_str(), conn_id);
-            fflush(stderr);
+            DEBUG_LOG_WS("WS_CONNECT executor=%p path=%s conn_id=%lu",
+                         (void*)executor, ws_path.c_str(), conn_id);
             LOG_INFO("WebSocket", "WS_CONNECT: executor=%p path=%s conn_id=%lu",
                      (void*)executor, ws_path.c_str(), conn_id);
             if (executor) {

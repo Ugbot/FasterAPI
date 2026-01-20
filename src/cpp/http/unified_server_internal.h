@@ -77,8 +77,8 @@ extern fasterapi::App* s_app_instance_;
 // Ultra-fast callback for maximum performance
 extern Http1Connection::UltraFastCallback s_ultra_fast_callback_;
 
-// Global request handler
-extern HttpRequestHandler s_request_handler_;
+// Global request handler (use UnifiedServer::s_request_handler_ for legacy fallback)
+// NOTE: Namespace-level s_request_handler_ removed - use class static via UnifiedServer::s_request_handler_
 
 // ============================================================================
 // Helper functions
