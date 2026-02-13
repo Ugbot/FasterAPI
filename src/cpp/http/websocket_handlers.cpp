@@ -98,6 +98,9 @@ void cleanup_websocket_connection(int fd) {
 // WebSocket Connection Handler
 // ============================================================================
 
+// Per-connection receive buffer for incomplete frames
+static thread_local std::unordered_map<int, std::vector<uint8_t>> t_ws_recv_buffers;
+
 void handle_websocket_connection(
     int fd,
     net::IOEvent events,
@@ -112,6 +115,9 @@ void handle_websocket_connection(
         return;
     }
 
+    // Get or create receive buffer for this connection
+    auto& recv_buffer = t_ws_recv_buffers[fd];
+
     // With edge-triggered events, we must keep processing in a loop.
     bool keep_processing = true;
     char buffer[8192];
@@ -124,8 +130,6 @@ void handle_websocket_connection(
             bool connection_closed = false;
             bool received_data = false;
 
-            fprintf(stderr, "[WS_HANDLER] fd=%d handle_websocket_connection READ event\n", fd);
-            fflush(stderr);
 
             // Loop to drain all available data (required for edge-triggered mode)
             while (true) {
@@ -133,12 +137,11 @@ void handle_websocket_connection(
 
                 if (n < 0) {
                     if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                        fprintf(stderr, "[WS_HANDLER] fd=%d recv returned EAGAIN - no more data\n", fd);
-                        fflush(stderr);
                         break;
                     }
                     LOG_ERROR("WebSocket", "Read error on fd=%d: errno=%d", fd, errno);
                     event_loop->remove_fd(fd);
+                    t_ws_recv_buffers.erase(fd);
                     cleanup_websocket_connection(fd);
                     ::close(fd);
                     return;
@@ -146,28 +149,63 @@ void handle_websocket_connection(
 
                 if (n == 0) {
                     connection_closed = true;
-                    fprintf(stderr, "[WS_HANDLER] fd=%d recv returned 0 - connection closed\n", fd);
-                    fflush(stderr);
                     break;
                 }
 
-                fprintf(stderr, "[WS_HANDLER] fd=%d recv got %zd bytes\n", fd, n);
-                fflush(stderr);
 
                 received_data = true;
 
-                // Process WebSocket frames
-                int result = ws_conn->handle_frame(reinterpret_cast<uint8_t*>(buffer), n);
-                fprintf(stderr, "[WS_HANDLER] fd=%d handle_frame returned %d\n", fd, result);
-                fflush(stderr);
-                if (result < 0) {
-                    LOG_ERROR("WebSocket", "Frame handling error on fd=%d: %d", fd, result);
+                // Append to receive buffer
+                recv_buffer.insert(recv_buffer.end(), buffer, buffer + n);
+
+                // Process all complete WebSocket frames in buffer
+                while (!recv_buffer.empty() && ws_conn->is_open()) {
+                    size_t consumed = 0;
+                    int result = ws_conn->handle_frame(recv_buffer.data(), recv_buffer.size(), consumed);
+                    
+                    if (result < 0) {
+                        // Need more data
+                        break;
+                    } else if (result > 0) {
+                        LOG_ERROR("WebSocket", "Frame handling error on fd=%d: %d", fd, result);
+                        break;
+                    }
+                    
+                    // Frame processed successfully - remove consumed bytes
+                    if (consumed > 0 && consumed <= recv_buffer.size()) {
+                        recv_buffer.erase(recv_buffer.begin(), recv_buffer.begin() + consumed);
+                        
+                        // Send any queued responses immediately after each frame
+                        while (ws_conn->has_pending_output()) {
+                            const std::string* frame = ws_conn->get_pending_output();
+                            if (!frame) break;
+
+                            ssize_t sent = ::send(fd, frame->data(), frame->size(), MSG_DONTWAIT);
+                            if (sent < 0) {
+                                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                                    event_loop->modify_fd(fd, net::IOEvent::READ | net::IOEvent::WRITE | net::IOEvent::EDGE);
+                                    return;
+                                }
+                                LOG_ERROR("WebSocket", "Send error on fd=%d: errno=%d", fd, errno);
+                                event_loop->remove_fd(fd);
+                                t_ws_recv_buffers.erase(fd);
+                                cleanup_websocket_connection(fd);
+                                ::close(fd);
+                                return;
+                            }
+                            ws_conn->pop_pending_output();
+                        }
+                    } else {
+                        // No bytes consumed - avoid infinite loop
+                        break;
+                    }
                 }
 
                 // Check if connection was closed by frame handler
                 if (!ws_conn->is_open()) {
                     LOG_DEBUG("WebSocket", "Connection closed by handler on fd=%d", fd);
                     event_loop->remove_fd(fd);
+                    t_ws_recv_buffers.erase(fd);
                     cleanup_websocket_connection(fd);
                     ::close(fd);
                     return;
@@ -177,6 +215,7 @@ void handle_websocket_connection(
             if (connection_closed) {
                 LOG_DEBUG("WebSocket", "Connection closed on fd=%d", fd);
                 event_loop->remove_fd(fd);
+                t_ws_recv_buffers.erase(fd);
                 cleanup_websocket_connection(fd);
                 ::close(fd);
                 return;
@@ -187,7 +226,7 @@ void handle_websocket_connection(
             }
         }
 
-        // Send pending output
+        // Send any remaining pending output
         while (ws_conn->has_pending_output()) {
             const std::string* frame = ws_conn->get_pending_output();
             if (!frame) break;
@@ -200,6 +239,7 @@ void handle_websocket_connection(
                 }
                 LOG_ERROR("WebSocket", "Send error on fd=%d: errno=%d", fd, errno);
                 event_loop->remove_fd(fd);
+                t_ws_recv_buffers.erase(fd);
                 cleanup_websocket_connection(fd);
                 ::close(fd);
                 return;

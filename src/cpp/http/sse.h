@@ -26,6 +26,12 @@ namespace http {
  * 
  * Spec: https://html.spec.whatwg.org/multipage/server-sent-events.html
  */
+/**
+ * Write callback type for SSE connection.
+ * Returns number of bytes written, or -1 on error.
+ */
+using SSEWriteCallback = std::function<ssize_t(const char* data, size_t len)>;
+
 class SSEConnection {
 public:
     /**
@@ -34,6 +40,14 @@ public:
      * @param connection_id Unique connection identifier
      */
     explicit SSEConnection(uint64_t connection_id);
+    
+    /**
+     * Create an SSE connection with a write callback.
+     * 
+     * @param connection_id Unique connection identifier
+     * @param write_cb Callback to write data to client
+     */
+    SSEConnection(uint64_t connection_id, SSEWriteCallback write_cb);
     
     ~SSEConnection();
     
@@ -116,6 +130,13 @@ public:
      */
     const std::string& get_last_event_id() const noexcept;
     
+    /**
+     * Set write callback.
+     * 
+     * @param write_cb Callback to write data to client
+     */
+    void set_write_callback(SSEWriteCallback write_cb) noexcept;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
@@ -125,6 +146,7 @@ private:
     std::atomic<uint64_t> events_sent_{0};
     std::atomic<uint64_t> bytes_sent_{0};
     std::string last_event_id_;
+    SSEWriteCallback write_callback_;
     
     /**
      * Format SSE message according to spec.

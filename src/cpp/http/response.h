@@ -109,8 +109,16 @@ public:
     HttpResponse& json(const std::string& data) noexcept;
 
     /**
+     * Set response body without changing content type.
+     *
+     * @param data Body content
+     * @return Reference to this response
+     */
+    HttpResponse& body(const std::string& data) noexcept;
+
+    /**
      * Send text response.
-     * 
+     *
      * @param text Text content
      * @return Reference to this response
      */

@@ -1,7 +1,7 @@
 {
 	"InstallScripts" : 
 	[
-		"/Users/bengamble/FasterAPI/build/_deps/zstd-subbuild/cmake_install.cmake"
+		"/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/zstd-subbuild/cmake_install.cmake"
 	],
 	"Parallel" : false
 }

@@ -308,6 +308,9 @@ ssize_t TlsSocket::flush_encrypted_output() {
         // Read encrypted data from Wbio
         int pending = BIO_read(wbio_, buffer, sizeof(buffer));
 
+        fprintf(stderr, "[TLS_FLUSH] BIO_read returned %d bytes\n", pending);
+        fflush(stderr);
+
         if (pending <= 0) {
             // No more data to send
             break;
@@ -315,6 +318,8 @@ ssize_t TlsSocket::flush_encrypted_output() {
 
         // Send to network
         ssize_t sent = ::send(tcp_socket_.fd(), buffer, pending, 0);
+        fprintf(stderr, "[TLS_FLUSH] send() returned %zd (pending=%d)\n", sent, pending);
+        fflush(stderr);
 
         if (sent < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -393,6 +398,23 @@ bool TlsSocket::has_pending_output() const {
 
     // Check if Wbio has encrypted data waiting to be sent
     if (wbio_ && BIO_pending(wbio_) > 0) {
+        return true;
+    }
+
+    return false;
+}
+
+bool TlsSocket::has_pending_input() const {
+    // Check if SSL has decrypted data buffered and ready to read
+    // SSL_pending returns the number of bytes that have been processed
+    // by the SSL layer and are available to read via SSL_read()
+    if (ssl_ && SSL_pending(ssl_) > 0) {
+        return true;
+    }
+
+    // Also check if rbio has unprocessed encrypted data
+    // This data would be processed on next SSL_read() call
+    if (rbio_ && BIO_pending(rbio_) > 0) {
         return true;
     }
 

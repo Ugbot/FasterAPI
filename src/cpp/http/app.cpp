@@ -5,6 +5,8 @@
 
 #include "app.h"
 #include "unified_server.h"
+#include "coro_unified_server.h"
+#include "compression_middleware.h"
 #include "core/logger.h"
 #include <sstream>
 #include <algorithm>
@@ -413,6 +415,8 @@ App::~App() {
     route_metadata_.clear();
     global_middleware_.clear();
     path_middleware_.clear();
+    async_global_middleware_.clear();
+    async_path_middleware_.clear();
 }
 
 App::App(App&&) noexcept = default;
@@ -670,9 +674,16 @@ App& App::sse(const std::string& path, SSEHandler handler) {
         // Create connection ID
         uint64_t conn_id = sse_connection_id_counter.fetch_add(1, std::memory_order_relaxed);
 
-        // Create SSE connection (exception-free allocation)
+        // Create write callback that uses Response's streaming API
+        Response* res_ptr = &res;
+        http::SSEWriteCallback write_cb = [res_ptr](const char* data, size_t len) -> ssize_t {
+            res_ptr->stream_chunk(std::string(data, len));
+            return static_cast<ssize_t>(len);
+        };
+
+        // Create SSE connection with write callback
         std::unique_ptr<http::SSEConnection> sse_conn(
-            new (std::nothrow) http::SSEConnection(conn_id)
+            new (std::nothrow) http::SSEConnection(conn_id, std::move(write_cb))
         );
         if (!sse_conn) {
             LOG_ERROR("App", "Failed to allocate SSEConnection (out of memory)");
@@ -698,14 +709,88 @@ App& App::sse(const std::string& path, SSEHandler handler) {
     return *this;
 }
 
+App& App::sse_coro(const std::string& path, http::CoroSSEHandler handler) {
+    // Store handler for transfer to CoroUnifiedServer in run_coro()
+    coro_sse_handlers_[path] = std::move(handler);
+    LOG_INFO("App", "Registered coroutine SSE handler: %s", path.c_str());
+    return *this;
+}
+
 App& App::use(MiddlewareFunc middleware) {
     global_middleware_.push_back(middleware);
+    // Also add wrapped version for async chains so sync middleware works with CoroUnifiedServer
+    async_global_middleware_.push_back(wrap_sync_middleware(middleware));
     return *this;
 }
 
 App& App::use(const std::string& path, MiddlewareFunc middleware) {
     path_middleware_[path].push_back(middleware);
+    // Also add wrapped version for async chains
+    async_path_middleware_[path].push_back(wrap_sync_middleware(middleware));
     return *this;
+}
+
+App& App::use_async(AsyncMiddlewareFunc middleware) {
+    async_global_middleware_.push_back(std::move(middleware));
+    return *this;
+}
+
+App& App::use_async(const std::string& path, AsyncMiddlewareFunc middleware) {
+    async_path_middleware_[path].push_back(std::move(middleware));
+    return *this;
+}
+
+// =============================================================================
+// Async Middleware Chain Execution
+// =============================================================================
+
+AsyncMiddlewareFunc App::wrap_sync_middleware(const MiddlewareFunc& sync_mw) {
+    return [sync_mw](Request& req, Response& res,
+                     std::function<core::coro_task<void>()> next)
+        -> core::coro_task<void> {
+        bool called_next = false;
+        
+        // Call the sync middleware with a sync next() that sets a flag
+        sync_mw(req, res, [&called_next]() { called_next = true; });
+        
+        // If the sync middleware called next(), we co_await the async next
+        if (called_next) {
+            co_await next();
+        }
+        // If middleware didn't call next(), chain is short-circuited (e.g., auth failure)
+        co_return;
+    };
+}
+
+core::coro_task<void> App::execute_async_middleware_chain(
+    Request& request,
+    Response& response,
+    const std::vector<AsyncMiddlewareFunc>& middleware,
+    std::function<core::coro_task<void>()> final_handler
+) {
+    // Use a shared index that all nested calls can see
+    size_t index = 0;
+    
+    // Recursive next function - captures everything by reference
+    // This works because execute_async_middleware_chain owns the coroutine frame
+    std::function<core::coro_task<void>()> next;
+    
+    next = [&]() -> core::coro_task<void> {
+        if (index < middleware.size()) {
+            // Get current middleware and increment index BEFORE calling
+            // This ensures each call to next() advances to the next middleware
+            auto& mw = middleware[index++];
+            co_await mw(request, response, next);
+        } else {
+            // All middleware exhausted, call the final handler (route handler)
+            co_await final_handler();
+        }
+        co_return;
+    };
+    
+    // Start the chain
+    co_await next();
+    co_return;
 }
 
 App& App::static_files(const std::string& url_path, const std::string& directory_path) {
@@ -1271,6 +1356,137 @@ http::Http1Response App::handle_http1_fast(const http::Http1RequestView& view) n
     return http1_response;
 }
 
+void App::handle_http2_request(
+    const std::string& method,
+    const std::string& path,
+    const std::unordered_map<std::string, std::string>& headers,
+    const std::string& body,
+    std::function<void(uint16_t, const std::unordered_map<std::string, std::string>&, const std::string&)> send_response
+) noexcept {
+    LOG_DEBUG("HTTP2", "handle_http2_request: method='%s' path='%s' body_len=%zu",
+              method.c_str(), path.c_str(), body.size());
+
+    // Strip query string from path for route matching
+    std::string route_path = path;
+    size_t query_pos = path.find('?');
+    if (query_pos != std::string::npos) {
+        route_path = path.substr(0, query_pos);
+    }
+
+    // Create HttpRequest from parsed data (stack-allocated, no heap allocation)
+    HttpRequest req = HttpRequest::from_parsed_data(method, path, headers, body);
+
+    // Match route - check async routes FIRST, then fall back to sync router
+    http::RouteParams params;
+    AsyncHandler async_handler;
+    bool has_async_route = match_async_route(method, route_path, &async_handler, &params);
+
+    http::RouteHandler sync_handler = nullptr;
+    if (!has_async_route) {
+        auto* router = server_->get_router();
+        if (router) {
+            sync_handler = router->match(method, route_path, params);
+        }
+    }
+
+    LOG_DEBUG("HTTP2", "route match: async=%s sync=%s for %s %s",
+              has_async_route ? "yes" : "no",
+              sync_handler ? "yes" : "no",
+              method.c_str(), route_path.c_str());
+
+    // If no route found, return 404
+    if (!has_async_route && !sync_handler) {
+        std::unordered_map<std::string, std::string> err_headers;
+        err_headers["content-type"] = "application/json";
+        send_response(404, err_headers, "{\"error\":\"Not Found\"}");
+        return;
+    }
+
+    // For async routes, we need to run the coroutine synchronously
+    // This is a blocking call - the coroutine runs to completion
+    if (has_async_route) {
+        // Create wrapper objects
+        Request request(&req, params);
+        HttpResponse res;
+        Response response(&res);
+
+        // Run the async handler as a coroutine
+        auto coro = async_handler(request, response);
+
+        // Execute the coroutine to completion (blocking)
+        // This works because the handler doesn't actually suspend on I/O
+        while (!coro.done()) {
+            coro.resume();
+        }
+
+        // Apply CORS if enabled
+        auto res_headers = res.get_headers();
+        auto res_headers_mut = const_cast<std::unordered_map<std::string, std::string>&>(res_headers);
+        if (config_.enable_cors) {
+            res_headers_mut["Access-Control-Allow-Origin"] = config_.cors_origin;
+            res_headers_mut["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS";
+            res_headers_mut["Access-Control-Allow-Headers"] = "Content-Type, Authorization";
+        }
+
+        // Send response
+        send_response(static_cast<uint16_t>(res.get_status_code()), res_headers_mut, res.get_body());
+        return;
+    }
+
+    // Fall through to sync handler
+
+    // Create HttpResponse object (stack-allocated, no heap allocation)
+    HttpResponse res;
+
+    // Create wrapper objects
+    Request request(&req, params);
+    Response response(&res);
+
+    // Build middleware chain (adapted from wrap_handler)
+    std::vector<MiddlewareFunc> all_middleware;
+
+    // Add global middleware
+    all_middleware.insert(all_middleware.end(),
+        global_middleware_.begin(), global_middleware_.end());
+
+    // Add path-specific middleware
+    for (const auto& [prefix, middleware_list] : path_middleware_) {
+        if (path.find(prefix) == 0) {
+            all_middleware.insert(all_middleware.end(),
+                middleware_list.begin(), middleware_list.end());
+        }
+    }
+
+    // Execute middleware chain
+    size_t middleware_index = 0;
+    std::function<void()> next;
+
+    next = [&]() {
+        if (middleware_index < all_middleware.size()) {
+            auto& middleware = all_middleware[middleware_index++];
+            middleware(request, response, next);
+        } else {
+            // All middleware executed, call the route handler
+            sync_handler(&req, &res, params);
+        }
+    };
+
+    // Start middleware chain
+    next();
+
+    // CORS handling if enabled
+    if (config_.enable_cors) {
+        response.cors(config_.cors_origin);
+    }
+
+    // Send response via callback
+    send_response(
+        static_cast<uint16_t>(res.get_status_code()),
+        res.get_headers(),
+        res.get_body()
+    );
+}
+
 // =============================================================================
 // UnifiedServer Integration (Multi-protocol Pure C++ Mode)
 // =============================================================================
@@ -1284,15 +1500,24 @@ int App::run_unified(const std::string& host, uint16_t port) {
     http::UnifiedServerConfig server_config;
     server_config.host = host;
     server_config.http1_port = port;
-    server_config.enable_http1_cleartext = true;
     server_config.pure_cpp_mode = config_.pure_cpp_mode;
 
     // TLS configuration
+    LOG_DEBUG("App", "TLS config check: cert_path='%s' key_path='%s'",
+              config_.cert_path.c_str(), config_.key_path.c_str());
     server_config.enable_tls = !config_.cert_path.empty() && !config_.key_path.empty();
+    LOG_DEBUG("App", "TLS enabled: %s", server_config.enable_tls ? "true" : "false");
     if (server_config.enable_tls) {
         server_config.cert_file = config_.cert_path;
         server_config.key_file = config_.key_path;
-        server_config.tls_port = 443;  // Standard HTTPS port
+        // Use configured TLS port, or same as main port if 0
+        server_config.tls_port = (config_.tls_port != 0) ? config_.tls_port : port;
+        // If TLS port equals HTTP port, disable cleartext (TLS-only mode)
+        server_config.enable_http1_cleartext = (server_config.tls_port != port);
+        LOG_DEBUG("App", "TLS port: %d, cleartext: %s",
+                  server_config.tls_port, server_config.enable_http1_cleartext ? "enabled" : "disabled");
+    } else {
+        server_config.enable_http1_cleartext = true;
     }
 
     // HTTP/2 and HTTP/3 configuration
@@ -1301,8 +1526,11 @@ int App::run_unified(const std::string& host, uint16_t port) {
     server_config.enable_webtransport = config_.enable_webtransport;
 
     // Worker configuration
-    server_config.num_workers = 0;  // Auto-detect CPU count
+    server_config.num_workers = config_.num_workers;  // 0 = auto-detect CPU count
     server_config.use_reuseport = true;
+    
+    LOG_INFO("App", "UnifiedServer workers: %zu (0=auto)",
+             server_config.num_workers);
 
     // Log mode
     if (config_.pure_cpp_mode) {
@@ -1316,6 +1544,56 @@ int App::run_unified(const std::string& host, uint16_t port) {
 
     // Set this App instance for direct HTTP/1.1 handling
     unified_server.set_app_instance(this);
+
+    // Set HTTP/2 request handler bridge (HTTP/2 uses set_request_handler, not app_instance)
+    // This bridges HTTP/2 requests to the App's router
+    unified_server.set_request_handler([this](
+        const std::string& method,
+        const std::string& path,
+        const std::unordered_map<std::string, std::string>& headers,
+        const std::string& body,
+        std::function<void(uint16_t, const std::unordered_map<std::string, std::string>&, const std::string&)> send_response
+    ) {
+        // Create HttpRequest from parsed data
+        HttpRequest request = HttpRequest::from_parsed_data(method, path, headers, body);
+
+        // Create HttpResponse
+        HttpResponse response;
+
+        // Strip query string from path for route matching
+        std::string route_path = path;
+        size_t query_pos = path.find('?');
+        if (query_pos != std::string::npos) {
+            route_path = path.substr(0, query_pos);
+        }
+
+        // Match route and get handler using server_'s router
+        http::RouteParams params;
+        http::RouteHandler handler = server_->get_router()->match(method, route_path, params);
+
+        if (handler) {
+            // Call user's route handler with path parameters
+            handler(&request, &response, params);
+        } else {
+            // No route found - return 404
+            response.status(HttpResponse::Status::NOT_FOUND)
+                   .content_type("application/json")
+                   .json("{\"error\":\"Not Found\"}");
+        }
+
+        // Apply CORS if enabled
+        if (config_.enable_cors) {
+            auto& resp_headers = const_cast<std::unordered_map<std::string, std::string>&>(response.get_headers());
+            resp_headers["Access-Control-Allow-Origin"] = config_.cors_origin;
+            resp_headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS";
+            resp_headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization";
+        }
+
+        // Extract response data and send via callback
+        uint16_t status_code = static_cast<uint16_t>(response.get_status_code());
+        send_response(status_code, response.get_headers(), response.get_body());
+    });
+    LOG_INFO("App", "HTTP/2 request handler bridge registered");
 
     // Set ultra-fast callback if configured (bypasses routing for max perf)
     if (ultra_fast_callback_) {
@@ -1346,6 +1624,180 @@ int App::run_unified(const std::string& host, uint16_t port) {
     int result = unified_server.start();
     if (result != 0) {
         LOG_ERROR("App", "UnifiedServer failed to start: %s", unified_server.get_error().c_str());
+        return result;
+    }
+
+    return 0;
+}
+
+// =============================================================================
+// CoroUnifiedServer Integration (Seastar-inspired Coroutine Architecture)
+// =============================================================================
+
+int App::run_coro(const std::string& host, uint16_t port) {
+    LOG_INFO("App", "Starting CoroUnifiedServer (Seastar-inspired architecture)");
+
+    // Create CoroUnifiedServer configuration from App config
+    http::CoroUnifiedServerConfig server_config;
+    server_config.host = host;
+    server_config.http1_port = port;
+    server_config.num_io_threads = config_.num_io_threads;
+    server_config.num_workers = config_.num_workers;
+
+    // TLS configuration
+    if (!config_.cert_path.empty() && !config_.key_path.empty()) {
+        server_config.enable_tls = true;
+        server_config.cert_file = config_.cert_path;
+        server_config.key_file = config_.key_path;
+        // Use configured TLS port, or same as main port if 0
+        server_config.tls_port = (config_.tls_port != 0) ? config_.tls_port : port;
+        // If TLS port equals HTTP port, disable cleartext (TLS-only mode)
+        server_config.enable_http1_cleartext = (server_config.tls_port != port);
+        LOG_INFO("App", "TLS enabled on port %d, cleartext %s",
+                 server_config.tls_port,
+                 server_config.enable_http1_cleartext ? "enabled" : "disabled");
+    } else {
+        server_config.enable_tls = false;
+        server_config.enable_http1_cleartext = true;
+        LOG_INFO("App", "Cleartext HTTP/1.1 only (no TLS)");
+    }
+
+    LOG_INFO("App", "I/O threads: %zu, Worker threads: %zu (0=auto)",
+             server_config.num_io_threads, server_config.num_workers);
+
+    // Create CoroUnifiedServer
+    http::CoroUnifiedServer coro_server(server_config);
+
+    // Set coroutine request handler that wraps our router with full middleware support
+    coro_server.set_handler([this](const http::CoroHttpRequest& req)
+        -> core::coro_task<http::CoroHttpResponse> {
+
+        http::CoroHttpResponse response;
+
+        // Create HttpRequest from parsed data
+        HttpRequest http_req = HttpRequest::from_parsed_data(
+            req.method, req.path, req.headers, req.body);
+
+        // Create HttpResponse for the handler
+        HttpResponse http_resp;
+
+        // Strip query string from path for route matching
+        std::string route_path = req.path;
+        size_t query_pos = req.path.find('?');
+        if (query_pos != std::string::npos) {
+            route_path = req.path.substr(0, query_pos);
+        }
+
+        // Match route first to get params (needed for Request wrapper)
+        http::RouteParams params;
+        AsyncHandler async_handler;
+        bool has_async_route = match_async_route(req.method, route_path, &async_handler, &params);
+        
+        http::RouteHandler sync_handler = nullptr;
+        if (!has_async_route) {
+            sync_handler = server_->get_router()->match(req.method, route_path, params);
+        }
+
+        // Create Request/Response wrappers
+        Request fapi_req(&http_req, params);
+        Response fapi_resp(&http_resp);
+
+        // Build middleware chain: global + path-specific
+        std::vector<AsyncMiddlewareFunc> middleware_chain;
+        
+        // Add global async middleware
+        middleware_chain.insert(middleware_chain.end(),
+            async_global_middleware_.begin(), async_global_middleware_.end());
+        
+        // Add path-specific async middleware
+        for (const auto& [prefix, middleware_list] : async_path_middleware_) {
+            if (route_path.find(prefix) == 0) {
+                middleware_chain.insert(middleware_chain.end(),
+                    middleware_list.begin(), middleware_list.end());
+            }
+        }
+
+        // Create the final handler that routes to async or sync handler
+        auto route_handler = [&]() -> core::coro_task<void> {
+            if (has_async_route) {
+                co_await async_handler(fapi_req, fapi_resp);
+            } else if (sync_handler) {
+                // Sync handler - call directly (no co_await needed)
+                sync_handler(&http_req, &http_resp, params);
+            } else {
+                // No route found - return 404
+                http_resp.status(HttpResponse::Status::NOT_FOUND)
+                        .content_type("application/json")
+                        .json("{\"error\":\"Not Found\"}");
+            }
+            co_return;
+        };
+
+        // Execute middleware chain -> route handler
+        if (!middleware_chain.empty()) {
+            co_await execute_async_middleware_chain(
+                fapi_req, fapi_resp, middleware_chain, route_handler);
+        } else {
+            // No middleware - call handler directly
+            co_await route_handler();
+        }
+
+        // Apply CORS if enabled (post-handler)
+        if (config_.enable_cors) {
+            auto& resp_headers = const_cast<std::unordered_map<std::string, std::string>&>(
+                http_resp.get_headers());
+            resp_headers["Access-Control-Allow-Origin"] = config_.cors_origin;
+            resp_headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS";
+            resp_headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization";
+        }
+
+        // Apply browser-compatible compression (gzip/brotli, no zstd).
+        // This compresses the response body based on Accept-Encoding header.
+        // Always enabled for browser-facing routes - the middleware only adds
+        // Content-Encoding header if compression actually reduces size and
+        // the client accepts the algorithm.
+        static http::CompressionMiddleware compressor(
+            http::compression_presets::browser_compatible());
+        compressor.apply(req.headers, http_resp);
+
+        // Convert to CoroHttpResponse
+        response.status = static_cast<uint16_t>(http_resp.get_status_code());
+        response.body = http_resp.get_body();
+        response.headers = http_resp.get_headers();
+
+        co_return response;
+    });
+
+    // Set ultra-fast callback if configured (bypasses routing for max perf)
+    if (ultra_fast_callback_) {
+        coro_server.set_ultra_fast_callback(ultra_fast_callback_);
+        LOG_INFO("App", "Ultra-fast callback enabled (bypasses routing)");
+    }
+
+    // Transfer WebSocket handlers to CoroUnifiedServer
+    for (const auto& [ws_path, ws_handler] : websocket_handlers_) {
+        coro_server.add_websocket_handler(ws_path, ws_handler);
+        LOG_INFO("App", "Registered WebSocket handler (coro): %s", ws_path.c_str());
+    }
+
+    // Transfer coroutine SSE handlers to CoroUnifiedServer
+    for (const auto& [sse_path, sse_handler] : coro_sse_handlers_) {
+        coro_server.add_sse_handler(sse_path, sse_handler);
+        LOG_INFO("App", "Registered SSE handler (coro): %s", sse_path.c_str());
+    }
+
+    LOG_INFO("App", "FasterAPI coroutine server starting on http://%s:%d", host.c_str(), port);
+    if (server_config.enable_tls) {
+        LOG_INFO("App", "TLS enabled on port %d (HTTP/1.1 + HTTP/2)", server_config.tls_port);
+    }
+    if (config_.enable_docs) {
+        LOG_INFO("App", "Documentation: http://%s:%d%s", host.c_str(), port, config_.docs_url.c_str());
+    }
+
+    // Start the coroutine server (blocks until stopped)
+    int result = coro_server.start();
+    if (result != 0) {
+        LOG_ERROR("App", "CoroUnifiedServer failed to start");
         return result;
     }
 

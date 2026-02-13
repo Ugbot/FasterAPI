@@ -114,6 +114,11 @@ int WebSocketConnection::close(uint16_t code, const char* reason) {
 
 int WebSocketConnection::handle_frame(const uint8_t* data, size_t length) {
     size_t consumed = 0;
+    return handle_frame(data, length, consumed);
+}
+
+int WebSocketConnection::handle_frame(const uint8_t* data, size_t length, size_t& consumed_out) {
+    consumed_out = 0;
     websocket::FrameHeader header;
     const uint8_t* payload_start = nullptr;
     size_t payload_length = 0;
@@ -121,7 +126,7 @@ int WebSocketConnection::handle_frame(const uint8_t* data, size_t length) {
     int result = parser_.parse_frame(
         data,
         length,
-        consumed,
+        consumed_out,
         header,
         payload_start,
         payload_length
@@ -130,6 +135,9 @@ int WebSocketConnection::handle_frame(const uint8_t* data, size_t length) {
     if (result != 0) {
         return result;  // Need more data or error
     }
+    
+    // Reset parser for next frame
+    parser_.reset();
     
     // Unmask if masked (client frames should be masked)
     std::vector<uint8_t> payload_copy;
@@ -146,7 +154,7 @@ int WebSocketConnection::handle_frame(const uint8_t* data, size_t length) {
         payload = payload_copy.data();
     }
     
-    bytes_received_ += consumed;
+    bytes_received_ += consumed_out;
     
     // Handle control frames
     if (header.opcode == OpCode::CLOSE ||
@@ -322,8 +330,6 @@ int WebSocketConnection::send_frame(OpCode opcode, const uint8_t* data, size_t l
 void WebSocketConnection::handle_message(OpCode opcode, const uint8_t* data, size_t length) {
     messages_received_++;
 
-    fprintf(stderr, "[WS_MESSAGE] handle_message called: opcode=%d length=%zu\n", static_cast<int>(opcode), length);
-    fflush(stderr);
 
     if (opcode == OpCode::TEXT) {
         // Validate UTF-8
@@ -335,19 +341,11 @@ void WebSocketConnection::handle_message(OpCode opcode, const uint8_t* data, siz
             return;
         }
 
-        fprintf(stderr, "[WS_MESSAGE] TEXT message, on_text_message set: %s\n", on_text_message ? "yes" : "no");
-        fflush(stderr);
 
         if (on_text_message) {
             std::string message(reinterpret_cast<const char*>(data), length);
-            fprintf(stderr, "[WS_MESSAGE] Calling on_text_message with: %s\n", message.c_str());
-            fflush(stderr);
             on_text_message(message);
-            fprintf(stderr, "[WS_MESSAGE] on_text_message returned\n");
-            fflush(stderr);
         } else {
-            fprintf(stderr, "[WS_MESSAGE] on_text_message is NULL!\n");
-            fflush(stderr);
         }
     } else if (opcode == OpCode::BINARY) {
         if (on_binary_message) {

@@ -48,14 +48,9 @@ ToolResult ToolRegistry::call_tool(const std::string& name, const std::string& p
         handler = it->second.handler;
     }
 
-    try {
-        std::string result = handler(params);
-        return ToolResult{false, result, std::nullopt};
-    } catch (const std::exception& e) {
-        return ToolResult{true, "", e.what()};
-    } catch (...) {
-        return ToolResult{true, "", "Unknown error"};
-    }
+    // Note: Built with -fno-exceptions, handlers must not throw
+    std::string result = handler(params);
+    return ToolResult{false, result, std::nullopt};
 }
 
 bool ToolRegistry::has_tool(const std::string& name) const {
@@ -106,11 +101,8 @@ std::optional<ResourceContent> ResourceRegistry::read_resource(const std::string
         provider = it->second.provider;
     }
 
-    try {
-        return provider(uri);
-    } catch (...) {
-        return std::nullopt;
-    }
+    // Note: Built with -fno-exceptions, provider must not throw
+    return provider(uri);
 }
 
 bool ResourceRegistry::has_resource(const std::string& uri) const {
@@ -164,11 +156,8 @@ std::optional<std::string> PromptRegistry::get_prompt_content(
         generator = it->second.generator;
     }
 
-    try {
-        return generator(args);
-    } catch (...) {
-        return std::nullopt;
-    }
+    // Note: Built with -fno-exceptions, generator must not throw
+    return generator(args);
 }
 
 bool PromptRegistry::has_prompt(const std::string& name) const {
@@ -177,6 +166,11 @@ bool PromptRegistry::has_prompt(const std::string& name) const {
 }
 
 // MCPServer implementation
+
+MCPServer::MCPServer()
+    : config_()
+{
+}
 
 MCPServer::MCPServer(const Config& config)
     : config_(config)

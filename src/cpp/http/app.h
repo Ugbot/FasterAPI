@@ -35,6 +35,7 @@
 #include "websocket.h"
 #include "sse.h"
 #include "http1_connection.h"
+#include "coro_unified_server.h"
 #include "../core/coro_task.h"
 
 #include <functional>
@@ -44,6 +45,7 @@
 #include <map>
 #include <optional>
 #include <regex>
+#include <type_traits>
 
 namespace fasterapi {
 
@@ -184,7 +186,7 @@ using AsyncHandler = std::function<core::coro_task<void>(Request&, Response&)>;
 using WSHandler = std::function<void(http::WebSocketConnection&)>;
 
 /**
- * SSE handler type.
+ * SSE handler type (synchronous, for use with UnifiedServer).
  */
 using SSEHandler = std::function<void(http::SSEConnection&)>;
 
@@ -192,6 +194,29 @@ using SSEHandler = std::function<void(http::SSEConnection&)>;
  * Middleware function type - can modify request/response or call next.
  */
 using MiddlewareFunc = std::function<void(Request&, Response&, std::function<void()> next)>;
+
+/**
+ * Async middleware function type - compatible with coroutines.
+ *
+ * Async middleware can co_await async operations and must call next() to continue
+ * the middleware chain. If next() is not called, the chain is short-circuited.
+ *
+ * Example:
+ * @code
+ * app.use_async([](Request& req, Response& res, auto next) -> core::coro_task<void> {
+ *     auto token = req.header("Authorization");
+ *     auto user = co_await validate_token_async(token);
+ *     if (!user) {
+ *         res.unauthorized().json({{"error", "Invalid token"}});
+ *         co_return;  // Short-circuit - don't call next
+ *     }
+ *     co_await next();  // Continue to next middleware/handler
+ * });
+ * @endcode
+ */
+using AsyncMiddlewareFunc = std::function<
+    core::coro_task<void>(Request&, Response&, std::function<core::coro_task<void>()> next)
+>;
 
 /**
  * Route configuration builder - allows chaining configuration methods.
@@ -317,6 +342,7 @@ public:
         // TLS settings
         std::string cert_path;
         std::string key_path;
+        uint16_t tls_port = 0;  // 0 = same as main port (TLS on main port)
 
         // Performance
         uint32_t max_connections = 10000;
@@ -338,6 +364,12 @@ public:
         // - All handlers must be C++ (no Python callbacks)
         // - Uses UnifiedServer with pure_cpp_mode enabled
         bool pure_cpp_mode = false;
+
+        // Coroutine server configuration (for run_coro)
+        // num_io_threads: I/O dispatcher threads (1-2 recommended)
+        // num_workers: Worker pool size for coroutine execution (0 = auto = CPU count)
+        size_t num_io_threads = 1;
+        size_t num_workers = 0;
     };
 
     /**
@@ -361,32 +393,52 @@ public:
     // =========================================================================
     // Route Registration - HTTP Methods
     // =========================================================================
+    // IMPORTANT: These sync route methods are for handlers that return void.
+    // For coroutine handlers that use co_await and return coro_task<void>,
+    // use the *_async variants instead (get_async, post_async, etc.)
+    //
+    // Using the wrong method type will result in silent failures or empty
+    // responses. When in doubt, check your handler's return type:
+    //   - void               -> use get(), post(), put(), del(), patch()
+    //   - coro_task<void>    -> use get_async(), post_async(), put_async(), etc.
 
     /**
-     * Register a GET route.
+     * Register a GET route with a synchronous handler.
      *
      * @param path Route path (supports {param} and *wildcard)
-     * @param handler Request handler
+     * @param handler Request handler (must return void)
+     *
+     * IMPORTANT: For async handlers that use co_await and return coro_task<void>,
+     * use get_async() instead. Using get() with an async handler will cause
+     * silent failures.
      */
     App& get(const std::string& path, Handler handler);
 
     /**
-     * Register a POST route.
+     * Register a POST route with a synchronous handler.
+     *
+     * IMPORTANT: For async handlers, use post_async() instead.
      */
     App& post(const std::string& path, Handler handler);
 
     /**
-     * Register a PUT route.
+     * Register a PUT route with a synchronous handler.
+     *
+     * IMPORTANT: For async handlers, use put_async() instead.
      */
     App& put(const std::string& path, Handler handler);
 
     /**
-     * Register a DELETE route.
+     * Register a DELETE route with a synchronous handler.
+     *
+     * IMPORTANT: For async handlers, use del_async() instead.
      */
     App& del(const std::string& path, Handler handler);
 
     /**
-     * Register a PATCH route.
+     * Register a PATCH route with a synchronous handler.
+     *
+     * IMPORTANT: For async handlers, use patch_async() instead.
      */
     App& patch(const std::string& path, Handler handler);
 
@@ -505,6 +557,18 @@ public:
      */
     App& sse(const std::string& path, SSEHandler handler);
 
+    /**
+     * Register a coroutine SSE endpoint (for use with CoroUnifiedServer).
+     *
+     * The handler receives the I/O dispatcher, file descriptor, and request.
+     * It should stream events by writing directly to the fd via io.async_write().
+     * SSE headers are automatically sent before the handler is invoked.
+     *
+     * @param path SSE path
+     * @param handler Coroutine SSE handler
+     */
+    App& sse_coro(const std::string& path, http::CoroSSEHandler handler);
+
     // =========================================================================
     // Middleware
     // =========================================================================
@@ -526,6 +590,24 @@ public:
      * @param middleware Middleware function
      */
     App& use(const std::string& path, MiddlewareFunc middleware);
+
+    /**
+     * Add global async middleware.
+     *
+     * Async middleware can use co_await for non-blocking operations.
+     * Works with both sync and async route handlers.
+     *
+     * @param middleware Async middleware function
+     */
+    App& use_async(AsyncMiddlewareFunc middleware);
+
+    /**
+     * Add async middleware for specific path prefix.
+     *
+     * @param path Path prefix (e.g., "/api")
+     * @param middleware Async middleware function
+     */
+    App& use_async(const std::string& path, AsyncMiddlewareFunc middleware);
 
     // =========================================================================
     // Static Files
@@ -593,6 +675,30 @@ public:
      * @return Error code (0 = success)
      */
     int run_unified(const std::string& host = "0.0.0.0", uint16_t port = 8080);
+
+    /**
+     * Run using CoroUnifiedServer (coroutine-based architecture).
+     *
+     * This is the preferred method for production servers using async coroutines.
+     * Implements the Seastar-inspired architecture:
+     * - 1-2 I/O threads for event dispatch
+     * - N worker threads executing coroutines
+     * - True async with zero-allocation per-request
+     *
+     * Features:
+     * - Lower CPU usage when idle (no per-thread event loops)
+     * - Coroutines yield on blocking I/O instead of blocking threads
+     * - Better scalability for high-concurrency workloads
+     *
+     * Configure via App::Config:
+     * - num_io_threads: I/O dispatcher threads (default 1, max 2 recommended)
+     * - num_workers: Worker pool size (default 0 = auto-detect CPU count)
+     *
+     * @param host Host to bind (e.g., "0.0.0.0")
+     * @param port Cleartext HTTP/1.1 port (default 8080)
+     * @return Error code (0 = success)
+     */
+    int run_coro(const std::string& host = "0.0.0.0", uint16_t port = 8080);
 
     /**
      * Set ultra-fast callback for maximum performance plaintext routes.
@@ -673,15 +779,39 @@ public:
      */
     http::Http1Response handle_http1_fast(const http::Http1RequestView& view) noexcept;
 
+    /**
+     * Handle HTTP/2 request - used by UnifiedServer for HTTP/2 streams.
+     * Routes through same handlers as HTTP/1, but uses callback for response.
+     * This ensures HTTP handlers work transparently with both HTTP/1 and HTTP/2.
+     *
+     * @param method HTTP method
+     * @param path Request path
+     * @param headers Request headers
+     * @param body Request body
+     * @param send_response Callback to send response (status, headers, body)
+     */
+    void handle_http2_request(
+        const std::string& method,
+        const std::string& path,
+        const std::unordered_map<std::string, std::string>& headers,
+        const std::string& body,
+        std::function<void(uint16_t, const std::unordered_map<std::string, std::string>&, const std::string&)> send_response
+    ) noexcept;
+
 private:
     Config config_;
     std::unique_ptr<HttpServer> server_;
     std::vector<MiddlewareFunc> global_middleware_;
     std::map<std::string, std::vector<MiddlewareFunc>> path_middleware_;
+    std::vector<AsyncMiddlewareFunc> async_global_middleware_;
+    std::map<std::string, std::vector<AsyncMiddlewareFunc>> async_path_middleware_;
     std::map<std::string, std::string> static_paths_;
 
     // WebSocket handlers stored for transfer to UnifiedServer in run_unified()
     std::map<std::string, WSHandler> websocket_handlers_;
+
+    // Coroutine SSE handlers stored for transfer to CoroUnifiedServer in run_coro()
+    std::map<std::string, http::CoroSSEHandler> coro_sse_handlers_;
 
     // Ultra-fast callback for maximum performance (bypasses routing)
     http::Http1Connection::UltraFastCallback ultra_fast_callback_ = nullptr;
@@ -761,6 +891,36 @@ private:
         Handler user_handler,
         const std::vector<MiddlewareFunc>& route_middleware
     );
+
+    /**
+     * Execute async middleware chain as a coroutine.
+     *
+     * Recursively calls each middleware, awaiting the next() function.
+     * When all middleware are exhausted, calls the final handler.
+     *
+     * @param request Request object
+     * @param response Response object
+     * @param middleware Vector of async middleware functions
+     * @param final_handler Handler to call after all middleware
+     * @return Coroutine task that completes when chain is done
+     */
+    core::coro_task<void> execute_async_middleware_chain(
+        Request& request,
+        Response& response,
+        const std::vector<AsyncMiddlewareFunc>& middleware,
+        std::function<core::coro_task<void>()> final_handler
+    );
+
+    /**
+     * Wrap sync middleware for use in async middleware chain.
+     *
+     * Converts a synchronous MiddlewareFunc to an AsyncMiddlewareFunc.
+     * The sync middleware's next() call triggers co_await on the async next().
+     *
+     * @param sync_mw Synchronous middleware to wrap
+     * @return AsyncMiddlewareFunc that wraps the sync middleware
+     */
+    static AsyncMiddlewareFunc wrap_sync_middleware(const MiddlewareFunc& sync_mw);
 
     /**
      * Initialize default routes (docs, OpenAPI, health check).

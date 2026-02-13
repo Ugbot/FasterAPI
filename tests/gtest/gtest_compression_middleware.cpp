@@ -796,6 +796,188 @@ TEST_F(CompressionMiddlewareTest, RoundTripZstd) {
     EXPECT_EQ(decompressed, original);
 }
 
+// =============================================================================
+// Compression Presets Tests
+// =============================================================================
+
+TEST_F(CompressionMiddlewareTest, BrowserCompatiblePresetExcludesZstd) {
+    // Browser-compatible preset should not include zstd
+    auto config = compression_presets::browser_compatible();
+    
+    EXPECT_TRUE(config.enabled);
+    EXPECT_EQ(config.preferred_algorithms.size(), 3);
+    
+    // Should include brotli, gzip, deflate but NOT zstd
+    bool has_brotli = false;
+    bool has_gzip = false;
+    bool has_deflate = false;
+    bool has_zstd = false;
+    
+    for (auto algo : config.preferred_algorithms) {
+        if (algo == CompressionAlgorithm::BROTLI) has_brotli = true;
+        if (algo == CompressionAlgorithm::GZIP) has_gzip = true;
+        if (algo == CompressionAlgorithm::DEFLATE) has_deflate = true;
+        if (algo == CompressionAlgorithm::ZSTD) has_zstd = true;
+    }
+    
+    EXPECT_TRUE(has_brotli);
+    EXPECT_TRUE(has_gzip);
+    EXPECT_TRUE(has_deflate);
+    EXPECT_FALSE(has_zstd);  // zstd should NOT be in browser-compatible preset
+}
+
+TEST_F(CompressionMiddlewareTest, BrowserCompatiblePresetSelectsGzipWhenRequested) {
+    auto config = compression_presets::browser_compatible();
+    CompressionMiddleware middleware(config);
+
+    std::unordered_map<std::string, std::string> req_headers;
+    // Typical browser Accept-Encoding header
+    req_headers["Accept-Encoding"] = "gzip, deflate, br";
+
+    Http1Response response;
+    response.body = generate_json(2000);
+    response.headers["Content-Type"] = "application/json";
+
+    size_t original_size = response.body.size();
+    bool compressed = middleware.apply(req_headers, response);
+
+    ASSERT_TRUE(compressed);
+    // Brotli should be selected as it's first in preference and browser supports it
+    EXPECT_EQ(response.headers["Content-Encoding"], "br");
+    EXPECT_LT(response.body.size(), original_size);
+}
+
+TEST_F(CompressionMiddlewareTest, BrowserCompatiblePresetFallsToGzip) {
+    auto config = compression_presets::browser_compatible();
+    CompressionMiddleware middleware(config);
+
+    std::unordered_map<std::string, std::string> req_headers;
+    // Client only accepts gzip (no brotli)
+    req_headers["Accept-Encoding"] = "gzip, deflate";
+
+    Http1Response response;
+    response.body = generate_json(2000);
+    response.headers["Content-Type"] = "application/json";
+
+    bool compressed = middleware.apply(req_headers, response);
+
+    ASSERT_TRUE(compressed);
+    // Should fall back to gzip
+    EXPECT_EQ(response.headers["Content-Encoding"], "gzip");
+}
+
+TEST_F(CompressionMiddlewareTest, GzipOnlyPreset) {
+    auto config = compression_presets::gzip_only();
+    
+    EXPECT_EQ(config.preferred_algorithms.size(), 1);
+    EXPECT_EQ(config.preferred_algorithms[0], CompressionAlgorithm::GZIP);
+    
+    CompressionMiddleware middleware(config);
+
+    std::unordered_map<std::string, std::string> req_headers;
+    // Even if client prefers brotli, we only use gzip
+    req_headers["Accept-Encoding"] = "br, gzip, deflate";
+
+    Http1Response response;
+    response.body = generate_json(2000);
+    response.headers["Content-Type"] = "application/json";
+
+    bool compressed = middleware.apply(req_headers, response);
+
+    ASSERT_TRUE(compressed);
+    // Should only use gzip, not brotli
+    EXPECT_EQ(response.headers["Content-Encoding"], "gzip");
+}
+
+TEST_F(CompressionMiddlewareTest, ApiOptimizedPresetIncludesZstd) {
+    auto config = compression_presets::api_optimized();
+    
+    // Should include all algorithms with zstd first
+    bool has_zstd = false;
+    for (auto algo : config.preferred_algorithms) {
+        if (algo == CompressionAlgorithm::ZSTD) has_zstd = true;
+    }
+    
+    EXPECT_TRUE(has_zstd);
+    // Zstd should be first preference for API clients
+    EXPECT_EQ(config.preferred_algorithms[0], CompressionAlgorithm::ZSTD);
+}
+
+TEST_F(CompressionMiddlewareTest, ApiOptimizedPresetUsesZstdWhenAvailable) {
+    auto config = compression_presets::api_optimized();
+    CompressionMiddleware middleware(config);
+
+    std::unordered_map<std::string, std::string> req_headers;
+    // API client that accepts zstd
+    req_headers["Accept-Encoding"] = "gzip, br, zstd";
+
+    Http1Response response;
+    response.body = generate_json(2000);
+    response.headers["Content-Type"] = "application/json";
+
+    bool compressed = middleware.apply(req_headers, response);
+
+    ASSERT_TRUE(compressed);
+    // Should use zstd as it's preferred for API clients
+    EXPECT_EQ(response.headers["Content-Encoding"], "zstd");
+}
+
+TEST_F(CompressionMiddlewareTest, FastPresetUsesLowestLevel) {
+    auto config = compression_presets::fast();
+    
+    EXPECT_EQ(config.level, CompressionLevel::FASTEST);
+    
+    // Should prefer gzip for compatibility
+    bool has_gzip = false;
+    for (auto algo : config.preferred_algorithms) {
+        if (algo == CompressionAlgorithm::GZIP) has_gzip = true;
+    }
+    EXPECT_TRUE(has_gzip);
+}
+
+TEST_F(CompressionMiddlewareTest, BestRatioPresetUsesHighestLevel) {
+    auto config = compression_presets::best_ratio();
+    
+    EXPECT_EQ(config.level, CompressionLevel::BEST);
+    
+    // Should prefer brotli for best ratio
+    EXPECT_EQ(config.preferred_algorithms[0], CompressionAlgorithm::BROTLI);
+}
+
+TEST_F(CompressionMiddlewareTest, MakeSharedCompressionMiddlewareWorks) {
+    auto config = compression_presets::browser_compatible();
+    auto middleware = make_shared_compression_middleware(config);
+    
+    ASSERT_NE(middleware, nullptr);
+    
+    std::unordered_map<std::string, std::string> req_headers;
+    req_headers["Accept-Encoding"] = "gzip";
+
+    Http1Response response;
+    response.body = generate_json(2000);
+    response.headers["Content-Type"] = "application/json";
+
+    bool compressed = middleware->apply(req_headers, response);
+    EXPECT_TRUE(compressed);
+    EXPECT_EQ(response.headers["Content-Encoding"], "gzip");
+}
+
+TEST_F(CompressionMiddlewareTest, MakeResponseCompressorWorks) {
+    auto compressor = make_response_compressor(compression_presets::gzip_only());
+    
+    std::unordered_map<std::string, std::string> req_headers;
+    req_headers["Accept-Encoding"] = "gzip, br";
+
+    Http1Response response;
+    response.body = generate_json(2000);
+    response.headers["Content-Type"] = "application/json";
+
+    bool compressed = compressor(req_headers, response);
+    
+    EXPECT_TRUE(compressed);
+    EXPECT_EQ(response.headers["Content-Encoding"], "gzip");
+}
+
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

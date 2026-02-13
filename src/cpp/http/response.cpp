@@ -115,7 +115,7 @@ std::string format_http_date(time_t t) {
 // Default constructor
 HttpResponse::HttpResponse() 
     : status_(Status::OK), type_(Type::TEXT), is_streaming_(false), 
-      is_sent_(false), compression_enabled_(true), compression_level_(3),
+      is_sent_(false), compression_enabled_(false), compression_level_(3),
       original_size_(0), compressed_size_(0) {
     // Pre-allocate headers map to avoid rehashing (reduces per-request allocations)
     headers_.reserve(16);  // Typical response has 5-15 headers
@@ -142,6 +142,11 @@ HttpResponse& HttpResponse::content_type(const std::string& content_type) noexce
 HttpResponse& HttpResponse::json(const std::string& data) noexcept {
     body_ = data;
     return content_type("application/json");
+}
+
+HttpResponse& HttpResponse::body(const std::string& data) noexcept {
+    body_ = data;
+    return *this;
 }
 
 HttpResponse& HttpResponse::text(const std::string& text) noexcept {
@@ -268,15 +273,10 @@ int HttpResponse::send() noexcept {
     
     original_size_ = body_.length() + binary_body_.size();
     
-    // uWebSockets integration disabled for now
-    
-    // Fallback implementation
-    if (compression_enabled_ && original_size_ > 1024) {
-        compressed_size_ = original_size_;  // Placeholder
-        headers_["content-encoding"] = "zstd";
-    } else {
-        compressed_size_ = original_size_;
-    }
+    // Compression disabled - stub code removed to prevent browser decode failures.
+    // The old code added content-encoding: zstd header without actually compressing,
+    // which caused ERR_CONTENT_DECODING_FAILED in browsers.
+    compressed_size_ = original_size_;
     
     is_sent_ = true;
     return 0;

@@ -28,8 +28,8 @@ set_property(GLOBAL PROPERTY _CMAKE_FindGit_GIT_EXECUTABLE_VERSION
 include(ExternalProject)
 ExternalProject_Add(simdjson-populate
                      "UPDATE_DISCONNECTED" "False" "GIT_REPOSITORY" "https://github.com/simdjson/simdjson.git" "EXTERNALPROJECT_INTERNAL_ARGUMENT_SEPARATOR" "GIT_TAG" "v3.10.1" "GIT_SHALLOW" "TRUE"
-                    SOURCE_DIR          "/Users/bengamble/FasterAPI/build/cpm-cache/simdjson/e2872dae246ae21201588fe57bc477e26fdade81"
-                    BINARY_DIR          "/Users/bengamble/FasterAPI/build/_deps/simdjson-build"
+                    SOURCE_DIR          "/Users/bengamble/Sabot/vendor/FasterAPI/build/cpm-cache/simdjson/e2872dae246ae21201588fe57bc477e26fdade81"
+                    BINARY_DIR          "/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/simdjson-build"
                     CONFIGURE_COMMAND   ""
                     BUILD_COMMAND       ""
                     INSTALL_COMMAND     ""

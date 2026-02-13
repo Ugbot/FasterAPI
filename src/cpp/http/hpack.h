@@ -228,8 +228,8 @@ private:
 
     // Temporary buffers for literal headers without indexing
     // These are needed to store string data that isn't in the dynamic table
-    std::string temp_name_buffer_;
-    std::string temp_value_buffer_;
+    // Using a vector to handle multiple such headers per decode() call
+    std::vector<std::pair<std::string, std::string>> temp_buffers_;
 
     /**
      * Decode string from HPACK format.

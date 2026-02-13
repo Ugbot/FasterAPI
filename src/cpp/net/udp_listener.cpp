@@ -3,7 +3,7 @@
  */
 
 #include "udp_listener.h"
-#include <iostream>
+#include "../core/logger.h"
 #include <csignal>
 #include <cstring>
 #include <unistd.h>
@@ -24,7 +24,7 @@ UdpListener::UdpListener(const UdpListenerConfig& config, DatagramCallback datag
 
     // Ensure SO_REUSEPORT is enabled for multi-worker setup
     if (config_.num_workers > 1 && !config_.use_reuseport) {
-        std::cerr << "Warning: Multi-worker setup requires SO_REUSEPORT. Enabling it." << std::endl;
+        LOG_WARN("UDP", "Multi-worker setup requires SO_REUSEPORT. Enabling it.");
         config_.use_reuseport = true;
     }
 }
@@ -40,12 +40,12 @@ int UdpListener::start() noexcept {
 
     running_.store(true);
 
-    std::cout << "Starting UDP listener on " << config_.host << ":" << config_.port << std::endl;
-    std::cout << "Workers: " << config_.num_workers << std::endl;
-    std::cout << "SO_REUSEPORT: " << (config_.use_reuseport ? "enabled" : "disabled") << std::endl;
-    std::cout << "Address family: " << (config_.address_family == AF_INET ? "IPv4" : "IPv6") << std::endl;
-    std::cout << "Max datagram size: " << config_.max_datagram_size << " bytes" << std::endl;
-    std::cout << "Socket buffer size: " << config_.recv_buffer_size << " bytes" << std::endl;
+    LOG_INFO("UDP", "Starting on %s:%d (workers: %d, reuseport: %s, AF: %s)",
+             config_.host.c_str(), config_.port, config_.num_workers,
+             config_.use_reuseport ? "enabled" : "disabled",
+             config_.address_family == AF_INET ? "IPv4" : "IPv6");
+    LOG_INFO("UDP", "Max datagram: %zu bytes, socket buffer: %zu bytes",
+             config_.max_datagram_size, config_.recv_buffer_size);
 
     // Create worker threads
     for (uint16_t i = 0; i < config_.num_workers; i++) {
@@ -82,16 +82,16 @@ bool UdpListener::is_running() const noexcept {
 }
 
 void UdpListener::worker_thread(int worker_id) noexcept {
-    std::cout << "Worker " << worker_id << " starting" << std::endl;
+    LOG_INFO("UDP", "Worker %d starting", worker_id);
 
     // Create event loop for this worker
     auto event_loop = create_event_loop();
     if (!event_loop) {
-        std::cerr << "Worker " << worker_id << ": Failed to create event loop" << std::endl;
+        LOG_ERROR("UDP", "Worker %d: Failed to create event loop", worker_id);
         return;
     }
 
-    std::cout << "Worker " << worker_id << ": Using " << event_loop->platform_name() << " event loop" << std::endl;
+    LOG_INFO("UDP", "Worker %d: Using %s event loop", worker_id, event_loop->platform_name());
 
     // Register event loop for shutdown
     {
@@ -102,11 +102,11 @@ void UdpListener::worker_thread(int worker_id) noexcept {
     // Create UDP socket
     int udp_fd = create_udp_socket();
     if (udp_fd < 0) {
-        std::cerr << "Worker " << worker_id << ": Failed to create UDP socket: " << strerror(errno) << std::endl;
+        LOG_ERROR("UDP", "Worker %d: Failed to create UDP socket: %s", worker_id, strerror(errno));
         return;
     }
 
-    std::cout << "Worker " << worker_id << ": Listening on fd " << udp_fd << std::endl;
+    LOG_INFO("UDP", "Worker %d: Listening on fd %d", worker_id, udp_fd);
 
     // Pre-allocate receive buffer (no allocations in hot path)
     std::vector<uint8_t> recv_buffer(config_.max_datagram_size);
@@ -133,7 +133,7 @@ void UdpListener::worker_thread(int worker_id) noexcept {
                     // No more datagrams
                     break;
                 }
-                std::cerr << "recvfrom error: " << strerror(errno) << std::endl;
+                LOG_ERROR("UDP", "recvfrom error: %s", strerror(errno));
                 continue;
             }
 
@@ -150,62 +150,62 @@ void UdpListener::worker_thread(int worker_id) noexcept {
 
     // Add UDP socket to event loop (edge-triggered for maximum throughput)
     if (event_loop->add_fd(udp_fd, IOEvent::READ | IOEvent::EDGE, recv_handler, nullptr) < 0) {
-        std::cerr << "Worker " << worker_id << ": Failed to add UDP socket to event loop: "
-                  << strerror(errno) << std::endl;
+        LOG_ERROR("UDP", "Worker %d: Failed to add UDP socket to event loop: %s",
+                  worker_id, strerror(errno));
         close(udp_fd);
         return;
     }
 
     // Run event loop
-    std::cout << "Worker " << worker_id << ": Running event loop" << std::endl;
+    LOG_INFO("UDP", "Worker %d: Running event loop", worker_id);
     event_loop->run();
 
     // Cleanup
     event_loop->remove_fd(udp_fd);
     close(udp_fd);
 
-    std::cout << "Worker " << worker_id << " stopped" << std::endl;
+    LOG_INFO("UDP", "Worker %d stopped", worker_id);
 }
 
 int UdpListener::create_udp_socket() noexcept {
     UdpSocket socket(config_.address_family == AF_INET6);
 
     if (!socket.is_valid()) {
-        std::cerr << "Failed to create UDP socket: " << strerror(errno) << std::endl;
+        LOG_ERROR("UDP", "Failed to create UDP socket: %s", strerror(errno));
         return -1;
     }
 
     // Set socket options
     if (socket.set_reuseaddr() < 0) {
-        std::cerr << "Failed to set SO_REUSEADDR: " << strerror(errno) << std::endl;
+        LOG_ERROR("UDP", "Failed to set SO_REUSEADDR: %s", strerror(errno));
         return -1;
     }
 
     // Set SO_REUSEPORT if enabled (required for multi-worker)
     if (config_.use_reuseport) {
         if (socket.set_reuseport() < 0) {
-            std::cerr << "Failed to set SO_REUSEPORT: " << strerror(errno) << std::endl;
+            LOG_ERROR("UDP", "Failed to set SO_REUSEPORT: %s", strerror(errno));
             return -1;
         }
     }
 
     // Set non-blocking
     if (socket.set_nonblocking() < 0) {
-        std::cerr << "Failed to set non-blocking: " << strerror(errno) << std::endl;
+        LOG_ERROR("UDP", "Failed to set non-blocking: %s", strerror(errno));
         return -1;
     }
 
     // Set receive buffer size (important for high-throughput UDP)
     if (socket.set_recv_buffer_size(config_.recv_buffer_size) < 0) {
-        std::cerr << "Warning: Failed to set receive buffer size to "
-                  << config_.recv_buffer_size << ": " << strerror(errno) << std::endl;
+        LOG_WARN("UDP", "Failed to set receive buffer size to %zu: %s",
+                 config_.recv_buffer_size, strerror(errno));
         // Continue anyway - not critical
     }
 
     // Enable packet info (to get destination address)
     if (config_.enable_pktinfo) {
         if (socket.set_recv_pktinfo(true) < 0) {
-            std::cerr << "Warning: Failed to enable IP_PKTINFO: " << strerror(errno) << std::endl;
+            LOG_WARN("UDP", "Failed to enable IP_PKTINFO: %s", strerror(errno));
             // Continue anyway - not critical for basic operation
         }
     }
@@ -213,15 +213,15 @@ int UdpListener::create_udp_socket() noexcept {
     // Enable TOS/ECN info (for congestion control)
     if (config_.enable_tos) {
         if (socket.set_recv_tos(true) < 0) {
-            std::cerr << "Warning: Failed to enable IP_RECVTOS: " << strerror(errno) << std::endl;
+            LOG_WARN("UDP", "Failed to enable IP_RECVTOS: %s", strerror(errno));
             // Continue anyway - not critical for basic operation
         }
     }
 
     // Bind to address
     if (socket.bind(config_.host, config_.port) < 0) {
-        std::cerr << "Failed to bind to " << config_.host << ":" << config_.port
-                  << ": " << strerror(errno) << std::endl;
+        LOG_ERROR("UDP", "Failed to bind to %s:%d: %s",
+                  config_.host.c_str(), config_.port, strerror(errno));
         return -1;
     }
 

@@ -6,22 +6,22 @@ cmake_minimum_required(VERSION ${CMAKE_VERSION}) # this file comes with cmake
 # If CMAKE_DISABLE_SOURCE_CHANGES is set to true and the source directory is an
 # existing directory in our source tree, calling file(MAKE_DIRECTORY) on it
 # would cause a fatal error, even though it would be a no-op.
-if(NOT EXISTS "/Users/bengamble/FasterAPI/build/cpm-cache/simdjson/e2872dae246ae21201588fe57bc477e26fdade81")
-  file(MAKE_DIRECTORY "/Users/bengamble/FasterAPI/build/cpm-cache/simdjson/e2872dae246ae21201588fe57bc477e26fdade81")
+if(NOT EXISTS "/Users/bengamble/Sabot/vendor/FasterAPI/build/cpm-cache/simdjson/e2872dae246ae21201588fe57bc477e26fdade81")
+  file(MAKE_DIRECTORY "/Users/bengamble/Sabot/vendor/FasterAPI/build/cpm-cache/simdjson/e2872dae246ae21201588fe57bc477e26fdade81")
 endif()
 file(MAKE_DIRECTORY
-  "/Users/bengamble/FasterAPI/build/_deps/simdjson-build"
-  "/Users/bengamble/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix"
-  "/Users/bengamble/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/tmp"
-  "/Users/bengamble/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src/simdjson-populate-stamp"
-  "/Users/bengamble/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src"
-  "/Users/bengamble/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src/simdjson-populate-stamp"
+  "/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/simdjson-build"
+  "/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix"
+  "/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/tmp"
+  "/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src/simdjson-populate-stamp"
+  "/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src"
+  "/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src/simdjson-populate-stamp"
 )
 
 set(configSubDirs )
 foreach(subDir IN LISTS configSubDirs)
-    file(MAKE_DIRECTORY "/Users/bengamble/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src/simdjson-populate-stamp/${subDir}")
+    file(MAKE_DIRECTORY "/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src/simdjson-populate-stamp/${subDir}")
 endforeach()
 if(cfgdir)
-  file(MAKE_DIRECTORY "/Users/bengamble/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src/simdjson-populate-stamp${cfgdir}") # cfgdir has leading slash
+  file(MAKE_DIRECTORY "/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src/simdjson-populate-stamp${cfgdir}") # cfgdir has leading slash
 endif()

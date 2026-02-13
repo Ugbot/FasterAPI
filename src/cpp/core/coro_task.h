@@ -45,6 +45,9 @@ public:
         alignas(std::exception_ptr) unsigned char exception_storage_[sizeof(std::exception_ptr)];
         bool has_value_ = false;
         bool has_exception_ = false;
+        
+        // Continuation (parent coroutine to resume when done)
+        std::coroutine_handle<> continuation_;
 
         // Accessors
         T& value() { return *reinterpret_cast<T*>(value_storage_); }
@@ -63,9 +66,23 @@ public:
         std::suspend_always initial_suspend() noexcept { return {}; }
 
         /**
-         * Final suspend: allow cleanup.
+         * Final suspend: resume the continuation (parent coroutine).
          */
-        std::suspend_always final_suspend() noexcept { return {}; }
+        struct final_awaiter {
+            bool await_ready() const noexcept { return false; }
+            
+            std::coroutine_handle<> await_suspend(std::coroutine_handle<promise_type> h) noexcept {
+                auto& promise = h.promise();
+                if (promise.continuation_) {
+                    return promise.continuation_;  // Resume parent
+                }
+                return std::noop_coroutine();  // No continuation, just stop
+            }
+            
+            void await_resume() noexcept {}
+        };
+        
+        final_awaiter final_suspend() noexcept { return {}; }
 
         /**
          * Store return value.
@@ -112,7 +129,9 @@ public:
         }
 
         std::coroutine_handle<> await_suspend(std::coroutine_handle<> awaiting) noexcept {
-            // Resume the task coroutine
+            // Store continuation so child can resume us when done
+            handle_.promise().continuation_ = awaiting;
+            // Resume the child coroutine
             return handle_;
         }
 
@@ -207,6 +226,22 @@ public:
         return handle_ && handle_.done();
     }
 
+    /**
+     * Get raw coroutine handle.
+     */
+    std::coroutine_handle<> get_handle() const noexcept {
+        return handle_;
+    }
+
+    /**
+     * Release ownership of the coroutine handle.
+     * After this, the coro_task no longer owns or destroys the handle.
+     * The caller is responsible for eventually destroying it.
+     */
+    std::coroutine_handle<promise_type> release() noexcept {
+        return std::exchange(handle_, nullptr);
+    }
+
 private:
     std::coroutine_handle<promise_type> handle_;
 };
@@ -220,19 +255,48 @@ public:
     struct promise_type {
         std::exception_ptr exception_;
         bool has_exception_ = false;
+        
+        // Continuation (parent coroutine to resume when done)
+        std::coroutine_handle<> continuation_;
 
         coro_task get_return_object() {
             return coro_task{std::coroutine_handle<promise_type>::from_promise(*this)};
         }
 
         std::suspend_always initial_suspend() noexcept { return {}; }
-        std::suspend_always final_suspend() noexcept { return {}; }
+        
+        /**
+         * Final suspend: resume the continuation (parent coroutine).
+         */
+        struct final_awaiter {
+            bool await_ready() const noexcept { return false; }
+            
+            std::coroutine_handle<> await_suspend(std::coroutine_handle<promise_type> h) noexcept {
+                auto& promise = h.promise();
+                if (promise.continuation_) {
+                    return promise.continuation_;  // Resume parent
+                }
+                return std::noop_coroutine();  // No continuation, just stop
+            }
+            
+            void await_resume() noexcept {}
+        };
+        
+        final_awaiter final_suspend() noexcept { return {}; }
 
         void return_void() noexcept {}
 
         void unhandled_exception() noexcept {
             exception_ = std::current_exception();
             has_exception_ = true;
+            // Debug: print what the exception is
+            try {
+                std::rethrow_exception(exception_);
+            } catch (const std::exception& e) {
+                std::cerr << "COROUTINE EXCEPTION (void): " << e.what() << std::endl;
+            } catch (...) {
+                std::cerr << "COROUTINE EXCEPTION (void): unknown type" << std::endl;
+            }
         }
     };
 
@@ -244,6 +308,9 @@ public:
         }
 
         std::coroutine_handle<> await_suspend(std::coroutine_handle<> awaiting) noexcept {
+            // Store continuation so child can resume us when done
+            handle_.promise().continuation_ = awaiting;
+            // Resume the child coroutine
             return handle_;
         }
 
@@ -304,6 +371,15 @@ public:
 
     std::coroutine_handle<> get_handle() const noexcept {
         return handle_;
+    }
+
+    /**
+     * Release ownership of the coroutine handle.
+     * After this, the coro_task no longer owns or destroys the handle.
+     * The caller is responsible for eventually destroying it.
+     */
+    std::coroutine_handle<promise_type> release() noexcept {
+        return std::exchange(handle_, nullptr);
     }
 
 private:

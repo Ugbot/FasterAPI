@@ -29,8 +29,7 @@ bool StdioUpstreamConnection::connect() {
     // Create STDIO transport in client mode
     transport_ = std::make_shared<StdioTransport>(
         config_.command,
-        config_.args,
-        TransportMode::CLIENT
+        config_.args
     );
 
     // Connect with timeout

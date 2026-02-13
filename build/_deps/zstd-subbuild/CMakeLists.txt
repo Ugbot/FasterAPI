@@ -28,8 +28,8 @@ set_property(GLOBAL PROPERTY _CMAKE_FindGit_GIT_EXECUTABLE_VERSION
 include(ExternalProject)
 ExternalProject_Add(zstd-populate
                      "UPDATE_DISCONNECTED" "False" "GIT_REPOSITORY" "https://github.com/facebook/zstd.git" "EXTERNALPROJECT_INTERNAL_ARGUMENT_SEPARATOR" "GIT_TAG" "v1.5.6" "GIT_SHALLOW" "TRUE"
-                    SOURCE_DIR          "/Users/bengamble/FasterAPI/build/cpm-cache/zstd/5375622b5fd73dea578f509561685c3376dce674"
-                    BINARY_DIR          "/Users/bengamble/FasterAPI/build/_deps/zstd-build"
+                    SOURCE_DIR          "/Users/bengamble/Sabot/vendor/FasterAPI/build/cpm-cache/zstd/5375622b5fd73dea578f509561685c3376dce674"
+                    BINARY_DIR          "/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/zstd-build"
                     CONFIGURE_COMMAND   ""
                     BUILD_COMMAND       ""
                     INSTALL_COMMAND     ""

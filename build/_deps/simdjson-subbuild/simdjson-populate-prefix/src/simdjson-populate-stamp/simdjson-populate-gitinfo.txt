@@ -3,9 +3,9 @@
 # No other meaning or use of this file is supported.
 
 method=git
-command=/opt/homebrew/bin/cmake;-DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE;-P;/Users/bengamble/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/tmp/simdjson-populate-gitclone.cmake
-source_dir=/Users/bengamble/FasterAPI/build/cpm-cache/simdjson/e2872dae246ae21201588fe57bc477e26fdade81
-work_dir=/Users/bengamble/FasterAPI/build/cpm-cache/simdjson
+command=/opt/homebrew/bin/cmake;-DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE;-P;/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/tmp/simdjson-populate-gitclone.cmake
+source_dir=/Users/bengamble/Sabot/vendor/FasterAPI/build/cpm-cache/simdjson/e2872dae246ae21201588fe57bc477e26fdade81
+work_dir=/Users/bengamble/Sabot/vendor/FasterAPI/build/cpm-cache/simdjson
 repository=https://github.com/simdjson/simdjson.git
 remote=origin
 init_submodules=TRUE

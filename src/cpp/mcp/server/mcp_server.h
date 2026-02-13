@@ -232,7 +232,8 @@ public:
         bool notify_prompts_changed = true;
     };
 
-    explicit MCPServer(const Config& config = Config());
+    MCPServer();
+    explicit MCPServer(const Config& config);
     ~MCPServer();
 
     /**

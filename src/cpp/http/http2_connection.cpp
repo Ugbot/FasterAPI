@@ -1,4 +1,5 @@
 #include "http2_connection.h"
+#include "core/logger.h"
 #include <cstring>
 #include <algorithm>
 #include <iostream>
@@ -239,17 +240,14 @@ core::result<size_t> Http2Connection::process_input(const uint8_t* data, size_t 
         size_t bytes_available = std::min(bytes_needed, len);
 
         // Debug: Log received bytes
-        std::cerr << "[HTTP/2] Validating preface: offset=" << preface_bytes_validated_
-                  << " bytes_available=" << bytes_available << " len=" << len << std::endl;
-        std::cerr << "[HTTP/2] Expected: ";
-        for (size_t i = 0; i < bytes_available; ++i) {
-            std::cerr << std::hex << (int)(unsigned char)CONNECTION_PREFACE[preface_bytes_validated_ + i] << " ";
-        }
-        std::cerr << std::endl << "[HTTP/2] Received: ";
-        for (size_t i = 0; i < bytes_available; ++i) {
-            std::cerr << std::hex << (int)(unsigned char)data[i] << " ";
-        }
-        std::cerr << std::dec << std::endl;
+        DEBUG_LOG_H2("Validating preface: offset=%zu bytes_available=%zu len=%zu",
+                     preface_bytes_validated_, bytes_available, len);
+        DEBUG_LOG_H2("Expected: %s",
+                     fasterapi::core::hex_dump(
+                         reinterpret_cast<const uint8_t*>(CONNECTION_PREFACE + preface_bytes_validated_),
+                         bytes_available).c_str());
+        DEBUG_LOG_H2("Received: %s",
+                     fasterapi::core::hex_dump(data, bytes_available).c_str());
 
         // Validate the bytes we can against the correct position in preface
         if (std::memcmp(
@@ -258,11 +256,11 @@ core::result<size_t> Http2Connection::process_input(const uint8_t* data, size_t 
             bytes_available
         ) != 0) {
             // Preface mismatch - protocol error
-            std::cerr << "[HTTP/2] Preface mismatch!" << std::endl;
+            DEBUG_LOG_H2("Preface mismatch!");
             return err<size_t>(error_code::internal_error);
         }
 
-        std::cerr << "[HTTP/2] Preface bytes validated OK" << std::endl;
+        DEBUG_LOG_H2("Preface bytes validated OK");
 
         // Update validated byte count and consumed count
         preface_bytes_validated_ += bytes_available;
@@ -271,7 +269,7 @@ core::result<size_t> Http2Connection::process_input(const uint8_t* data, size_t 
         // Check if we've received the complete preface
         if (preface_bytes_validated_ == CONNECTION_PREFACE_LEN) {
             // Complete preface received and validated
-            std::cerr << "[HTTP/2] Complete preface validated, transitioning to ACTIVE state" << std::endl;
+            DEBUG_LOG_H2("Complete preface validated, transitioning to ACTIVE state");
             state_ = ConnectionState::ACTIVE;
             // Note: Initial SETTINGS already queued in constructor
         } else {
@@ -280,7 +278,7 @@ core::result<size_t> Http2Connection::process_input(const uint8_t* data, size_t 
         }
     }
 
-    std::cerr << "[HTTP/2] Processing frames, consumed=" << consumed << " len=" << len << std::endl;
+    DEBUG_LOG_H2("Processing frames, consumed=%zu len=%zu", consumed, len);
 
     // Process frames
     while (consumed < len) {
@@ -299,15 +297,13 @@ core::result<size_t> Http2Connection::process_input(const uint8_t* data, size_t 
         // Parse frame header
         auto header_result = parse_frame_header(data + consumed);
         if (header_result.is_err()) {
-            std::cerr << "[HTTP/2] Frame header parse error!" << std::endl;
+            DEBUG_LOG_H2("Frame header parse error!");
             return err<size_t>(header_result.error());
         }
 
         FrameHeader header = header_result.value();
-        std::cerr << "[HTTP/2] Parsed frame: type=" << (int)header.type
-                  << " flags=" << (int)header.flags
-                  << " stream_id=" << header.stream_id
-                  << " length=" << header.length << std::endl;
+        DEBUG_LOG_H2("Parsed frame: type=%d flags=%d stream_id=%u length=%u",
+                     (int)header.type, (int)header.flags, header.stream_id, header.length);
 
         // Check if we have complete frame
         size_t frame_size = 9 + header.length;
@@ -398,14 +394,23 @@ core::result<void> Http2Connection::send_response(
     std::vector<http::HPACKHeader> hpack_headers;
     hpack_headers.reserve(headers.size() + 1);
 
+    // Storage for lowercase header names (HPACKHeader uses string_view, so we need
+    // to keep the strings alive until encoding is complete)
+    std::vector<std::string> lowercase_names;
+    lowercase_names.reserve(headers.size());
+
     // Add :status pseudo-header
     char status_buf[4];
     snprintf(status_buf, sizeof(status_buf), "%u", status);
     hpack_headers.push_back({":status", status_buf, false});
 
-    // Add response headers
+    // Add response headers (convert names to lowercase for HTTP/2 compliance)
     for (const auto& [name, value] : headers) {
-        hpack_headers.push_back({name, value, false});
+        // HTTP/2 requires lowercase header names (RFC 7540 Section 8.1.2)
+        lowercase_names.emplace_back(name);
+        std::transform(lowercase_names.back().begin(), lowercase_names.back().end(),
+                       lowercase_names.back().begin(), ::tolower);
+        hpack_headers.push_back({lowercase_names.back(), value, false});
     }
 
     // Encode headers with HPACK
@@ -500,16 +505,16 @@ core::result<void> Http2Connection::handle_headers_frame(
     const uint8_t* payload,
     size_t payload_len
 ) noexcept {
-    std::cerr << "[HTTP/2] handle_headers_frame: stream_id=" << header.stream_id
-              << " payload_len=" << payload_len << std::endl;
+    DEBUG_LOG_H2("handle_headers_frame: stream_id=%u payload_len=%zu",
+                 header.stream_id, payload_len);
 
     // Get or create stream
     Http2Stream* stream = stream_manager_.get_stream(header.stream_id);
     if (!stream) {
-        std::cerr << "[HTTP/2] Creating new stream " << header.stream_id << std::endl;
+        DEBUG_LOG_H2("Creating new stream %u", header.stream_id);
         auto create_result = stream_manager_.create_stream(header.stream_id);
         if (create_result.is_err()) {
-            std::cerr << "[HTTP/2] Failed to create stream!" << std::endl;
+            DEBUG_LOG_H2("Failed to create stream!");
             return err<void>(create_result.error());
         }
         stream = create_result.value();
@@ -520,43 +525,46 @@ core::result<void> Http2Connection::handle_headers_frame(
     PrioritySpec priority;
     std::vector<uint8_t> header_block;
 
-    std::cerr << "[HTTP/2] Parsing HEADERS frame..." << std::endl;
+    DEBUG_LOG_H2("Parsing HEADERS frame...");
     auto parse_result = parse_headers_frame(header, payload, payload_len,
                                            &priority, header_block);
     if (parse_result.is_err()) {
-        std::cerr << "[HTTP/2] Failed to parse HEADERS frame!" << std::endl;
+        DEBUG_LOG_H2("Failed to parse HEADERS frame!");
         return err<void>(parse_result.error());
     }
-    std::cerr << "[HTTP/2] Parsed HEADERS frame, header_block size=" << header_block.size() << std::endl;
+    DEBUG_LOG_H2("Parsed HEADERS frame, header_block size=%zu", header_block.size());
 
     // Decode HPACK headers
     std::vector<http::HPACKHeader> decoded_headers;
-    std::cerr << "[HTTP/2] Decoding HPACK headers..." << std::endl;
+    DEBUG_LOG_H2("Decoding HPACK headers...");
     int decode_result = hpack_decoder_.decode(header_block.data(),
                                              header_block.size(),
                                              decoded_headers);
     if (decode_result != 0) {
-        std::cerr << "[HTTP/2] Failed to decode HPACK headers! decode_result=" << decode_result << std::endl;
+        DEBUG_LOG_H2("Failed to decode HPACK headers! decode_result=%d", decode_result);
         return err<void>(error_code::internal_error);
     }
-    std::cerr << "[HTTP/2] Decoded " << decoded_headers.size() << " headers" << std::endl;
+    DEBUG_LOG_H2("Decoded %zu headers", decoded_headers.size());
 
     // Store headers in stream
     for (const auto& h : decoded_headers) {
-        std::cerr << "[HTTP/2] Header: " << h.name << ": " << h.value << std::endl;
+        DEBUG_LOG_H2("Header: %s: %s",
+                     fasterapi::core::safe_string(h.name, 50).c_str(),
+                     fasterapi::core::safe_string(h.value, 100).c_str());
         stream->add_request_header(std::string(h.name), std::string(h.value));
     }
 
     // Update stream state
     bool end_stream = (header.flags & FrameFlags::HEADERS_END_STREAM) != 0;
-    std::cerr << "[HTTP/2] end_stream=" << end_stream << " request_callback_=" << (request_callback_ ? "set" : "null") << std::endl;
+    DEBUG_LOG_H2("end_stream=%d request_callback_=%s",
+                 end_stream, request_callback_ ? "set" : "null");
     stream->on_headers_received(end_stream);
 
     // If request complete, invoke callback
     if (end_stream && request_callback_) {
-        std::cerr << "[HTTP/2] Invoking request callback for stream " << stream->id() << std::endl;
+        DEBUG_LOG_H2("Invoking request callback for stream %u", stream->id());
         request_callback_(stream);
-        std::cerr << "[HTTP/2] Request callback completed" << std::endl;
+        DEBUG_LOG_H2("Request callback completed");
     }
 
     return ok();
@@ -567,38 +575,51 @@ core::result<void> Http2Connection::handle_data_frame(
     const uint8_t* payload,
     size_t payload_len
 ) noexcept {
+    DEBUG_LOG_H2("handle_data_frame: stream_id=%u payload_len=%zu flags=%u",
+                 header.stream_id, payload_len, header.flags);
+
     Http2Stream* stream = stream_manager_.get_stream(header.stream_id);
     if (!stream) {
+        DEBUG_LOG_H2("Stream %u not found!", header.stream_id);
         return err<void>(error_code::invalid_state);
     }
 
     // Parse DATA frame
     auto data_result = parse_data_frame(header, payload, payload_len);
     if (data_result.is_err()) {
+        DEBUG_LOG_H2("parse_data_frame failed!");
         return err<void>(data_result.error());
     }
+    DEBUG_LOG_H2("Parsed DATA frame, body_len=%zu", data_result.value().size());
 
     // Check flow control
     auto consume_conn = consume_recv_window(static_cast<uint32_t>(data_result.value().size()));
     if (consume_conn.is_err()) {
+        DEBUG_LOG_H2("consume_recv_window (connection) failed!");
         return consume_conn;
     }
 
     auto consume_stream = stream->consume_recv_window(static_cast<uint32_t>(data_result.value().size()));
     if (consume_stream.is_err()) {
+        DEBUG_LOG_H2("consume_recv_window (stream) failed!");
         return consume_stream;
     }
 
     // Append to stream body
     stream->append_request_body(data_result.value());
+    DEBUG_LOG_H2("Appended body, total_body_len=%zu", stream->request_body().size());
 
     // Update stream state
     bool end_stream = (header.flags & FrameFlags::DATA_END_STREAM) != 0;
+    DEBUG_LOG_H2("end_stream=%d request_callback_=%s",
+                 end_stream, request_callback_ ? "set" : "null");
     stream->on_data_received(end_stream);
 
     // If request complete, invoke callback
     if (end_stream && request_callback_) {
+        DEBUG_LOG_H2("Invoking request callback for DATA frame on stream %u", stream->id());
         request_callback_(stream);
+        DEBUG_LOG_H2("Request callback completed for DATA frame");
     }
 
     return ok();
@@ -683,13 +704,13 @@ core::result<void> Http2Connection::handle_goaway_frame(
         return err<void>(parse_result.error());
     }
 
-    std::cerr << "[HTTP/2] GOAWAY received: last_stream_id=" << last_stream_id
-              << " error_code=" << static_cast<uint32_t>(error_code_val)
-              << " debug_data_len=" << debug_data.size();
-    if (!debug_data.empty()) {
-        std::cerr << " debug_data=\"" << debug_data << "\"";
-    }
-    std::cerr << std::endl;
+    DEBUG_LOG_H2("GOAWAY received: last_stream_id=%u error_code=%u debug_data_len=%zu%s%s%s",
+                 last_stream_id,
+                 static_cast<uint32_t>(error_code_val),
+                 debug_data.size(),
+                 debug_data.empty() ? "" : " debug_data=\"",
+                 debug_data.empty() ? "" : fasterapi::core::safe_string(debug_data, 64).c_str(),
+                 debug_data.empty() ? "" : "\"");
 
     state_ = ConnectionState::GOAWAY_RECEIVED;
     return ok();

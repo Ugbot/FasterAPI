@@ -195,6 +195,16 @@ public:
     bool has_pending_output() const;
 
     /**
+     * Check if there's pending decrypted data available to read
+     *
+     * IMPORTANT: After TLS handshake completes, application data may already
+     * be decrypted and waiting. With edge-triggered event loops, no new READ
+     * event will be triggered for this buffered data. Call this method after
+     * handshake to check for pending data.
+     */
+    bool has_pending_input() const;
+
+    /**
      * Check if connection needs WRITE event registration
      *
      * Returns true if there's unsent data in write buffer.

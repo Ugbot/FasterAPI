@@ -235,9 +235,15 @@ int Router::insert_route(
     
     if (is_wildcard(segment)) {
         seg_type = NodeType::WILDCARD;
-        // Extract wildcard name: /*path -> path
-        if (segment.length() > 2) {
-            param_name = segment.substr(2);  // Skip "/*"
+        // Extract wildcard name: *path or /*path -> path
+        size_t name_start = 0;
+        if (!segment.empty() && segment[0] == '/') {
+            name_start = 2;  // Skip "/*"
+        } else if (!segment.empty() && segment[0] == '*') {
+            name_start = 1;  // Skip "*"
+        }
+        if (name_start < segment.length()) {
+            param_name = segment.substr(name_start);
         }
     } else {
         param_name = parse_param_name(segment);
@@ -429,13 +435,15 @@ RouteHandler Router::match_route(
         }
 
         // Extract parameter value until next '/' or end
-        size_t next_slash = path.find('/', pos + 1);
+        // pos may point to '/' (from param match) or first char (after static match)
+        size_t value_start = (pos < path.length() && path[pos] == '/') ? pos + 1 : pos;
+        size_t next_slash = path.find('/', value_start);
         if (next_slash == std::string::npos) {
             next_slash = path.length();
         }
 
-        if (next_slash > pos + 1) {  // Must have at least one character
-            std::string value = path.substr(pos + 1, next_slash - pos - 1);
+        if (next_slash > value_start) {  // Must have at least one character
+            std::string value = path.substr(value_start, next_slash - value_start);
 
             // Save param value
             size_t param_count_before = params.size();
@@ -492,19 +500,44 @@ size_t Router::longest_common_prefix(
 }
 
 std::string Router::parse_param_name(const std::string& segment) noexcept {
-    // Check if segment is a parameter: /{name}
-    if (segment.length() >= 3 && segment[0] == '/' && segment[1] == '{') {
-        size_t close = segment.find('}', 2);
+    // Check if segment is a parameter: {name} or /{name}
+    // Handles both cases:
+    // - /{name} when segment includes leading slash
+    // - {name} when segment starts directly with parameter (from insert_route)
+    if (segment.empty()) {
+        return "";
+    }
+
+    size_t start = 0;
+    if (segment[0] == '/') {
+        start = 1;  // Skip leading slash
+    }
+
+    // Now check for {name} pattern
+    if (start < segment.length() && segment[start] == '{') {
+        size_t close = segment.find('}', start + 1);
         if (close != std::string::npos) {
-            return segment.substr(2, close - 2);
+            return segment.substr(start + 1, close - start - 1);
         }
     }
     return "";
 }
 
 bool Router::is_wildcard(const std::string& segment) noexcept {
-    // Check if segment starts with "/*"
-    return segment.length() >= 2 && segment[0] == '/' && segment[1] == '*';
+    // Check if segment is a wildcard: * or /*
+    // Handles both cases:
+    // - /* when segment includes leading slash
+    // - * when segment starts directly with wildcard (from insert_route)
+    if (segment.empty()) {
+        return false;
+    }
+
+    size_t start = 0;
+    if (segment[0] == '/') {
+        start = 1;  // Skip leading slash
+    }
+
+    return start < segment.length() && segment[start] == '*';
 }
 
 void Router::collect_routes(

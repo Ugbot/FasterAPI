@@ -113,9 +113,19 @@ public:
      *
      * @param data Frame data
      * @param length Data length
-     * @return 0 on success, error code otherwise
+     * @return 0 on success, -1 if more data needed, positive error code otherwise
      */
     int handle_frame(const uint8_t* data, size_t length);
+
+    /**
+     * Handle incoming frame data with consumed bytes output.
+     *
+     * @param data Frame data
+     * @param length Data length
+     * @param consumed Output: number of bytes consumed
+     * @return 0 on success, -1 if more data needed, positive error code otherwise
+     */
+    int handle_frame(const uint8_t* data, size_t length, size_t& consumed);
 
     /**
      * Set socket file descriptor for direct I/O.

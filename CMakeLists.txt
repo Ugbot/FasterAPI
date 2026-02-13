@@ -100,6 +100,7 @@ set(CORE_SOURCES
     src/cpp/core/ring_buffer.cpp
     src/cpp/core/async_io.cpp
     src/cpp/core/logger.cpp
+    src/cpp/core/worker_pool.cpp
 )
 
 # Platform-specific async I/O implementations
@@ -510,6 +511,9 @@ set(NET_SOURCES
     src/cpp/net/tls_context.cpp
     src/cpp/net/tls_cert_generator.cpp
     src/cpp/net/tls_socket.cpp
+    src/cpp/net/io_dispatcher.cpp
+    src/cpp/net/coro_tcp_listener.cpp
+    src/cpp/net/coro_tls_socket.cpp
 )
 
 # Platform-specific event loop implementations
@@ -618,6 +622,9 @@ if (FA_BUILD_HTTP)
     list(APPEND HTTP_SOURCES src/cpp/http/connection_handlers.cpp)
     list(APPEND HTTP_SOURCES src/cpp/http/websocket_handlers.cpp)
     list(APPEND HTTP_SOURCES src/cpp/http/quic_handlers.cpp)
+
+    # Coroutine-based unified server (Seastar-inspired architecture)
+    list(APPEND HTTP_SOURCES src/cpp/http/coro_unified_server.cpp)
 
     # Note: Removed CoroIO-based handlers - using native event loop instead
 
@@ -968,6 +975,16 @@ if (FA_BUILD_HTTP)
     target_include_directories(test_unified_server PRIVATE ${CMAKE_SOURCE_DIR})
     target_link_libraries(test_unified_server PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
     set_target_properties(test_unified_server PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+    )
+
+    # Test HTTP/2 ALPN integration
+    add_executable(test_http2_alpn
+        tests/test_http2_alpn.cpp
+    )
+    target_include_directories(test_http2_alpn PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(test_http2_alpn PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+    set_target_properties(test_http2_alpn PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
     )
 endif()
@@ -1882,7 +1899,14 @@ if(FA_BUILD_GTEST AND TARGET gtest)
         src/cpp/http/http2_stream.cpp
         src/cpp/http/hpack.cpp
         src/cpp/http/huffman.cpp
+        src/cpp/http/huffman_table_data.cpp
     )
+
+    # HTTP/2 E2E tests
+    add_gtest_test(gtest_http2_e2e
+        tests/gtest/gtest_http2_e2e.cpp
+    )
+    target_link_libraries(gtest_http2_e2e PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
 
     # WebSocket tests
     add_gtest_test(gtest_websocket
@@ -2151,6 +2175,12 @@ if(FA_BUILD_GTEST AND TARGET gtest)
         tests/gtest/gtest_openapi.cpp
     )
     target_link_libraries(gtest_openapi PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
+
+    # Coroutine-based unified server tests
+    add_gtest_test(gtest_coro_unified_server
+        tests/gtest/gtest_coro_unified_server.cpp
+    )
+    target_link_libraries(gtest_coro_unified_server PRIVATE fasterapi_http OpenSSL::SSL OpenSSL::Crypto)
 
     message(STATUS "Google Test tests will be built at: ${CMAKE_BINARY_DIR}/tests/gtest/")
 endif()

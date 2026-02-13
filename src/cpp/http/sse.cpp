@@ -20,6 +20,12 @@ SSEConnection::SSEConnection(uint64_t connection_id)
       connection_id_(connection_id) {
 }
 
+SSEConnection::SSEConnection(uint64_t connection_id, SSEWriteCallback write_cb)
+    : impl_(std::make_unique<Impl>()),
+      connection_id_(connection_id),
+      write_callback_(std::move(write_cb)) {
+}
+
 SSEConnection::~SSEConnection() {
     close();
 }
@@ -147,13 +153,27 @@ std::string SSEConnection::format_message(
     return oss.str();
 }
 
+void SSEConnection::set_write_callback(SSEWriteCallback write_cb) noexcept {
+    write_callback_ = std::move(write_cb);
+}
+
 int SSEConnection::send_raw(const std::string& data) noexcept {
     if (!open_.load(std::memory_order_acquire)) {
         return 1;
     }
     
-    // In real implementation, would write to socket
-    // For now, queue the message
+    // Use write callback if set
+    if (write_callback_) {
+        ssize_t written = write_callback_(data.data(), data.size());
+        if (written < 0) {
+            // Write error - close connection
+            open_.store(false, std::memory_order_release);
+            return 2;
+        }
+        return 0;
+    }
+    
+    // Fallback: queue the message (for testing or buffered mode)
     impl_->queued_messages.push_back(data);
     
     return 0;

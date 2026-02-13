@@ -7,6 +7,9 @@
 #include <atomic>
 #include <chrono>
 #include <unistd.h>
+#include <string>
+#include <string_view>
+#include <algorithm>
 
 /**
  * High-performance lock-free logging system for FasterAPI
@@ -151,6 +154,71 @@ private:
     std::atomic<int> output_fd_;  // File descriptor for output (default stderr=2)
 };
 
+// ============================================================================
+// Safe Binary Data Helpers
+// ============================================================================
+
+/**
+ * Convert potentially binary data to a safe printable string.
+ * Non-printable characters are replaced with '.' (like hexdump -C).
+ *
+ * @param data The data to convert (may contain binary/non-printable chars)
+ * @param max_len Maximum characters to output (truncates with "..." if exceeded)
+ * @return Safe printable string
+ */
+inline std::string safe_string(std::string_view data, size_t max_len = 100) noexcept {
+    std::string result;
+    result.reserve(std::min(data.size(), max_len) + 4);
+
+    for (size_t i = 0; i < std::min(data.size(), max_len); ++i) {
+        uint8_t c = static_cast<uint8_t>(data[i]);
+        if (c >= 32 && c < 127) {
+            result += static_cast<char>(c);
+        } else {
+            result += '.';  // Replace non-printable with dot
+        }
+    }
+
+    if (data.size() > max_len) {
+        result += "...";
+    }
+    return result;
+}
+
+/**
+ * Convert binary data to hex string for safe logging.
+ * Output format: "00 01 02 03 ..." (space-separated hex bytes)
+ *
+ * @param data Pointer to binary data
+ * @param len Length of data in bytes
+ * @param max_bytes Maximum bytes to output (truncates with "..." if exceeded)
+ * @return Hex string representation
+ */
+inline std::string hex_dump(const uint8_t* data, size_t len, size_t max_bytes = 32) noexcept {
+    if (!data || len == 0) return "(empty)";
+
+    std::string result;
+    result.reserve(std::min(len, max_bytes) * 3 + 4);
+
+    static const char hex_chars[] = "0123456789abcdef";
+
+    for (size_t i = 0; i < std::min(len, max_bytes); ++i) {
+        if (i > 0) result += ' ';
+        result += hex_chars[data[i] >> 4];
+        result += hex_chars[data[i] & 0x0F];
+    }
+
+    if (len > max_bytes) {
+        result += " ...";
+    }
+    return result;
+}
+
+// Overload for string_view
+inline std::string hex_dump(std::string_view data, size_t max_bytes = 32) noexcept {
+    return hex_dump(reinterpret_cast<const uint8_t*>(data.data()), data.size(), max_bytes);
+}
+
 } // namespace core
 } // namespace fasterapi
 
@@ -168,7 +236,10 @@ private:
  * 
  * Enable at compile time by defining:
  *   -DDEBUG_HTTP1=1      Enable HTTP/1.1 connection debugging
- *   -DDEBUG_PARAMS=1     Enable parameter extraction debugging  
+ *   -DDEBUG_H2=1         Enable HTTP/2 frame debugging
+ *   -DDEBUG_H3=1         Enable HTTP/3 / QUIC debugging
+ *   -DDEBUG_TLS=1        Enable TLS handshake debugging
+ *   -DDEBUG_PARAMS=1     Enable parameter extraction debugging
  *   -DDEBUG_ROUTING=1    Enable route matching debugging
  *   -DDEBUG_BODY=1       Enable request body debugging
  *   -DDEBUG_ZMQ=1        Enable ZeroMQ IPC debugging
@@ -192,6 +263,15 @@ private:
     #ifndef DEBUG_HTTP1
         #define DEBUG_HTTP1 1
     #endif
+    #ifndef DEBUG_H2
+        #define DEBUG_H2 1
+    #endif
+    #ifndef DEBUG_H3
+        #define DEBUG_H3 1
+    #endif
+    #ifndef DEBUG_TLS
+        #define DEBUG_TLS 1
+    #endif
     #ifndef DEBUG_PARAMS
         #define DEBUG_PARAMS 1
     #endif
@@ -213,6 +293,9 @@ private:
     #ifndef DEBUG_CONN
         #define DEBUG_CONN 1
     #endif
+    #ifndef DEBUG_WS
+        #define DEBUG_WS 1
+    #endif
 #endif
 
 // Per-key debug macros - compile to nothing when not enabled
@@ -220,6 +303,24 @@ private:
     #define DEBUG_LOG_HTTP1(fmt, ...) _DEBUG_LOG_IMPL(HTTP1, fmt, ##__VA_ARGS__)
 #else
     #define DEBUG_LOG_HTTP1(fmt, ...) ((void)0)
+#endif
+
+#if DEBUG_H2
+    #define DEBUG_LOG_H2(fmt, ...) _DEBUG_LOG_IMPL(H2, fmt, ##__VA_ARGS__)
+#else
+    #define DEBUG_LOG_H2(fmt, ...) ((void)0)
+#endif
+
+#if DEBUG_H3
+    #define DEBUG_LOG_H3(fmt, ...) _DEBUG_LOG_IMPL(H3, fmt, ##__VA_ARGS__)
+#else
+    #define DEBUG_LOG_H3(fmt, ...) ((void)0)
+#endif
+
+#if DEBUG_TLS
+    #define DEBUG_LOG_TLS(fmt, ...) _DEBUG_LOG_IMPL(TLS, fmt, ##__VA_ARGS__)
+#else
+    #define DEBUG_LOG_TLS(fmt, ...) ((void)0)
 #endif
 
 #if DEBUG_PARAMS
@@ -262,6 +363,12 @@ private:
     #define DEBUG_LOG_CONN(fmt, ...) _DEBUG_LOG_IMPL(CONN, fmt, ##__VA_ARGS__)
 #else
     #define DEBUG_LOG_CONN(fmt, ...) ((void)0)
+#endif
+
+#if DEBUG_WS
+    #define DEBUG_LOG_WS(fmt, ...) _DEBUG_LOG_IMPL(WS, fmt, ##__VA_ARGS__)
+#else
+    #define DEBUG_LOG_WS(fmt, ...) ((void)0)
 #endif
 
 // Generic DEBUG_LOG macro that takes key as first argument

@@ -208,20 +208,19 @@ void reactor::run() noexcept {
     
     while (!stop_requested_.load(std::memory_order_acquire)) {
         loops_.fetch_add(1, std::memory_order_relaxed);
-        
+
         // Process tasks
         process_tasks();
-        
+
         // Process timers
         process_timers();
-        
-        // Poll I/O events (with timeout)
-        process_io_events(1);  // 1ms timeout
-        
-        // Yield if no work
-        if (task_queue_->pending.load(std::memory_order_relaxed) == 0) {
-            std::this_thread::sleep_for(std::chrono::microseconds(100));
-        }
+
+        // Poll I/O events with adaptive timeout:
+        // - If tasks pending, don't block (0 timeout) - maximize throughput
+        // - If no tasks, block up to 1ms waiting for I/O - minimize CPU usage
+        // Never use sleep_for - it adds latency without benefit
+        int timeout_ms = (task_queue_->pending.load(std::memory_order_relaxed) > 0) ? 0 : 1;
+        process_io_events(timeout_ms);
     }
     
     running_.store(false);

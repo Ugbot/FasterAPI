@@ -233,17 +233,12 @@ int Middleware::security_middleware(HttpRequest* request, HttpResponse* response
 }
 
 int Middleware::compression_middleware(HttpRequest* request, HttpResponse* response) noexcept {
-    // Check if client supports compression
-    std::string accept_encoding = request->get_header("Accept-Encoding");
-    
-    if (accept_encoding.find("zstd") != std::string::npos) {
-        response->header("Content-Encoding", "zstd");
-    } else if (accept_encoding.find("gzip") != std::string::npos) {
-        response->header("Content-Encoding", "gzip");
-    } else if (accept_encoding.find("deflate") != std::string::npos) {
-        response->header("Content-Encoding", "deflate");
-    }
-    
+    // Compression disabled - this stub used to add Content-Encoding headers without
+    // actually compressing, causing ERR_CONTENT_DECODING_FAILED in browsers.
+    // Real compression should use CompressionMiddleware from compression_middleware.h
+    // which actually compresses the response body.
+    (void)request;
+    (void)response;
     return 0;
 }
 

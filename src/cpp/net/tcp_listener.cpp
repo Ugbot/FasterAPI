@@ -3,7 +3,7 @@
  */
 
 #include "tcp_listener.h"
-#include <iostream>
+#include "../core/logger.h"
 #include <csignal>
 #include <cstring>
 #include <unistd.h>
@@ -34,9 +34,9 @@ int TcpListener::start() {
 
     running_.store(true);
 
-    std::cout << "Starting TCP listener on " << config_.host << ":" << config_.port << std::endl;
-    std::cout << "Workers: " << config_.num_workers << std::endl;
-    std::cout << "SO_REUSEPORT: " << (config_.use_reuseport ? "enabled" : "disabled") << std::endl;
+    LOG_INFO("TCP", "Starting TCP listener on %s:%d", config_.host.c_str(), config_.port);
+    LOG_INFO("TCP", "Workers: %d, SO_REUSEPORT: %s", 
+             config_.num_workers, config_.use_reuseport ? "enabled" : "disabled");
 
     // Create worker threads
     for (uint16_t i = 0; i < config_.num_workers; i++) {
@@ -73,16 +73,16 @@ bool TcpListener::is_running() const {
 }
 
 void TcpListener::worker_thread(int worker_id) {
-    std::cout << "Worker " << worker_id << " starting" << std::endl;
+    LOG_INFO("TCP", "Worker %d starting", worker_id);
 
     // Create event loop for this worker
     auto event_loop = create_event_loop();
     if (!event_loop) {
-        std::cerr << "Worker " << worker_id << ": Failed to create event loop" << std::endl;
+        LOG_ERROR("TCP", "Worker %d: Failed to create event loop", worker_id);
         return;
     }
 
-    std::cout << "Worker " << worker_id << ": Using " << event_loop->platform_name() << " event loop" << std::endl;
+    LOG_INFO("TCP", "Worker %d: Using %s event loop", worker_id, event_loop->platform_name());
 
     // Register event loop for shutdown
     {
@@ -93,15 +93,18 @@ void TcpListener::worker_thread(int worker_id) {
     // Create listen socket
     int listen_fd = create_listen_socket();
     if (listen_fd < 0) {
-        std::cerr << "Worker " << worker_id << ": Failed to create listen socket: " << strerror(errno) << std::endl;
+        LOG_ERROR("TCP", "Worker %d: Failed to create listen socket: %s", worker_id, strerror(errno));
         return;
     }
 
-    std::cout << "Worker " << worker_id << ": Listening on fd " << listen_fd << std::endl;
+    LOG_INFO("TCP", "Worker %d: Listening on fd %d", worker_id, listen_fd);
 
     // Accept handler
     auto accept_handler = [this, event_loop = event_loop.get()](int fd, IOEvent events, void* user_data) {
+        LOG_DEBUG("TCP", "accept_handler called fd=%d events=%d", fd, static_cast<int>(events));
+
         if (!(events & IOEvent::READ)) {
+            LOG_DEBUG("TCP", "Not a READ event, returning");
             return;
         }
 
@@ -116,36 +119,41 @@ void TcpListener::worker_thread(int worker_id) {
             if (client_fd < 0) {
                 if (errno == EAGAIN || errno == EWOULDBLOCK) {
                     // No more connections
+                    LOG_DEBUG("TCP", "No more connections to accept");
                     break;
                 }
-                std::cerr << "Accept error: " << strerror(errno) << std::endl;
+                LOG_ERROR("TCP", "Accept error: %s", strerror(errno));
                 continue;
             }
+
+            LOG_DEBUG("TCP", "Accepted connection client_fd=%d", client_fd);
 
             // Wrap client fd in TcpSocket
             TcpSocket socket(client_fd);
 
             // Call connection callback
+            LOG_DEBUG("TCP", "Calling connection callback for fd=%d", client_fd);
             connection_cb_(std::move(socket), event_loop);
+            LOG_DEBUG("TCP", "Connection callback returned for fd=%d", client_fd);
         }
     };
 
     // Add listen socket to event loop
     if (event_loop->add_fd(listen_fd, IOEvent::READ | IOEvent::EDGE, accept_handler, nullptr) < 0) {
-        std::cerr << "Worker " << worker_id << ": Failed to add listen socket to event loop: " << strerror(errno) << std::endl;
+        LOG_ERROR("TCP", "Worker %d: Failed to add listen socket to event loop: %s", worker_id, strerror(errno));
         close(listen_fd);
         return;
     }
 
     // Run event loop
-    std::cout << "Worker " << worker_id << ": Running event loop" << std::endl;
+    LOG_INFO("TCP", "Worker %d: Running event loop", worker_id);
     event_loop->run();
 
     // Cleanup
     event_loop->remove_fd(listen_fd);
     close(listen_fd);
 
-    std::cout << "Worker " << worker_id << " stopped" << std::endl;
+    LOG_INFO("TCP", "Worker %d stopped", worker_id);
 }
 
 int TcpListener::create_listen_socket() {
@@ -157,7 +165,7 @@ int TcpListener::create_listen_socket() {
 
     // Set socket options
     if (socket.set_reuseaddr() < 0) {
-        std::cerr << "Failed to set SO_REUSEADDR: " << strerror(errno) << std::endl;
+        LOG_ERROR("TCP", "Failed to set SO_REUSEADDR: %s", strerror(errno));
         return -1;
     }
 
@@ -165,25 +173,25 @@ int TcpListener::create_listen_socket() {
     if (config_.use_reuseport) {
         if (socket.set_reuseport() < 0) {
             // SO_REUSEPORT might not be available, continue anyway
-            std::cerr << "Warning: Failed to set SO_REUSEPORT: " << strerror(errno) << std::endl;
+            LOG_WARN("TCP", "Failed to set SO_REUSEPORT: %s", strerror(errno));
         }
     }
 
     // Set non-blocking
     if (socket.set_nonblocking() < 0) {
-        std::cerr << "Failed to set non-blocking: " << strerror(errno) << std::endl;
+        LOG_ERROR("TCP", "Failed to set non-blocking: %s", strerror(errno));
         return -1;
     }
 
     // Bind
     if (socket.bind(config_.host, config_.port) < 0) {
-        std::cerr << "Failed to bind to " << config_.host << ":" << config_.port << ": " << strerror(errno) << std::endl;
+        LOG_ERROR("TCP", "Failed to bind to %s:%d: %s", config_.host.c_str(), config_.port, strerror(errno));
         return -1;
     }
 
     // Listen
     if (socket.listen(config_.backlog) < 0) {
-        std::cerr << "Failed to listen: " << strerror(errno) << std::endl;
+        LOG_ERROR("TCP", "Failed to listen: %s", strerror(errno));
         return -1;
     }
 

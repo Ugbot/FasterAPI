@@ -20,10 +20,9 @@ events:
     names:
       - "uname"
     candidate_directories:
+      - "/Users/bengamble/.antigravity/antigravity/bin/"
       - "/Users/bengamble/.fly/bin/"
-      - "/Users/bengamble/.local/bin/"
       - "/Users/bengamble/Downloads/google-cloud-sdk/bin/"
-      - "/Users/bengamble/.sdkman/candidates/java/current/bin/"
       - "/opt/homebrew/bin/"
       - "/opt/homebrew/sbin/"
       - "/usr/local/bin/"
@@ -35,12 +34,13 @@ events:
       - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin/"
       - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin/"
       - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin/"
+      - "/Users/bengamble/.local/bin/"
+      - "/Users/bengamble/.sdkman/candidates/java/current/bin/"
       - "/Users/bengamble/.cargo/bin/"
     searched_directories:
+      - "/Users/bengamble/.antigravity/antigravity/bin/uname"
       - "/Users/bengamble/.fly/bin/uname"
-      - "/Users/bengamble/.local/bin/uname"
       - "/Users/bengamble/Downloads/google-cloud-sdk/bin/uname"
-      - "/Users/bengamble/.sdkman/candidates/java/current/bin/uname"
       - "/opt/homebrew/bin/uname"
       - "/opt/homebrew/sbin/uname"
       - "/usr/local/bin/uname"
@@ -48,10 +48,9 @@ events:
     found: "/usr/bin/uname"
     search_context:
       ENV{PATH}:
+        - "/Users/bengamble/.antigravity/antigravity/bin"
         - "/Users/bengamble/.fly/bin"
-        - "/Users/bengamble/.local/bin"
         - "/Users/bengamble/Downloads/google-cloud-sdk/bin"
-        - "/Users/bengamble/.sdkman/candidates/java/current/bin"
         - "/opt/homebrew/bin"
         - "/opt/homebrew/sbin"
         - "/usr/local/bin"
@@ -63,6 +62,11 @@ events:
         - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin"
         - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin"
         - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin"
+        - "/Users/bengamble/.antigravity/antigravity/bin"
+        - "/Users/bengamble/.fly/bin"
+        - "/Users/bengamble/.local/bin"
+        - "/Users/bengamble/Downloads/google-cloud-sdk/bin"
+        - "/Users/bengamble/.sdkman/candidates/java/current/bin"
         - "/Users/bengamble/.cargo/bin"
   -
     kind: "message-v1"
@@ -91,10 +95,9 @@ events:
     names:
       - "install_name_tool"
     candidate_directories:
+      - "/Users/bengamble/.antigravity/antigravity/bin/"
       - "/Users/bengamble/.fly/bin/"
-      - "/Users/bengamble/.local/bin/"
       - "/Users/bengamble/Downloads/google-cloud-sdk/bin/"
-      - "/Users/bengamble/.sdkman/candidates/java/current/bin/"
       - "/opt/homebrew/bin/"
       - "/opt/homebrew/sbin/"
       - "/usr/local/bin/"
@@ -106,12 +109,13 @@ events:
       - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin/"
       - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin/"
       - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin/"
+      - "/Users/bengamble/.local/bin/"
+      - "/Users/bengamble/.sdkman/candidates/java/current/bin/"
       - "/Users/bengamble/.cargo/bin/"
     searched_directories:
+      - "/Users/bengamble/.antigravity/antigravity/bin/install_name_tool"
       - "/Users/bengamble/.fly/bin/install_name_tool"
-      - "/Users/bengamble/.local/bin/install_name_tool"
       - "/Users/bengamble/Downloads/google-cloud-sdk/bin/install_name_tool"
-      - "/Users/bengamble/.sdkman/candidates/java/current/bin/install_name_tool"
       - "/opt/homebrew/bin/install_name_tool"
       - "/opt/homebrew/sbin/install_name_tool"
       - "/usr/local/bin/install_name_tool"
@@ -119,10 +123,9 @@ events:
     found: "/usr/bin/install_name_tool"
     search_context:
       ENV{PATH}:
+        - "/Users/bengamble/.antigravity/antigravity/bin"
         - "/Users/bengamble/.fly/bin"
-        - "/Users/bengamble/.local/bin"
         - "/Users/bengamble/Downloads/google-cloud-sdk/bin"
-        - "/Users/bengamble/.sdkman/candidates/java/current/bin"
         - "/opt/homebrew/bin"
         - "/opt/homebrew/sbin"
         - "/usr/local/bin"
@@ -134,6 +137,11 @@ events:
         - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin"
         - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin"
         - "/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin"
+        - "/Users/bengamble/.antigravity/antigravity/bin"
+        - "/Users/bengamble/.fly/bin"
+        - "/Users/bengamble/.local/bin"
+        - "/Users/bengamble/Downloads/google-cloud-sdk/bin"
+        - "/Users/bengamble/.sdkman/candidates/java/current/bin"
         - "/Users/bengamble/.cargo/bin"
       CMAKE_INSTALL_PREFIX: "/usr/local"
 ...

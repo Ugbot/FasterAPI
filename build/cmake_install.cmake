@@ -1,4 +1,4 @@
-# Install script for directory: /Users/bengamble/FasterAPI
+# Install script for directory: /Users/bengamble/Sabot/vendor/FasterAPI
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -39,36 +39,36 @@ endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for the subdirectory.
-  include("/Users/bengamble/FasterAPI/build/_deps/simdjson-build/cmake_install.cmake")
+  include("/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/simdjson-build/cmake_install.cmake")
 endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for the subdirectory.
-  include("/Users/bengamble/FasterAPI/build/_deps/zstd-build/cmake_install.cmake")
+  include("/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/zstd-build/cmake_install.cmake")
 endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for the subdirectory.
-  include("/Users/bengamble/FasterAPI/build/_deps/brotli-build/cmake_install.cmake")
+  include("/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/brotli-build/cmake_install.cmake")
 endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for the subdirectory.
-  include("/Users/bengamble/FasterAPI/build/_deps/zlib-build/cmake_install.cmake")
+  include("/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/zlib-build/cmake_install.cmake")
 endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for the subdirectory.
-  include("/Users/bengamble/FasterAPI/build/_deps/googletest-build/cmake_install.cmake")
+  include("/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/googletest-build/cmake_install.cmake")
 endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for the subdirectory.
-  include("/Users/bengamble/FasterAPI/build/_deps/benchmark-build/cmake_install.cmake")
+  include("/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/benchmark-build/cmake_install.cmake")
 endif()
 
 if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/fasterapi/_native" TYPE SHARED_LIBRARY FILES "/Users/bengamble/FasterAPI/fasterapi/_native/libfasterapi_mcp.dylib")
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/fasterapi/_native" TYPE SHARED_LIBRARY FILES "/Users/bengamble/Sabot/vendor/FasterAPI/fasterapi/_native/libfasterapi_mcp.dylib")
   if(EXISTS "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/fasterapi/_native/libfasterapi_mcp.dylib" AND
      NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/fasterapi/_native/libfasterapi_mcp.dylib")
     execute_process(COMMAND /usr/bin/install_name_tool
@@ -84,29 +84,29 @@ if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT
 endif()
 
 if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/fasterapi/_native" TYPE MODULE FILES "/Users/bengamble/FasterAPI/fasterapi/_native/http2.cpython-313-darwin.so")
-  if(EXISTS "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/fasterapi/_native/http2.cpython-313-darwin.so" AND
-     NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/fasterapi/_native/http2.cpython-313-darwin.so")
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/fasterapi/_native" TYPE MODULE FILES "/Users/bengamble/Sabot/vendor/FasterAPI/fasterapi/_native/http2.cpython-314-darwin.so")
+  if(EXISTS "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/fasterapi/_native/http2.cpython-314-darwin.so" AND
+     NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/fasterapi/_native/http2.cpython-314-darwin.so")
     execute_process(COMMAND /usr/bin/install_name_tool
       -delete_rpath "/Users/bengamble/.local/quictls/lib"
-      -delete_rpath "/Users/bengamble/FasterAPI/build/lib"
-      "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/fasterapi/_native/http2.cpython-313-darwin.so")
+      -delete_rpath "/Users/bengamble/Sabot/vendor/FasterAPI/build/lib"
+      "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/fasterapi/_native/http2.cpython-314-darwin.so")
     if(CMAKE_INSTALL_DO_STRIP)
-      execute_process(COMMAND "/usr/bin/strip" -x "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/fasterapi/_native/http2.cpython-313-darwin.so")
+      execute_process(COMMAND "/usr/bin/strip" -x "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/fasterapi/_native/http2.cpython-314-darwin.so")
     endif()
   endif()
 endif()
 
 if(CMAKE_INSTALL_COMPONENT STREQUAL "Unspecified" OR NOT CMAKE_INSTALL_COMPONENT)
-  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/fasterapi/_native" TYPE MODULE FILES "/Users/bengamble/FasterAPI/fasterapi/_native/webtransport.cpython-313-darwin.so")
-  if(EXISTS "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/fasterapi/_native/webtransport.cpython-313-darwin.so" AND
-     NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/fasterapi/_native/webtransport.cpython-313-darwin.so")
+  file(INSTALL DESTINATION "${CMAKE_INSTALL_PREFIX}/fasterapi/_native" TYPE MODULE FILES "/Users/bengamble/Sabot/vendor/FasterAPI/fasterapi/_native/webtransport.cpython-314-darwin.so")
+  if(EXISTS "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/fasterapi/_native/webtransport.cpython-314-darwin.so" AND
+     NOT IS_SYMLINK "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/fasterapi/_native/webtransport.cpython-314-darwin.so")
     execute_process(COMMAND /usr/bin/install_name_tool
       -delete_rpath "/Users/bengamble/.local/quictls/lib"
-      -delete_rpath "/Users/bengamble/FasterAPI/build/lib"
-      "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/fasterapi/_native/webtransport.cpython-313-darwin.so")
+      -delete_rpath "/Users/bengamble/Sabot/vendor/FasterAPI/build/lib"
+      "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/fasterapi/_native/webtransport.cpython-314-darwin.so")
     if(CMAKE_INSTALL_DO_STRIP)
-      execute_process(COMMAND "/usr/bin/strip" -x "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/fasterapi/_native/webtransport.cpython-313-darwin.so")
+      execute_process(COMMAND "/usr/bin/strip" -x "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/fasterapi/_native/webtransport.cpython-314-darwin.so")
     endif()
   endif()
 endif()
@@ -114,7 +114,7 @@ endif()
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
 if(CMAKE_INSTALL_LOCAL_ONLY)
-  file(WRITE "/Users/bengamble/FasterAPI/build/install_local_manifest.txt"
+  file(WRITE "/Users/bengamble/Sabot/vendor/FasterAPI/build/install_local_manifest.txt"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")
 endif()
 if(CMAKE_INSTALL_COMPONENT)
@@ -130,6 +130,6 @@ else()
 endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
-  file(WRITE "/Users/bengamble/FasterAPI/build/${CMAKE_INSTALL_MANIFEST}"
+  file(WRITE "/Users/bengamble/Sabot/vendor/FasterAPI/build/${CMAKE_INSTALL_MANIFEST}"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")
 endif()

@@ -11,6 +11,7 @@
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
 
 #include "event_loop.h"
+#include "../core/logger.h"
 #include <sys/event.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -66,8 +67,11 @@ public:
     int add_fd(int fd, IOEvent events, EventHandler handler, void* user_data) override {
         if (fd < 0 || !handler) {
             errno = EINVAL;
+            LOG_DEBUG("KQUEUE", "add_fd INVALID fd=%d handler=%s", fd, handler ? "valid" : "null");
             return -1;
         }
+
+        LOG_DEBUG("KQUEUE", "add_fd fd=%d events=%d kq_fd=%d", fd, static_cast<int>(events), kq_fd_);
 
         // Store handler
         EventHandlerData data;
@@ -77,7 +81,9 @@ public:
         handlers_[fd] = std::move(data);
 
         // Register with kqueue
-        return update_kqueue_events(fd, events, false);
+        int result = update_kqueue_events(fd, events, false);
+        LOG_DEBUG("KQUEUE", "add_fd result=%d errno=%d", result, errno);
+        return result;
     }
 
     int modify_fd(int fd, IOEvent events) override {
@@ -151,7 +157,12 @@ public:
             if (errno == EINTR) {
                 return 0;  // Interrupted, not an error
             }
+            LOG_DEBUG("KQUEUE", "poll error errno=%d", errno);
             return -1;
+        }
+
+        if (n_events > 0) {
+            LOG_DEBUG("KQUEUE", "poll got %d events", n_events);
         }
 
         // Dispatch events
@@ -159,9 +170,12 @@ public:
             struct kevent& ev = events_[i];
             int fd = static_cast<int>(ev.ident);
 
+            LOG_DEBUG("KQUEUE", "event fd=%d filter=%d flags=%d", fd, ev.filter, ev.flags);
+
             // Look up handler
             auto it = handlers_.find(fd);
             if (it == handlers_.end()) {
+                LOG_DEBUG("KQUEUE", "no handler for fd=%d", fd);
                 continue;  // Handler was removed
             }
 
@@ -184,6 +198,8 @@ public:
                 event_type = event_type | IOEvent::ERROR;
             }
 
+            LOG_DEBUG("KQUEUE", "dispatching to handler fd=%d event_type=%d", fd, static_cast<int>(event_type));
+
             // Invoke handler
             it->second.handler(fd, event_type, it->second.user_data);
         }
@@ -202,7 +218,7 @@ public:
         while (running_.load(std::memory_order_acquire)) {
             int result = poll(100);  // 100ms timeout for responsiveness
             if (result < 0 && errno != EINTR) {
-                std::cerr << "poll() error: " << strerror(errno) << std::endl;
+                LOG_ERROR("KQUEUE", "poll() error: %s", strerror(errno));
                 break;
             }
         }

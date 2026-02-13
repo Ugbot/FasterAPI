@@ -3,11 +3,11 @@
 
 cmake_minimum_required(VERSION ${CMAKE_VERSION}) # this file comes with cmake
 
-if(EXISTS "/Users/bengamble/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src/simdjson-populate-stamp/simdjson-populate-gitclone-lastrun.txt" AND EXISTS "/Users/bengamble/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src/simdjson-populate-stamp/simdjson-populate-gitinfo.txt" AND
-  "/Users/bengamble/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src/simdjson-populate-stamp/simdjson-populate-gitclone-lastrun.txt" IS_NEWER_THAN "/Users/bengamble/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src/simdjson-populate-stamp/simdjson-populate-gitinfo.txt")
+if(EXISTS "/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src/simdjson-populate-stamp/simdjson-populate-gitclone-lastrun.txt" AND EXISTS "/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src/simdjson-populate-stamp/simdjson-populate-gitinfo.txt" AND
+  "/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src/simdjson-populate-stamp/simdjson-populate-gitclone-lastrun.txt" IS_NEWER_THAN "/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src/simdjson-populate-stamp/simdjson-populate-gitinfo.txt")
   message(VERBOSE
     "Avoiding repeated git clone, stamp file is up to date: "
-    "'/Users/bengamble/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src/simdjson-populate-stamp/simdjson-populate-gitclone-lastrun.txt'"
+    "'/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src/simdjson-populate-stamp/simdjson-populate-gitclone-lastrun.txt'"
   )
   return()
 endif()
@@ -22,12 +22,12 @@ else()
 endif()
 
 execute_process(
-  COMMAND ${CMAKE_COMMAND} -E rm -rf "/Users/bengamble/FasterAPI/build/cpm-cache/simdjson/e2872dae246ae21201588fe57bc477e26fdade81"
+  COMMAND ${CMAKE_COMMAND} -E rm -rf "/Users/bengamble/Sabot/vendor/FasterAPI/build/cpm-cache/simdjson/e2872dae246ae21201588fe57bc477e26fdade81"
   RESULT_VARIABLE error_code
   ${maybe_show_command}
 )
 if(error_code)
-  message(FATAL_ERROR "Failed to remove directory: '/Users/bengamble/FasterAPI/build/cpm-cache/simdjson/e2872dae246ae21201588fe57bc477e26fdade81'")
+  message(FATAL_ERROR "Failed to remove directory: '/Users/bengamble/Sabot/vendor/FasterAPI/build/cpm-cache/simdjson/e2872dae246ae21201588fe57bc477e26fdade81'")
 endif()
 
 # try the clone 3 times in case there is an odd git clone issue
@@ -37,7 +37,7 @@ while(error_code AND number_of_tries LESS 3)
   execute_process(
     COMMAND "/usr/bin/git"
             clone --no-checkout --depth 1 --no-single-branch --config "advice.detachedHead=false" "https://github.com/simdjson/simdjson.git" "e2872dae246ae21201588fe57bc477e26fdade81"
-    WORKING_DIRECTORY "/Users/bengamble/FasterAPI/build/cpm-cache/simdjson"
+    WORKING_DIRECTORY "/Users/bengamble/Sabot/vendor/FasterAPI/build/cpm-cache/simdjson"
     RESULT_VARIABLE error_code
     ${maybe_show_command}
   )
@@ -53,7 +53,7 @@ endif()
 execute_process(
   COMMAND "/usr/bin/git"
           checkout "v3.10.1" --
-  WORKING_DIRECTORY "/Users/bengamble/FasterAPI/build/cpm-cache/simdjson/e2872dae246ae21201588fe57bc477e26fdade81"
+  WORKING_DIRECTORY "/Users/bengamble/Sabot/vendor/FasterAPI/build/cpm-cache/simdjson/e2872dae246ae21201588fe57bc477e26fdade81"
   RESULT_VARIABLE error_code
   ${maybe_show_command}
 )
@@ -66,22 +66,22 @@ if(init_submodules)
   execute_process(
     COMMAND "/usr/bin/git" 
             submodule update --recursive --init 
-    WORKING_DIRECTORY "/Users/bengamble/FasterAPI/build/cpm-cache/simdjson/e2872dae246ae21201588fe57bc477e26fdade81"
+    WORKING_DIRECTORY "/Users/bengamble/Sabot/vendor/FasterAPI/build/cpm-cache/simdjson/e2872dae246ae21201588fe57bc477e26fdade81"
     RESULT_VARIABLE error_code
     ${maybe_show_command}
   )
 endif()
 if(error_code)
-  message(FATAL_ERROR "Failed to update submodules in: '/Users/bengamble/FasterAPI/build/cpm-cache/simdjson/e2872dae246ae21201588fe57bc477e26fdade81'")
+  message(FATAL_ERROR "Failed to update submodules in: '/Users/bengamble/Sabot/vendor/FasterAPI/build/cpm-cache/simdjson/e2872dae246ae21201588fe57bc477e26fdade81'")
 endif()
 
 # Complete success, update the script-last-run stamp file:
 #
 execute_process(
-  COMMAND ${CMAKE_COMMAND} -E copy "/Users/bengamble/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src/simdjson-populate-stamp/simdjson-populate-gitinfo.txt" "/Users/bengamble/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src/simdjson-populate-stamp/simdjson-populate-gitclone-lastrun.txt"
+  COMMAND ${CMAKE_COMMAND} -E copy "/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src/simdjson-populate-stamp/simdjson-populate-gitinfo.txt" "/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src/simdjson-populate-stamp/simdjson-populate-gitclone-lastrun.txt"
   RESULT_VARIABLE error_code
   ${maybe_show_command}
 )
 if(error_code)
-  message(FATAL_ERROR "Failed to copy script-last-run stamp file: '/Users/bengamble/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src/simdjson-populate-stamp/simdjson-populate-gitclone-lastrun.txt'")
+  message(FATAL_ERROR "Failed to copy script-last-run stamp file: '/Users/bengamble/Sabot/vendor/FasterAPI/build/_deps/simdjson-subbuild/simdjson-populate-prefix/src/simdjson-populate-stamp/simdjson-populate-gitclone-lastrun.txt'")
 endif()

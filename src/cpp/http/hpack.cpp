@@ -234,7 +234,12 @@ int HPACKDecoder::decode(
     size_t max_headers
 ) noexcept {
     size_t pos = 0;
-    
+
+    // Clear temporary buffers from previous decode() call
+    // Reserve space to prevent reallocation (which would invalidate string_views)
+    temp_buffers_.clear();
+    temp_buffers_.reserve(max_headers);
+
     while (pos < input_len && output.size() < max_headers) {
         uint8_t first_byte = input[pos];
         
@@ -316,14 +321,16 @@ int HPACKDecoder::decode(
             }
             pos += value_consumed;
 
-            // Add to dynamic table
+            // Add to dynamic table (for future lookups on same connection)
             table_.add(name, value);
 
-            // Add to output (create string_view from table storage)
+            // Store in temp_buffers_ for safe output (avoids string_view lifetime issues)
+            temp_buffers_.emplace_back(std::move(name), std::move(value));
+
             HPACKHeader header;
-            if (table_.get(0, header) != 0) {
-                return 1;
-            }
+            header.name = temp_buffers_.back().first;
+            header.value = temp_buffers_.back().second;
+            header.sensitive = false;
             output.push_back(header);
 
         } else if ((first_byte & 0xE0) == 0x20) {
@@ -383,12 +390,12 @@ int HPACKDecoder::decode(
             pos += value_consumed;
 
             // Store in temporary buffer (these headers are NOT added to dynamic table)
-            temp_name_buffer_ = name;
-            temp_value_buffer_ = value;
+            // Use vector so each header gets its own storage (string_view lifetime fix)
+            temp_buffers_.emplace_back(std::move(name), std::move(value));
 
             HPACKHeader header;
-            header.name = temp_name_buffer_;
-            header.value = temp_value_buffer_;
+            header.name = temp_buffers_.back().first;
+            header.value = temp_buffers_.back().second;
             header.sensitive = never_indexed;
             output.push_back(header);
         }

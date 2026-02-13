@@ -1,7 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"/Users/bengamble/FasterAPI/build/_deps/libuv-subbuild/cmake_install.cmake"
-	],
-	"Parallel" : false
-}
