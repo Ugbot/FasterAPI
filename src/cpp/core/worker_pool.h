@@ -34,15 +34,15 @@ namespace core {
 // MPMC Bounded Queue (for coroutine handle submission)
 // =============================================================================
 
-/// Bounded MPMC queue for coroutine handles
+/// Bounded MPMC queue for any copyable type
 /// Uses sequence numbers for lock-free operation
-template <size_t Capacity = 4096>
+template <typename T, size_t Capacity = 4096>
 class MPMCQueue {
     static_assert(Capacity > 0, "Capacity must be positive");
     static_assert((Capacity & (Capacity - 1)) == 0, "Capacity must be power of 2");
 
 public:
-    using ValueType = std::coroutine_handle<>;
+    using ValueType = T;
 
     MPMCQueue() : head_(0), tail_(0) {
         for (size_t i = 0; i < Capacity; ++i) {
@@ -208,12 +208,11 @@ private:
     std::vector<std::thread> workers_;
     std::vector<std::thread> blocking_workers_;
 
-    MPMCQueue<4096> task_queue_;
+    MPMCQueue<std::coroutine_handle<>, 4096> task_queue_;
 
-    // Blocking task queue (with mutex since it's not hot path)
-    std::mutex blocking_mutex_;
-    std::condition_variable blocking_cv_;
-    std::vector<std::function<void()>> blocking_tasks_;
+    // Blocking task queue (lock-free, aligns with "No Mutexes" principle)
+    // Uses a function wrapper queue for blocking operations (file I/O, DNS, etc.)
+    MPMCQueue<std::function<void()>, 1024> blocking_task_queue_;
 
     // Control
     std::atomic<bool> running_{false};
@@ -273,8 +272,7 @@ inline void WorkerThreadPool::stop() {
 
     shutdown_requested_.store(true, std::memory_order_release);
 
-    // Wake blocking workers
-    blocking_cv_.notify_all();
+    // Blocking workers will detect shutdown via polling (no CV needed in lock-free design)
 
     // Join all workers
     for (auto& t : workers_) {
@@ -319,11 +317,23 @@ auto WorkerThreadPool::submit_blocking(F&& func) -> std::future<std::invoke_resu
     auto task = std::make_shared<std::packaged_task<ReturnType()>>(std::forward<F>(func));
     auto future = task->get_future();
 
-    {
-        std::lock_guard<std::mutex> lock(blocking_mutex_);
-        blocking_tasks_.emplace_back([task]() { (*task)(); });
+    // Use lock-free queue (no mutex, aligns with "No Mutexes" principle)
+    std::function<void()> wrapped = [task]() { (*task)(); };
+
+    // Busy-wait until we can enqueue (with backoff)
+    int attempts = 0;
+    while (!blocking_task_queue_.try_push(wrapped)) {
+        if (shutdown_requested_.load(std::memory_order_relaxed)) {
+            break;
+        }
+        // Exponential backoff
+        if (attempts < 10) {
+            std::this_thread::yield();
+            attempts++;
+        } else {
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        }
     }
-    blocking_cv_.notify_one();
 
     return future;
 }
@@ -363,27 +373,42 @@ inline void WorkerThreadPool::worker_loop(size_t /*worker_id*/) {
 }
 
 inline void WorkerThreadPool::blocking_worker_loop(size_t /*worker_id*/) {
+    // Lock-free blocking worker loop (no mutex, aligns with "No Mutexes" principle)
+    // Uses busy-waiting with exponential backoff instead of condition variables
+
+    int idle_count = 0;
     while (!shutdown_requested_.load(std::memory_order_acquire)) {
-        std::function<void()> task;
+        auto task_opt = blocking_task_queue_.try_pop();
 
-        {
-            std::unique_lock<std::mutex> lock(blocking_mutex_);
-            blocking_cv_.wait(lock, [this]() {
-                return shutdown_requested_.load(std::memory_order_relaxed) ||
-                       !blocking_tasks_.empty();
-            });
-
-            if (shutdown_requested_.load(std::memory_order_relaxed) &&
-                blocking_tasks_.empty()) {
-                return;
+        if (task_opt) {
+            // Got a task - execute it
+            auto& task = *task_opt;
+            if (task) {
+                task();
+                blocking_tasks_executed_.fetch_add(1, std::memory_order_relaxed);
             }
-
-            if (!blocking_tasks_.empty()) {
-                task = std::move(blocking_tasks_.back());
-                blocking_tasks_.pop_back();
+            idle_count = 0;  // Reset idle counter
+        } else {
+            // No task available - use exponential backoff
+            if (idle_count < 10) {
+                // Spin briefly for low latency
+                std::this_thread::yield();
+                idle_count++;
+            } else if (idle_count < 100) {
+                // Short sleep
+                std::this_thread::sleep_for(std::chrono::microseconds(100));
+                idle_count++;
+            } else {
+                // Longer sleep when idle
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                // Don't increment further to stay at this level
             }
         }
+    }
 
+    // Drain remaining tasks on shutdown
+    while (auto task_opt = blocking_task_queue_.try_pop()) {
+        auto& task = *task_opt;
         if (task) {
             task();
             blocking_tasks_executed_.fetch_add(1, std::memory_order_relaxed);
