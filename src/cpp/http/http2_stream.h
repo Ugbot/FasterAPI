@@ -1,6 +1,7 @@
 #pragma once
 
 #include "http2_frame.h"
+#include "request_body_buffer.h"
 #include "../core/result.h"
 #include <cstdint>
 #include <string>
@@ -412,16 +413,18 @@ public:
     }
 
     /**
-     * Request body data.
+     * Request body data — backed by thread-local arena pool.
      */
-    const std::string& request_body() const noexcept { return request_body_; }
+    std::string request_body() const { return body_buf_.to_string(); }
+    std::string_view request_body_view() const noexcept { return body_buf_.view(); }
+    size_t request_body_size() const noexcept { return body_buf_.size(); }
 
     void append_request_body(const uint8_t* data, size_t len) {
-        request_body_.append(reinterpret_cast<const char*>(data), len);
+        body_buf_.append(data, len);
     }
 
-    void append_request_body(std::string data) {
-        request_body_.append(std::move(data));
+    void append_request_body(const std::string& data) {
+        body_buf_.append(reinterpret_cast<const uint8_t*>(data.data()), data.size());
     }
 
     /**
@@ -474,7 +477,7 @@ private:
 
     // Request data
     std::unordered_map<std::string, std::string> request_headers_;
-    std::string request_body_;
+    http::RequestBodyBuffer body_buf_;
 
     // Response data
     uint16_t response_status_{200};

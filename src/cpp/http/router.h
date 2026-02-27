@@ -284,7 +284,26 @@ public:
         uint32_t priority;
     };
     std::vector<RouteInfo> get_routes() const;
-    
+
+    /**
+     * Sort all routes to enforce deterministic priority matching.
+     *
+     * Must be called ONCE after all routes are registered and before
+     * any matching occurs. Walks each method's radix tree and sorts
+     * children at every node:
+     *   1. STATIC nodes first (highest priority)
+     *   2. PARAM nodes second
+     *   3. WILDCARD nodes last (lowest priority)
+     * Within the same NodeType, longer path prefixes sort first
+     * (more specific routes win). Ties broken alphabetically.
+     *
+     * After sorting, rebuilds the child_index[256] lookup array
+     * so O(1) static child lookups remain correct.
+     *
+     * Complexity: O(n log n) one-time at startup, zero runtime cost.
+     */
+    void sort_routes() noexcept;
+
 private:
     // Per-method trees using enum-indexed array (no hash lookup)
     // Index by HttpMethod enum for O(1) access
@@ -342,6 +361,11 @@ private:
         const std::string& prefix,
         std::vector<RouteInfo>& routes
     ) const;
+
+    /**
+     * Recursively sort a node's children by priority.
+     */
+    static void sort_node(RouterNode* node) noexcept;
 };
 
 } // namespace http

@@ -12,6 +12,7 @@
 #include "../net/tls_cert_generator.h"
 #include "http1_parser.h"
 #include "http2_connection.h"
+#include "request_body_buffer.h"
 #include <iostream>
 #include <cstring>
 #include <cctype>
@@ -492,10 +493,16 @@ core::coro_task<void> CoroUnifiedServer::handle_cleartext_connection(net::IODisp
 core::coro_task<void> CoroUnifiedServer::handle_http1_connection(
     net::IODispatcher& io, int fd, bool is_tls) {
 
-    // Use thread-local buffer pool for zero allocation
-    static constexpr size_t BUFFER_SIZE = 8192;
-    uint8_t buffer[BUFFER_SIZE];
-    size_t buffer_len = 0;
+    // Two-phase buffer strategy:
+    // Phase 1: 8KB stack buffer for headers (zero allocation fast path)
+    // Phase 2: RequestBodyBuffer for large bodies (thread-local arena pool)
+    static constexpr size_t STACK_BUF_SIZE = 8192;
+    uint8_t stack_buf[STACK_BUF_SIZE];
+    uint8_t* buf = stack_buf;
+    size_t buf_cap = STACK_BUF_SIZE;
+    size_t buf_len = 0;
+    RequestBodyBuffer body_buf;   // RAII — auto-releases arena buffer on destruction
+    bool body_detected = false;   // set when Content-Length found in headers
 
     HTTP1Parser parser;
 
@@ -516,53 +523,88 @@ core::coro_task<void> CoroUnifiedServer::handle_http1_connection(
         int parse_result = -1;  // Need more data by default
 
         // Try parsing if we have data in buffer (pipelining case)
-        if (buffer_len > 0) {
-            parse_result = parser.parse(buffer, buffer_len, parsed_req, consumed);
+        if (buf_len > 0) {
+            parse_result = parser.parse(buf, buf_len, parsed_req, consumed);
         }
 
         // If we need more data, read from socket
         while (parse_result < 0 && !stop_requested_.load(std::memory_order_relaxed)) {
-            // Check header size limit before reading more
-            if (buffer_len > config_.max_header_size) {
-                // Headers too large - send 431 Request Header Fields Too Large
-                const char* too_large =
-                    "HTTP/1.1 431 Request Header Fields Too Large\r\n"
-                    "Content-Length: 0\r\n"
-                    "Connection: close\r\n"
-                    "\r\n";
-                co_await io.async_write(fd, too_large, strlen(too_large));
-                io.async_close(fd);
-                co_return;
-            }
-
-            // Read more data
-            ssize_t n = co_await io.async_read(fd, buffer + buffer_len, BUFFER_SIZE - buffer_len);
-            if (n <= 0) {
-                // Connection closed or error
-                io.async_close(fd);
-                co_return;
-            }
-            buffer_len += n;
-
-            // Try parsing again
-            parse_result = parser.parse(buffer, buffer_len, parsed_req, consumed);
-
-            if (parse_result < 0) {
-                // Still need more data - check timeout
-                auto elapsed = clock::now() - request_start;
-                auto timeout = is_first_request ? request_timeout : idle_timeout;
-                if (elapsed > timeout) {
-                    // Timeout - send 408 Request Timeout
-                    const char* timeout_response =
-                        "HTTP/1.1 408 Request Timeout\r\n"
-                        "Content-Length: 0\r\n"
-                        "Connection: close\r\n"
-                        "\r\n";
-                    co_await io.async_write(fd, timeout_response, strlen(timeout_response));
+            // Buffer full — need to grow or reject
+            if (buf_len >= buf_cap) {
+                if (!body_detected) {
+                    const char* r = "HTTP/1.1 431 Request Header Fields Too Large\r\n"
+                        "Content-Length: 0\r\nConnection: close\r\n\r\n";
+                    co_await io.async_write(fd, r, strlen(r));
                     io.async_close(fd);
                     co_return;
                 }
-                // Continue reading
+                const char* r = "HTTP/1.1 413 Payload Too Large\r\n"
+                    "Content-Length: 0\r\nConnection: close\r\n\r\n";
+                co_await io.async_write(fd, r, strlen(r));
+                io.async_close(fd);
+                co_return;
+            }
+
+            // Header size limit (only before body detected)
+            if (!body_detected && buf_len > config_.max_header_size) {
+                const char* r = "HTTP/1.1 431 Request Header Fields Too Large\r\n"
+                    "Content-Length: 0\r\nConnection: close\r\n\r\n";
+                co_await io.async_write(fd, r, strlen(r));
+                io.async_close(fd);
+                co_return;
+            }
+
+            // Read more data into current buffer
+            ssize_t n = co_await io.async_read(fd, buf + buf_len, buf_cap - buf_len);
+            if (n <= 0) {
+                io.async_close(fd);
+                co_return;
+            }
+            buf_len += n;
+
+            // Try parsing again
+            parse_result = parser.parse(buf, buf_len, parsed_req, consumed);
+
+            if (parse_result < 0) {
+                // Content-Length known but body incomplete → acquire arena buffer
+                if (!body_detected && parsed_req.has_content_length) {
+                    body_detected = true;
+                    if (parsed_req.content_length > config_.max_body_size) {
+                        const char* r = "HTTP/1.1 413 Payload Too Large\r\n"
+                            "Content-Length: 0\r\nConnection: close\r\n\r\n";
+                        co_await io.async_write(fd, r, strlen(r));
+                        io.async_close(fd);
+                        co_return;
+                    }
+                    // Need room for headers + body
+                    size_t needed = config_.max_header_size + parsed_req.content_length;
+                    if (needed > STACK_BUF_SIZE) {
+                        body_buf.reserve(needed, config_.max_body_size + config_.max_header_size);
+                        body_buf.adopt(stack_buf, buf_len);
+                        buf = body_buf.writable_data();
+                        buf_cap = body_buf.capacity();
+                    }
+                }
+
+                // Chunked without Content-Length — not yet supported
+                if (!body_detected && parsed_req.chunked && !parsed_req.has_content_length) {
+                    const char* r = "HTTP/1.1 501 Not Implemented\r\n"
+                        "Content-Length: 0\r\nConnection: close\r\n\r\n";
+                    co_await io.async_write(fd, r, strlen(r));
+                    io.async_close(fd);
+                    co_return;
+                }
+
+                // Timeout check
+                auto elapsed = clock::now() - request_start;
+                auto timeout = is_first_request ? request_timeout : idle_timeout;
+                if (elapsed > timeout) {
+                    const char* r = "HTTP/1.1 408 Request Timeout\r\n"
+                        "Content-Length: 0\r\nConnection: close\r\n\r\n";
+                    co_await io.async_write(fd, r, strlen(r));
+                    io.async_close(fd);
+                    co_return;
+                }
             }
         }
 
@@ -670,13 +712,26 @@ core::coro_task<void> CoroUnifiedServer::handle_http1_connection(
                 keep_alive = parsed_req.keep_alive;
                 
                 // Shift buffer (remove consumed data)
-                if (consumed < buffer_len) {
-                    memmove(buffer, buffer + consumed, buffer_len - consumed);
-                    buffer_len -= consumed;
+                if (consumed < buf_len) {
+                    memmove(buf, buf + consumed, buf_len - consumed);
+                    buf_len -= consumed;
                 } else {
-                    buffer_len = 0;
+                    buf_len = 0;
                 }
-                
+
+                // Release arena buffer if used, copy leftover back to stack
+                if (body_buf.is_arena_backed()) {
+                    if (buf_len > 0 && buf_len <= STACK_BUF_SIZE) {
+                        std::memcpy(stack_buf, buf, buf_len);
+                    } else if (buf_len > STACK_BUF_SIZE) {
+                        buf_len = 0;
+                    }
+                    body_buf.reset();
+                    buf = stack_buf;
+                    buf_cap = STACK_BUF_SIZE;
+                }
+                body_detected = false;
+
                 // Reset parser for next request
                 parser.reset();
                 continue;  // Skip normal handler processing
@@ -867,28 +922,36 @@ core::coro_task<void> CoroUnifiedServer::handle_http1_connection(
 
         // Pipelining timeout check: before processing next request from buffer,
         // verify we haven't exceeded idle timeout since start of this request
-        if (buffer_len > consumed) {
-            // There's more data in the buffer (pipelined request)
+        if (buf_len > consumed) {
             auto elapsed = clock::now() - request_start;
             if (elapsed > idle_timeout) {
-                // Connection has been active too long - close it
-                const char* timeout_response =
-                    "HTTP/1.1 408 Request Timeout\r\n"
-                    "Content-Length: 0\r\n"
-                    "Connection: close\r\n"
-                    "\r\n";
-                co_await io.async_write(fd, timeout_response, strlen(timeout_response));
+                const char* r = "HTTP/1.1 408 Request Timeout\r\n"
+                    "Content-Length: 0\r\nConnection: close\r\n\r\n";
+                co_await io.async_write(fd, r, strlen(r));
                 break;
             }
         }
 
         // Shift buffer (remove consumed data)
-        if (consumed < buffer_len) {
-            memmove(buffer, buffer + consumed, buffer_len - consumed);
-            buffer_len -= consumed;
+        if (consumed < buf_len) {
+            memmove(buf, buf + consumed, buf_len - consumed);
+            buf_len -= consumed;
         } else {
-            buffer_len = 0;
+            buf_len = 0;
         }
+
+        // Release arena buffer if used, copy leftover back to stack
+        if (body_buf.is_arena_backed()) {
+            if (buf_len > 0 && buf_len <= STACK_BUF_SIZE) {
+                std::memcpy(stack_buf, buf, buf_len);
+            } else if (buf_len > STACK_BUF_SIZE) {
+                buf_len = 0;
+            }
+            body_buf.reset();
+            buf = stack_buf;
+            buf_cap = STACK_BUF_SIZE;
+        }
+        body_detected = false;
 
         // Reset parser for next request
         parser.reset();

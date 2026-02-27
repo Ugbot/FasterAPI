@@ -2,6 +2,7 @@
 
 #include "quic/quic_connection.h"
 #include "h3_handler.h"
+#include "request_body_buffer.h"
 #include "qpack/qpack_encoder.h"
 #include "qpack/qpack_decoder.h"
 #include "http3_parser.h"
@@ -111,7 +112,7 @@ struct Http3StreamState {
     std::string scheme;
     std::string authority;
     std::unordered_map<std::string, std::string> headers;
-    std::vector<uint8_t> body;
+    http::RequestBodyBuffer body_buf;
     bool headers_complete{false};
     bool request_complete{false};
 };

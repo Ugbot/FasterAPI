@@ -401,11 +401,11 @@ int Http3Connection::handle_headers_frame(uint64_t stream_id, const uint8_t* dat
 int Http3Connection::handle_data_frame(uint64_t stream_id, const uint8_t* data, size_t length) noexcept {
     Http3StreamState& state = get_or_create_stream_state(stream_id);
 
-    // Append to body
-    state.body.insert(state.body.end(), data, data + length);
+    // Append to body (arena-backed buffer)
+    state.body_buf.append(data, length);
 
     std::cout << "[HTTP/3] Received " << length << " bytes of data on stream " << stream_id
-             << " (total: " << state.body.size() << ")" << std::endl;
+             << " (total: " << state.body_buf.size() << ")" << std::endl;
 
     return 0;
 }
@@ -469,7 +469,7 @@ void Http3Connection::complete_request(uint64_t stream_id) noexcept {
     // Invoke request callback if set
     if (request_callback_) {
         // Convert body to string
-        std::string body_str(state.body.begin(), state.body.end());
+        std::string body_str = state.body_buf.to_string();
 
         // Create send_response callback
         auto send_response = [this, stream_id](
@@ -621,10 +621,10 @@ Http3StreamState& Http3Connection::get_or_create_stream_state(uint64_t stream_id
         return it->second;
     }
 
-    // Create new state
+    // Create new state (move into map — RequestBodyBuffer is move-only)
     Http3StreamState state;
     state.stream_id = stream_id;
-    stream_states_[stream_id] = state;
+    stream_states_[stream_id] = std::move(state);
 
     return stream_states_[stream_id];
 }

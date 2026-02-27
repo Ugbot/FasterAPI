@@ -832,9 +832,31 @@ private:
 
     /**
      * Async routes by method (GET, POST, PUT, DELETE, PATCH).
-     * Routes are tried in order of registration.
+     * Routes are tried in order: static routes first, then parametric,
+     * then wildcard. Call sort_async_routes() after all routes are registered.
      */
     std::map<std::string, std::vector<AsyncRouteEntry>> async_routes_;
+
+public:
+    /**
+     * Sort async routes to enforce deterministic priority matching.
+     *
+     * Must be called ONCE after all routes are registered and before
+     * any matching occurs. Sorts routes within each HTTP method group:
+     *   1. Fully static routes first (no {param} or * segments)
+     *   2. Routes with fewer parameters second
+     *   3. Wildcard routes last
+     * Within the same category, longer path templates sort first
+     * (more specific routes win). Ties broken alphabetically.
+     *
+     * This ensures that static routes like /_cat/indices always match
+     * before parametric routes like /{index} regardless of registration order.
+     *
+     * Complexity: O(n log n) one-time at startup per method, zero runtime cost.
+     */
+    void sort_async_routes() noexcept;
+
+private:
 
     /**
      * Register an async route internally.

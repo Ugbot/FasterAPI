@@ -540,6 +540,70 @@ bool Router::is_wildcard(const std::string& segment) noexcept {
     return start < segment.length() && segment[start] == '*';
 }
 
+// ============================================================================
+// Route Priority Sorting
+// ============================================================================
+
+void Router::sort_routes() noexcept {
+    for (size_t i = 0; i < static_cast<size_t>(HttpMethod::COUNT); ++i) {
+        auto& tree = trees_[i];
+        if (tree) {
+            sort_node(tree.get());
+        }
+    }
+}
+
+void Router::sort_node(RouterNode* node) noexcept {
+    if (!node || node->children.empty()) {
+        return;
+    }
+
+    // Sort children: STATIC < PARAM < WILDCARD (lower type value = higher priority)
+    // Within same type: longer path first (more specific), then alphabetical
+    std::stable_sort(
+        node->children.begin(),
+        node->children.end(),
+        [](const std::unique_ptr<RouterNode>& a, const std::unique_ptr<RouterNode>& b) {
+            // Primary: node type (STATIC=0 < PARAM=1 < WILDCARD=2)
+            if (a->type != b->type) {
+                return static_cast<uint8_t>(a->type) < static_cast<uint8_t>(b->type);
+            }
+            // Secondary: longer path prefix first (more specific routes win)
+            if (a->path.length() != b->path.length()) {
+                return a->path.length() > b->path.length();
+            }
+            // Tertiary: alphabetical for determinism
+            return a->path < b->path;
+        }
+    );
+
+    // Rebuild child_index[256] lookup array after sort
+    node->child_index.fill(-1);
+    node->indices.clear();
+
+    for (size_t i = 0; i < node->children.size(); ++i) {
+        const auto& child = node->children[i];
+        if (child->type == NodeType::STATIC && !child->path.empty()) {
+            char c = child->path[0];
+            // Only set child_index for the first static child with this char
+            // (if multiple statics share first char, linear scan handles the rest)
+            if (node->child_index[static_cast<uint8_t>(c)] < 0) {
+                node->child_index[static_cast<uint8_t>(c)] = static_cast<int16_t>(i);
+            }
+            node->indices += c;
+        } else if (child->type == NodeType::PARAM) {
+            node->indices += ':';
+        } else if (child->type == NodeType::WILDCARD) {
+            node->indices += '*';
+        }
+    }
+
+    // Recurse into all children
+    for (auto& child : node->children) {
+        sort_node(child.get());
+    }
+}
+
 void Router::collect_routes(
     const RouterNode* node,
     const std::string& method,

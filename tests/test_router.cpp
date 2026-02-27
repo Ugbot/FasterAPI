@@ -413,6 +413,184 @@ TEST(route_introspection) {
 }
 
 // ============================================================================
+// SortRoutes Tests
+// ============================================================================
+
+// Verifies that sort_routes() makes static routes win over param routes
+// even when param routes are registered FIRST.
+TEST(sort_routes_static_wins_after_sort) {
+    Router router;
+
+    // Register param route FIRST (would normally shadow static)
+    router.add_route("GET", "/{index}", make_handler(1));
+    // Register static route SECOND
+    router.add_route("GET", "/_cat/indices", make_handler(2));
+    router.add_route("GET", "/_cluster/health", make_handler(3));
+
+    // Sort to enforce static > param priority
+    router.sort_routes();
+
+    RouteParams params;
+
+    // Static routes must match even though param was registered first
+    auto h_cat = router.match("GET", "/_cat/indices", params);
+    ASSERT(h_cat != nullptr);
+    ASSERT(params.empty());  // Static match means no params extracted
+
+    auto h_cluster = router.match("GET", "/_cluster/health", params);
+    ASSERT(h_cluster != nullptr);
+    ASSERT(params.empty());
+
+    // Param route still works for non-static paths
+    params.clear();
+    auto h_param = router.match("GET", "/my-index", params);
+    ASSERT(h_param != nullptr);
+    ASSERT(params.get("index") == "my-index");
+}
+
+// Verifies that param routes still win over wildcard after sort
+TEST(sort_routes_param_wins_over_wildcard) {
+    Router router;
+
+    // Register wildcard FIRST
+    router.add_route("GET", "/files/*path", make_handler(1));
+    // Register param SECOND
+    router.add_route("GET", "/files/{id}", make_handler(2));
+
+    router.sort_routes();
+
+    RouteParams params;
+    auto handler = router.match("GET", "/files/123", params);
+    ASSERT(handler != nullptr);
+    // Should match param, not wildcard
+    ASSERT(params.get("id") == "123");
+}
+
+// Comprehensive test simulating the real Gestalt route registration pattern
+TEST(sort_routes_gestalt_es_pattern) {
+    Router router;
+
+    // Simulate real Gestalt registration order:
+    // 1. ES param routes (registered in ElasticsearchRoutes)
+    router.add_route("GET", "/{index}", make_handler(10));
+    router.add_route("PUT", "/{index}", make_handler(11));
+    router.add_route("DELETE", "/{index}", make_handler(12));
+    router.add_route("GET", "/{index}/_search", make_handler(13));
+    router.add_route("POST", "/{index}/_search", make_handler(14));
+    router.add_route("GET", "/{index}/_doc/{id}", make_handler(15));
+
+    // 2. Cluster static routes (registered in ClusterRoutes)
+    router.add_route("GET", "/_cat/indices", make_handler(20));
+    router.add_route("GET", "/_cat/health", make_handler(21));
+    router.add_route("GET", "/_cat/nodes", make_handler(22));
+    router.add_route("GET", "/_cluster/health", make_handler(23));
+    router.add_route("GET", "/_cluster/settings", make_handler(24));
+    router.add_route("GET", "/_nodes/stats", make_handler(25));
+
+    // 3. Other static routes
+    router.add_route("GET", "/_aliases", make_handler(30));
+    router.add_route("POST", "/_bulk", make_handler(31));
+    router.add_route("POST", "/_msearch", make_handler(32));
+    router.add_route("POST", "/_mget", make_handler(33));
+
+    // Sort to fix priority
+    router.sort_routes();
+
+    RouteParams params;
+
+    // All static underscore-prefixed routes must resolve correctly
+    ASSERT(router.match("GET", "/_cat/indices", params) != nullptr);
+    ASSERT(params.empty());
+
+    ASSERT(router.match("GET", "/_cat/health", params) != nullptr);
+    ASSERT(params.empty());
+
+    ASSERT(router.match("GET", "/_cluster/health", params) != nullptr);
+    ASSERT(params.empty());
+
+    ASSERT(router.match("GET", "/_cluster/settings", params) != nullptr);
+    ASSERT(params.empty());
+
+    ASSERT(router.match("GET", "/_nodes/stats", params) != nullptr);
+    ASSERT(params.empty());
+
+    ASSERT(router.match("GET", "/_aliases", params) != nullptr);
+    ASSERT(params.empty());
+
+    ASSERT(router.match("POST", "/_bulk", params) != nullptr);
+    ASSERT(params.empty());
+
+    ASSERT(router.match("POST", "/_msearch", params) != nullptr);
+    ASSERT(params.empty());
+
+    ASSERT(router.match("POST", "/_mget", params) != nullptr);
+    ASSERT(params.empty());
+
+    // Param routes still work for non-underscore paths
+    params.clear();
+    auto h = router.match("GET", "/my-index", params);
+    ASSERT(h != nullptr);
+    ASSERT(params.get("index") == "my-index");
+
+    params.clear();
+    h = router.match("GET", "/products/_search", params);
+    ASSERT(h != nullptr);
+    ASSERT(params.get("index") == "products");
+
+    params.clear();
+    h = router.match("GET", "/logs/_doc/abc123", params);
+    ASSERT(h != nullptr);
+    ASSERT(params.get("index") == "logs");
+    ASSERT(params.get("id") == "abc123");
+}
+
+// Verify sort is idempotent
+TEST(sort_routes_idempotent) {
+    Router router;
+
+    router.add_route("GET", "/{index}", make_handler(1));
+    router.add_route("GET", "/_cat/indices", make_handler(2));
+    router.add_route("GET", "/_cluster/health", make_handler(3));
+
+    // Sort multiple times
+    router.sort_routes();
+    router.sort_routes();
+    router.sort_routes();
+
+    RouteParams params;
+    auto h = router.match("GET", "/_cat/indices", params);
+    ASSERT(h != nullptr);
+    ASSERT(params.empty());
+
+    params.clear();
+    h = router.match("GET", "/my-index", params);
+    ASSERT(h != nullptr);
+    ASSERT(params.get("index") == "my-index");
+}
+
+// Verify longer static paths sort before shorter ones within same type
+TEST(sort_routes_longer_static_first) {
+    Router router;
+
+    router.add_route("GET", "/api", make_handler(1));
+    router.add_route("GET", "/api/v1/users", make_handler(2));
+    router.add_route("GET", "/api/v1", make_handler(3));
+
+    router.sort_routes();
+
+    RouteParams params;
+
+    auto h1 = router.match("GET", "/api", params);
+    ASSERT(h1 != nullptr);
+
+    auto h2 = router.match("GET", "/api/v1", params);
+    ASSERT(h2 != nullptr);
+
+    auto h3 = router.match("GET", "/api/v1/users", params);
+    ASSERT(h3 != nullptr);
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 

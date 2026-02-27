@@ -545,6 +545,45 @@ void App::register_async_route(const std::string& method, const std::string& pat
     async_routes_[method].push_back(std::move(entry));
 }
 
+void App::sort_async_routes() noexcept {
+    for (auto& [method, routes] : async_routes_) {
+        std::stable_sort(routes.begin(), routes.end(),
+            [](const AsyncRouteEntry& a, const AsyncRouteEntry& b) {
+                // Classify routes by specificity:
+                // 0 = fully static (no params, no wildcards)
+                // 1 = has params but no wildcards
+                // 2 = has wildcards
+                auto classify = [](const AsyncRouteEntry& entry) -> int {
+                    for (const auto& name : entry.param_names) {
+                        if (name == "wildcard") return 2;
+                    }
+                    return entry.param_names.empty() ? 0 : 1;
+                };
+
+                int class_a = classify(a);
+                int class_b = classify(b);
+
+                // Primary: more specific class first
+                if (class_a != class_b) {
+                    return class_a < class_b;
+                }
+
+                // Secondary: within param class, fewer params = more specific
+                if (class_a == 1 && a.param_names.size() != b.param_names.size()) {
+                    return a.param_names.size() < b.param_names.size();
+                }
+
+                // Tertiary: longer path template first (more specific)
+                if (a.path_template.length() != b.path_template.length()) {
+                    return a.path_template.length() > b.path_template.length();
+                }
+
+                // Quaternary: alphabetical for determinism
+                return a.path_template < b.path_template;
+            });
+    }
+}
+
 bool App::has_async_route(const std::string& method, const std::string& path) const {
     auto it = async_routes_.find(method);
     if (it == async_routes_.end()) {

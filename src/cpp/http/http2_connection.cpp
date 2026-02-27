@@ -607,7 +607,7 @@ core::result<void> Http2Connection::handle_data_frame(
 
     // Append to stream body
     stream->append_request_body(data_result.value());
-    DEBUG_LOG_H2("Appended body, total_body_len=%zu", stream->request_body().size());
+    DEBUG_LOG_H2("Appended body, total_body_len=%zu", stream->request_body_size());
 
     // Update stream state
     bool end_stream = (header.flags & FrameFlags::DATA_END_STREAM) != 0;

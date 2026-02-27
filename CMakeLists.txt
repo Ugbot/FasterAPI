@@ -1074,6 +1074,20 @@ if (FA_BUILD_HTTP)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
     )
 
+    add_executable(test_body_buffer_arena tests/test_body_buffer_arena.cpp)
+    target_include_directories(test_body_buffer_arena PRIVATE ${CMAKE_SOURCE_DIR})
+    target_compile_features(test_body_buffer_arena PRIVATE cxx_std_17)
+    set_target_properties(test_body_buffer_arena PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+    )
+
+    add_executable(test_request_body_buffer tests/test_request_body_buffer.cpp)
+    target_include_directories(test_request_body_buffer PRIVATE ${CMAKE_SOURCE_DIR})
+    target_compile_features(test_request_body_buffer PRIVATE cxx_std_17)
+    set_target_properties(test_request_body_buffer PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests"
+    )
+
     add_executable(bench_http1_parser benchmarks/fasterapi/bench_http1_parser.cpp src/cpp/http/http1_parser.cpp)
     target_include_directories(bench_http1_parser PRIVATE ${CMAKE_SOURCE_DIR})
     set_target_properties(bench_http1_parser PROPERTIES
