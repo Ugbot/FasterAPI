@@ -1833,12 +1833,20 @@ int App::run_coro(const std::string& host, uint16_t port) {
         LOG_INFO("App", "Documentation: http://%s:%d%s", host.c_str(), port, config_.docs_url.c_str());
     }
 
-    // Start the coroutine server (blocks until stopped)
+    // Start the coroutine server (sets up background I/O threads)
     int result = coro_server.start();
     if (result != 0) {
         LOG_ERROR("App", "CoroUnifiedServer failed to start");
         return result;
     }
+
+    // Block until shutdown is requested (same pattern as run_unified)
+    while (coro_server.is_running()) {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+
+    // Graceful shutdown
+    coro_server.stop();
 
     return 0;
 }
