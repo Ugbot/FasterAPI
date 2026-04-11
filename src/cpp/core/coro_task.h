@@ -101,8 +101,13 @@ public:
          * Handle exceptions.
          */
         void unhandled_exception() noexcept {
+#ifdef __cpp_exceptions
             new (exception_storage_) std::exception_ptr(std::current_exception());
             has_exception_ = true;
+#else
+            std::cerr << "COROUTINE EXCEPTION: unhandled (exceptions disabled)" << std::endl;
+            std::abort();
+#endif
         }
 
         /**
@@ -287,9 +292,9 @@ public:
         void return_void() noexcept {}
 
         void unhandled_exception() noexcept {
+#ifdef __cpp_exceptions
             exception_ = std::current_exception();
             has_exception_ = true;
-            // Debug: print what the exception is
             try {
                 std::rethrow_exception(exception_);
             } catch (const std::exception& e) {
@@ -297,6 +302,10 @@ public:
             } catch (...) {
                 std::cerr << "COROUTINE EXCEPTION (void): unknown type" << std::endl;
             }
+#else
+            std::cerr << "COROUTINE EXCEPTION (void): unhandled (exceptions disabled)" << std::endl;
+            std::abort();
+#endif
         }
     };
 
