@@ -13,6 +13,7 @@
 #include "http1_parser.h"
 #include "http2_connection.h"
 #include "request_body_buffer.h"
+#include <algorithm>
 #include <iostream>
 #include <cstring>
 #include <cctype>
@@ -806,18 +807,20 @@ core::coro_task<void> CoroUnifiedServer::handle_http1_connection(
             }
         }
         
-        if (!accept_value.empty() &&
-            accept_value.find("text/event-stream") != std::string::npos) {
-
-            CoroSSEHandler* sse_handler = get_sse_handler(req.path);
-            if (sse_handler) {
-                // Send SSE headers
+        // Match SSE either by Accept header or by registered path (allows curl testing)
+        CoroSSEHandler* sse_handler = get_sse_handler(req.path);
+        if (sse_handler && (accept_value.empty() ||
+            accept_value.find("text/event-stream") != std::string::npos)) {
+            {
+                // Send SSE headers (include CORS for cross-origin EventSource)
                 const char* sse_headers =
                     "HTTP/1.1 200 OK\r\n"
                     "Content-Type: text/event-stream\r\n"
                     "Cache-Control: no-cache\r\n"
                     "Connection: keep-alive\r\n"
                     "X-Accel-Buffering: no\r\n"
+                    "Access-Control-Allow-Origin: *\r\n"
+                    "Access-Control-Allow-Headers: Content-Type, Authorization\r\n"
                     "\r\n";
                 co_await io.async_write(fd, sse_headers, strlen(sse_headers));
 
