@@ -35,6 +35,7 @@
 #include <vector>
 #include <unordered_map>
 #include <map>
+#include <algorithm>
 #include <atomic>
 #include <mutex>
 #include <chrono>

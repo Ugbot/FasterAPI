@@ -13,6 +13,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <cstring>
 #include <memory>
 #include <functional>
 #include <array>

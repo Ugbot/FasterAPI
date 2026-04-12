@@ -407,9 +407,9 @@ private:
     }
 
     void process_completion(const OVERLAPPED_ENTRY& entry) {
-        // Check for shutdown signal (null overlapped with zero key)
-        if (entry.lpOverlapped == NULL && entry.lpCompletionKey == 0) {
-            return;  // Wake-up signal
+        // Check for control signals (null overlapped, special key)
+        if (entry.lpOverlapped == NULL) {
+            return;  // Wake-up or stop signal
         }
 
         // Get our operation context

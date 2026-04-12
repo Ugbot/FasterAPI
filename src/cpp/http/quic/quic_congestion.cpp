@@ -146,7 +146,7 @@ uint64_t calculate_pto(uint64_t smoothed_rtt,
  * @return Initial congestion window (bytes)
  */
 uint64_t calculate_initial_cwnd(uint64_t max_datagram_size) noexcept {
-    uint64_t min_cwnd = std::max(2 * max_datagram_size, 14600ULL);
+    uint64_t min_cwnd = std::max(2 * max_datagram_size, uint64_t{14600});
     return std::min(10 * max_datagram_size, min_cwnd);
 }
 

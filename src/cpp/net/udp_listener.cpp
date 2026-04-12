@@ -6,9 +6,20 @@
 #include "../core/logger.h"
 #include <csignal>
 #include <cstring>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+#pragma comment(lib, "ws2_32.lib")
+#else
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#endif
 
 namespace fasterapi {
 namespace net {
@@ -84,10 +95,86 @@ bool UdpListener::is_running() const noexcept {
 void UdpListener::worker_thread(int worker_id) noexcept {
     LOG_INFO("UDP", "Worker %d starting", worker_id);
 
-    // Create event loop for this worker
+    // Create UDP socket
+    int udp_fd = create_udp_socket();
+    if (udp_fd < 0) {
+        LOG_ERROR("UDP", "Worker %d: Failed to create UDP socket", worker_id);
+        return;
+    }
+
+    LOG_INFO("UDP", "Worker %d: Listening on fd %d", worker_id, udp_fd);
+
+#ifdef _WIN32
+    // Windows: IOCP-based proactor model
+    // Create a per-worker IOCP handle
+    HANDLE iocp = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 1);
+    if (iocp == NULL) {
+        LOG_ERROR("UDP", "Worker %d: Failed to create IOCP handle: %lu", worker_id, GetLastError());
+        closesocket(static_cast<SOCKET>(udp_fd));
+        return;
+    }
+
+    // Create IOCP UDP context with pre-posted receives
+    SOCKET sock = static_cast<SOCKET>(udp_fd);
+    IOCPUdpContext ctx(iocp, sock, UDP_IOCP_DEFAULT_RECV_DEPTH,
+        [this](const UdpDatagram& dgram, SOCKET s) {
+            // Invoke the datagram callback.
+            // event_loop param is nullptr on Windows (IOCP replaces the event loop for UDP).
+            datagram_cb_(reinterpret_cast<const uint8_t*>(dgram.data),
+                        dgram.length,
+                        reinterpret_cast<const struct sockaddr*>(&dgram.from_addr),
+                        dgram.from_addr_len,
+                        nullptr, static_cast<int>(s));
+        }
+    );
+
+    if (ctx.start_receiving() != 0) {
+        LOG_ERROR("UDP", "Worker %d: Failed to start IOCP receiving", worker_id);
+        CloseHandle(iocp);
+        closesocket(sock);
+        return;
+    }
+
+    LOG_INFO("UDP", "Worker %d: IOCP event loop running", worker_id);
+
+    // IOCP event loop: dequeue completions and dispatch
+    constexpr ULONG MAX_ENTRIES = 64;
+    OVERLAPPED_ENTRY entries[MAX_ENTRIES];
+
+    while (running_.load(std::memory_order_acquire)) {
+        ULONG num_entries = 0;
+        BOOL ok = GetQueuedCompletionStatusEx(iocp, entries, MAX_ENTRIES, &num_entries, 100, FALSE);
+
+        if (!ok) {
+            if (GetLastError() == WAIT_TIMEOUT) continue;
+            break;
+        }
+
+        for (ULONG i = 0; i < num_entries; ++i) {
+            DWORD error = 0;
+            if (entries[i].lpOverlapped == NULL) continue;
+
+            DWORD flags = 0;
+            DWORD bytes = entries[i].dwNumberOfBytesTransferred;
+            if (!WSAGetOverlappedResult(sock, entries[i].lpOverlapped, &bytes, FALSE, &flags)) {
+                error = WSAGetLastError();
+                if (error == WSA_IO_INCOMPLETE) error = 0;
+            }
+
+            ctx.process_completion(entries[i].lpOverlapped, bytes, error);
+        }
+    }
+
+    ctx.stop_receiving();
+    CloseHandle(iocp);
+    closesocket(sock);
+
+#else
+    // POSIX: epoll/kqueue reactor model
     auto event_loop = create_event_loop();
     if (!event_loop) {
         LOG_ERROR("UDP", "Worker %d: Failed to create event loop", worker_id);
+        close(udp_fd);
         return;
     }
 
@@ -98,15 +185,6 @@ void UdpListener::worker_thread(int worker_id) noexcept {
         std::lock_guard<std::mutex> lock(event_loops_mutex_);
         event_loops_.push_back(event_loop.get());
     }
-
-    // Create UDP socket
-    int udp_fd = create_udp_socket();
-    if (udp_fd < 0) {
-        LOG_ERROR("UDP", "Worker %d: Failed to create UDP socket: %s", worker_id, strerror(errno));
-        return;
-    }
-
-    LOG_INFO("UDP", "Worker %d: Listening on fd %d", worker_id, udp_fd);
 
     // Pre-allocate receive buffer (no allocations in hot path)
     std::vector<uint8_t> recv_buffer(config_.max_datagram_size);
@@ -124,31 +202,24 @@ void UdpListener::worker_thread(int worker_id) noexcept {
             struct sockaddr_storage addr;
             socklen_t addr_len = sizeof(addr);
 
-            // Receive datagram
             ssize_t n = ::recvfrom(fd, recv_buffer.data(), recv_buffer.size(),
                                    0, (struct sockaddr*)&addr, &addr_len);
 
             if (n < 0) {
                 if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                    // No more datagrams
                     break;
                 }
                 LOG_ERROR("UDP", "recvfrom error: %s", strerror(errno));
                 continue;
             }
 
-            if (n == 0) {
-                // Empty datagram (shouldn't happen with UDP, but handle it)
-                continue;
-            }
+            if (n == 0) continue;
 
-            // Call datagram callback with socket fd for response sending
             datagram_cb_(recv_buffer.data(), static_cast<size_t>(n),
                         (struct sockaddr*)&addr, addr_len, event_loop, fd);
         }
     };
 
-    // Add UDP socket to event loop (edge-triggered for maximum throughput)
     if (event_loop->add_fd(udp_fd, IOEvent::READ | IOEvent::EDGE, recv_handler, nullptr) < 0) {
         LOG_ERROR("UDP", "Worker %d: Failed to add UDP socket to event loop: %s",
                   worker_id, strerror(errno));
@@ -156,13 +227,12 @@ void UdpListener::worker_thread(int worker_id) noexcept {
         return;
     }
 
-    // Run event loop
     LOG_INFO("UDP", "Worker %d: Running event loop", worker_id);
     event_loop->run();
 
-    // Cleanup
     event_loop->remove_fd(udp_fd);
     close(udp_fd);
+#endif
 
     LOG_INFO("UDP", "Worker %d stopped", worker_id);
 }

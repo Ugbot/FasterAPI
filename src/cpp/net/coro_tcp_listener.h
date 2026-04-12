@@ -15,6 +15,7 @@
 #include "tcp_socket.h"
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <string>

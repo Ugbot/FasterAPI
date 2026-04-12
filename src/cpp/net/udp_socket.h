@@ -7,14 +7,31 @@
  * - IPv4 and IPv6 support
  * - SO_REUSEPORT for multi-core scaling
  * - Integration with EventLoop
+ * - Windows IOCP support (proactor-based async UDP)
  */
 
 #pragma once
 
 #include <cstdint>
 #include <string>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+// Windows type compatibility
+using ssize_t = SSIZE_T;
+using socklen_t = int;
+using socket_t = SOCKET;
+constexpr socket_t INVALID_SOCKET_FD = INVALID_SOCKET;
+#else
 #include <sys/socket.h>
 #include <netinet/in.h>
+using socket_t = int;
+constexpr socket_t INVALID_SOCKET_FD = -1;
+#endif
 
 namespace fasterapi {
 namespace net {
@@ -44,9 +61,9 @@ public:
     explicit UdpSocket(bool ipv6 = false) noexcept;
 
     /**
-     * Create a UDP socket from an existing file descriptor
+     * Create a UDP socket from an existing file descriptor/handle
      * Takes ownership of the fd.
-     * @param fd File descriptor
+     * @param fd File descriptor (POSIX) or SOCKET handle (Windows)
      * @param af Address family (AF_INET or AF_INET6)
      */
     static UdpSocket from_fd(int fd, int af = AF_INET) noexcept;
@@ -63,14 +80,27 @@ public:
     UdpSocket& operator=(UdpSocket&& other) noexcept;
 
     /**
-     * Get the file descriptor
+     * Get the file descriptor / socket handle
+     * On Windows, this returns the SOCKET cast to int for API compatibility.
+     * Use native_handle() for the actual SOCKET value on Windows.
      */
     int fd() const noexcept { return fd_; }
+
+#ifdef _WIN32
+    /**
+     * Get the native Windows SOCKET handle
+     */
+    SOCKET native_handle() const noexcept { return static_cast<SOCKET>(fd_); }
+#endif
 
     /**
      * Check if socket is valid
      */
+#ifdef _WIN32
+    bool is_valid() const noexcept { return static_cast<SOCKET>(fd_) != INVALID_SOCKET; }
+#else
     bool is_valid() const noexcept { return fd_ >= 0; }
+#endif
 
     /**
      * Close the socket

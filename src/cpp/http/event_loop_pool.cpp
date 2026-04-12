@@ -17,6 +17,7 @@
 #include <chrono>
 #include <cstring>
 #include <sys/socket.h>
+#include <netinet/in.h>
 #include <netinet/tcp.h>
 
 using namespace NNet;

@@ -49,15 +49,30 @@ else()
     set(COVERAGE_FLAGS "")
 endif()
 
-# Conditional exception flags
-if(NOT ENABLE_EXCEPTIONS)
-    set(EXCEPTION_FLAGS "-fno-exceptions -fno-rtti")
-else()
-    set(EXCEPTION_FLAGS "")
-endif()
+# Conditional exception flags and optimization - platform-specific
+if(MSVC)
+    if(NOT ENABLE_EXCEPTIONS)
+        set(EXCEPTION_FLAGS "/EHs- /GR-")
+    else()
+        set(EXCEPTION_FLAGS "/EHsc")
+    endif()
 
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 ${NATIVE_FLAG} -flto ${EXCEPTION_FLAGS} ${COVERAGE_FLAGS}")
-set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g ${EXCEPTION_FLAGS} ${COVERAGE_FLAGS}")
+    if(FA_NATIVE_ARCH)
+        set(NATIVE_FLAG "/arch:AVX2")
+    endif()
+
+    set(CMAKE_CXX_FLAGS_RELEASE "/O2 ${NATIVE_FLAG} /GL ${EXCEPTION_FLAGS}")
+    set(CMAKE_CXX_FLAGS_DEBUG "/Od /Zi ${EXCEPTION_FLAGS}")
+else()
+    if(NOT ENABLE_EXCEPTIONS)
+        set(EXCEPTION_FLAGS "-fno-exceptions -fno-rtti")
+    else()
+        set(EXCEPTION_FLAGS "")
+    endif()
+
+    set(CMAKE_CXX_FLAGS_RELEASE "-O3 ${NATIVE_FLAG} -flto ${EXCEPTION_FLAGS} ${COVERAGE_FLAGS}")
+    set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g ${EXCEPTION_FLAGS} ${COVERAGE_FLAGS}")
+endif()
 
 # Default to Release build
 if(NOT CMAKE_BUILD_TYPE)

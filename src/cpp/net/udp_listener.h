@@ -16,6 +16,9 @@
 
 #include "event_loop.h"
 #include "udp_socket.h"
+#ifdef _WIN32
+#include "udp_socket_iocp.h"
+#endif
 #include <cstdint>
 #include <string>
 #include <vector>

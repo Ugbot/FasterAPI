@@ -54,15 +54,23 @@ struct iocp_op {
     }
 };
 
+// Completion keys to distinguish wake/stop events from real I/O
+static constexpr ULONG_PTR WAKE_KEY = 0xFADE0001;
+static constexpr ULONG_PTR STOP_KEY = 0xFADE0002;
+
 /**
  * IOCP implementation
  */
 struct iocp_io::impl {
     HANDLE iocp_handle{INVALID_HANDLE_VALUE};
     async_io_config config;
-    
+
     std::atomic<bool> running{false};
     std::atomic<bool> stop_requested{false};
+
+    // Wake mechanism
+    async_io::wake_callback wake_cb;
+    std::atomic<bool> wake_pending{false};
     
     // AcceptEx function pointer (loaded dynamically)
     LPFN_ACCEPTEX AcceptEx{nullptr};
@@ -328,7 +336,19 @@ int iocp_io::poll(uint32_t timeout_us) noexcept {
         // Timeout or error
         return 0;
     }
-    
+
+    // Check for wake/stop signals (no OVERLAPPED, special completion key)
+    if (overlapped == NULL || completion_key == WAKE_KEY || completion_key == STOP_KEY) {
+        if (completion_key == WAKE_KEY) {
+            impl_->wake_pending.store(false, std::memory_order_release);
+            if (impl_->wake_cb) {
+                impl_->wake_cb();
+            }
+        }
+        // STOP_KEY: just return, the run() loop checks stop_requested
+        return (completion_key == WAKE_KEY) ? 1 : 0;
+    }
+
     // Get operation from OVERLAPPED
     iocp_op* op = CONTAINING_RECORD(overlapped, iocp_op, overlapped);
     std::unique_ptr<iocp_op> op_guard(op);
@@ -390,10 +410,10 @@ void iocp_io::run() noexcept {
 
 void iocp_io::stop() noexcept {
     impl_->stop_requested.store(true, std::memory_order_release);
-    
-    // Post quit message to wake up IOCP
+
+    // Post stop signal to wake up IOCP
     if (impl_->iocp_handle != INVALID_HANDLE_VALUE) {
-        PostQueuedCompletionStatus(impl_->iocp_handle, 0, 0, NULL);
+        PostQueuedCompletionStatus(impl_->iocp_handle, 0, STOP_KEY, NULL);
     }
 }
 
@@ -414,16 +434,19 @@ async_io::stats iocp_io::get_stats() const noexcept {
     return s;
 }
 
-// TODO: Implement wake() and set_wake_callback() for IOCP
-// wake() should use PostQueuedCompletionStatus() with a special completion key
-// This is needed for async coroutine resumption from worker threads
 void iocp_io::wake() noexcept {
-    // NOT IMPLEMENTED - Windows IOCP wake mechanism needed
-    // Use: PostQueuedCompletionStatus(iocp_handle, 0, WAKE_KEY, nullptr);
+    // Thread-safe wake using PostQueuedCompletionStatus with WAKE_KEY.
+    // Only post if not already pending (avoid redundant wakes).
+    bool expected = false;
+    if (impl_->wake_pending.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+        if (impl_->iocp_handle != INVALID_HANDLE_VALUE) {
+            PostQueuedCompletionStatus(impl_->iocp_handle, 0, WAKE_KEY, NULL);
+        }
+    }
 }
 
 void iocp_io::set_wake_callback(wake_callback callback) noexcept {
-    // NOT IMPLEMENTED - store callback and invoke when WAKE_KEY detected in poll()
+    impl_->wake_cb = std::move(callback);
 }
 
 } // namespace core

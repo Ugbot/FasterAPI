@@ -1,4 +1,5 @@
 #include "h2_server_push.h"
+#include <cstring>
 #include <iostream>
 
 namespace fasterapi {

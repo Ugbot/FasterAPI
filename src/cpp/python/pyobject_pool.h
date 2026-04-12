@@ -21,6 +21,7 @@
 #pragma once
 
 #include <Python.h>
+#include <algorithm>
 #include <atomic>
 #include <vector>
 #include <memory>

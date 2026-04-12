@@ -5,6 +5,7 @@
 #include "../huffman.h"
 #include "../quic/quic_varint.h"
 #include <cstdint>
+#include <cstring>
 #include <string_view>
 #include <vector>
 
