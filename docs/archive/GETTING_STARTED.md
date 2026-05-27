@@ -1,8 +1,14 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # Getting Started with FasterAPI
 
 ## What You Have Now
 
-A **production-ready scaffolding** for a high-performance Python web framework that combines:
+A **exploratory scaffolding** for a high-performance Python web framework that combines:
 
 1. **HTTP Server** (HTTP/1.1, HTTP/2, HTTP/3, WebSocket) via uWebSockets, nghttp2, MsQuic
 2. **PostgreSQL Driver** (connection pooling, binary codecs, COPY streaming) via libpq

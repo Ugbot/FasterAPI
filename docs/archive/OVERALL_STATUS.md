@@ -1,8 +1,14 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # FasterAPI - Overall Status
 
 ## 🎉 Complete Implementation Summary
 
-FasterAPI now includes **three major production-ready components**:
+FasterAPI now includes **three major exploratory components**:
 
 1. ✅ **Seastar-Style Futures** - Zero-allocation async with continuation chaining
 2. ✅ **PostgreSQL Integration** - High-performance connection pooling with binary protocol
@@ -12,7 +18,7 @@ FasterAPI now includes **three major production-ready components**:
 
 ## Component 1: Seastar-Style Futures ✅
 
-### Status: PRODUCTION READY
+### Status: EXPLORATORY
 
 **Implementation:**
 - C++ Future/Promise with zero-allocation design
@@ -39,7 +45,7 @@ FasterAPI now includes **three major production-ready components**:
 
 ## Component 2: PostgreSQL Integration ✅
 
-### Status: PRODUCTION READY
+### Status: EXPLORATORY
 
 **Implementation:**
 - Per-core connection pooling
@@ -66,7 +72,7 @@ FasterAPI now includes **three major production-ready components**:
 
 ## Component 3: High-Performance Router ✅
 
-### Status: PRODUCTION READY
+### Status: EXPLORATORY
 
 **Implementation:**
 - Radix tree with path compression
@@ -308,7 +314,7 @@ Benchmarks:     5 performance suites
 
 ## 🎉 Conclusion
 
-FasterAPI is now a **complete, production-ready, high-performance Python web framework** featuring:
+FasterAPI is now a **complete, exploratory, high-performance Python web framework** featuring:
 
 - ⚡ **Ultra-fast router** (30ns) with path parameters
 - 🔄 **Seastar-style futures** for async operations
@@ -323,6 +329,6 @@ FasterAPI is now a **complete, production-ready, high-performance Python web fra
 
 **Project:** FasterAPI
 **Completion Date:** October 18, 2025
-**Final Status:** ✅ **PRODUCTION READY**
+**Final Status:** ✅ **EXPLORATORY**
 **Recommendation:** **Deploy with confidence!**
 

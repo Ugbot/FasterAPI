@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # Seastar-Style Future Chaining - Final Summary
 
 ## 🎉 Implementation Complete
@@ -309,7 +315,7 @@ def get_user_fast(id: int):
 
 ## ✨ Final Thoughts
 
-The Seastar-style future chaining implementation for FasterAPI is **complete and production-ready**. It successfully combines:
+The Seastar-style future chaining implementation for FasterAPI is **complete and exploratory**. It successfully combines:
 
 - **Seastar's performance patterns** (zero-allocation, continuations)
 - **Python's ergonomics** (`async/await`, rich syntax)

@@ -1,6 +1,12 @@
-# FasterAPI - ULTIMATE ACHIEVEMENT
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
+# FasterAPI - experiment writeup
 
-## 🏆 PROJECT COMPLETE - PRODUCTION READY
+## 🏆 PROJECT COMPLETE - EXPLORATORY
 
 **Date:** October 18, 2025  
 **Status:** ✅ **READY FOR DEPLOYMENT**  
@@ -293,7 +299,7 @@ RFC Compliance:          HTTP/1.1, HTTP/2, HTTP/3, WebRTC
 ║           🏆 9 PRODUCTION SYSTEMS                       ║
 ║           ✅ 169/171 TESTS PASSING                      ║
 ║           ⚡ 5-75x FASTER THAN APIS                     ║
-║           🚀 PRODUCTION READY                           ║
+║           🚀 EXPLORATORY                           ║
 ║                                                          ║
 ╚══════════════════════════════════════════════════════════╝
 

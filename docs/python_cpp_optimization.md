@@ -1,5 +1,11 @@
 # Python-C++ Interop Optimization Guide
 
+> **Note — FasterAPI is an experimental testbed, not a framework.** A
+> lot of the value of this repo is the answer to "what does it actually
+> take to put a C++ hot path under Python?" — this doc captures that
+> exploration. Ping [@ugbot](https://github.com/ugbot) for the actual
+> framework built on top of this toolkit.
+
 ## Overview
 
 This document details the optimizations implemented to maximize Python-C++ interoperability performance in FasterAPI, with special focus on eliminating GIL contention and achieving true multi-core parallelism.

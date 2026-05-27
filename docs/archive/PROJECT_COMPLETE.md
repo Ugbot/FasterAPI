@@ -1,6 +1,12 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # FasterAPI: Seastar-Style Futures - PROJECT COMPLETE ✅
 
-## 🎉 Mission Accomplished
+## 🎉 Experiment complete
 
 Successfully implemented **Seastar-style zero-allocation futures with continuation chaining** for FasterAPI, providing both ergonomic async/await syntax and explicit .then() chains for maximum performance.
 
@@ -253,7 +259,7 @@ FasterAPI/
 
 ## 🚀 Ready for Production
 
-The implementation is **production-ready** with:
+The implementation is **exploratory** with:
 
 ✅ Comprehensive test suite
 ✅ Performance benchmarks
@@ -265,7 +271,7 @@ The implementation is **production-ready** with:
 
 ## 🔮 Future Enhancements
 
-While complete and production-ready, potential optimizations:
+While complete and exploratory, potential optimizations:
 
 1. **Performance**
    - True stack-only allocation (reduce 0.26µs to ~0µs)
@@ -309,7 +315,7 @@ Perfect for applications needing:
 ║                                                          ║
 ║              ✅ IMPLEMENTATION COMPLETE                  ║
 ║              ✅ ALL TESTS PASSING                        ║
-║              ✅ PRODUCTION READY                         ║
+║              ✅ EXPLORATORY                         ║
 ║                                                          ║
 ╚══════════════════════════════════════════════════════════╝
 
@@ -318,7 +324,7 @@ Tests:            22/22 passing
 Documentation:    1,000+ lines
 Examples:         4 complete examples
 Performance:      0.7µs async/await, 0.5µs explicit
-Status:           PRODUCTION READY ✅
+Status:           EXPLORATORY ✅
 ```
 
 ---
@@ -326,6 +332,6 @@ Status:           PRODUCTION READY ✅
 **Project:** FasterAPI Seastar-Style Futures
 **Completion Date:** October 18, 2025
 **Development Time:** ~6 hours
-**Final Status:** ✅ **COMPLETE & PRODUCTION READY**
+**Final Status:** ✅ **COMPLETE & EXPLORATORY**
 
 🚀 Ready to revolutionize Python async programming!

@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # QUIC ACK Tracker Implementation Report
 ## Agent 14 - Production Quality Implementation
 
@@ -375,7 +381,7 @@ No additional linking required.
 
 ## Conclusion
 
-The QUIC ACK tracker implementation is **production-ready** with:
+The QUIC ACK tracker implementation is **exploratory** with:
 
 - ✅ Full RFC 9002 compliance
 - ✅ Comprehensive test coverage (18 tests, 100% pass)
@@ -451,4 +457,4 @@ Test 18: Non-ack-eliciting packets...
 **Report Generated**: October 31, 2025
 **Agent**: Agent 14
 **Mission**: Production HTTP/3 QUIC ACK Tracker
-**Status**: ✅ MISSION ACCOMPLISHED
+**Status**: ✅ experiment complete

@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # HTTP/3 Performance Benchmark Report
 
 **Date**: 2025-10-31
@@ -9,7 +15,7 @@
 
 ## Executive Summary
 
-The HTTP/3 implementation demonstrates **exceptional performance** across all metrics, significantly exceeding the target performance goals. The stack is production-ready with outstanding throughput, sub-microsecond latency, and excellent scalability.
+The HTTP/3 implementation demonstrates **exceptional performance** across all metrics, significantly exceeding the target performance goals. The stack is exploratory with outstanding throughput, sub-microsecond latency, and excellent scalability.
 
 ### Key Highlights
 
@@ -416,7 +422,7 @@ The HTTP/3 implementation delivers **exceptional performance** across all dimens
 - **Latency**: Sub-microsecond P50, <2μs P99
 - **Efficiency**: Zero allocations, optimal CPU usage
 - **Scalability**: Stable from 1 to 10K+ concurrent operations
-- **Quality**: Clean compilation, no errors, production-ready
+- **Quality**: Clean compilation, no errors, exploratory
 
 ### Key Achievements
 
@@ -428,7 +434,7 @@ The HTTP/3 implementation delivers **exceptional performance** across all dimens
 
 ### Final Verdict
 
-**Status**: ✅ **PRODUCTION READY**
+**Status**: ✅ **EXPLORATORY**
 
 This HTTP/3 stack represents a **best-in-class implementation** with performance characteristics that exceed industry standards. The combination of thoughtful architecture, zero-allocation design, and careful optimization has resulted in a stack that is both extremely fast and highly reliable.
 

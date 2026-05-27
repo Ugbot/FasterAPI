@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # QUIC Packet Implementation Report
 
 ## Mission Completed
@@ -284,7 +290,7 @@ src/cpp/http/quic/quic_packet.cpp        (460 lines) [IMPLEMENTED]
 src/cpp/http/quic/test_quic_packet.cpp   (550 lines) [NEW]
 ```
 
-**Total Implementation**: 1,368 lines of RFC-compliant, production-ready code.
+**Total Implementation**: 1,368 lines of RFC-compliant, exploratory code.
 
 ## Conclusion
 

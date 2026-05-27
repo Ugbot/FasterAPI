@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # Python Integration Layer - Detailed Findings
 
 ## Overview
@@ -633,4 +639,4 @@ The codebase has architectural promise but severe implementation gaps:
 3. **Too many shortcuts violate project principles**
 4. **No proper testing of critical paths**
 
-The detailed issues above should be addressed in priority order before the codebase can be considered production-ready.
+The detailed issues above should be addressed in priority order before the codebase can be considered exploratory.

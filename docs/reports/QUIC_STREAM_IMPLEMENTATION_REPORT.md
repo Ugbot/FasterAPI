@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # QUIC Stream Implementation Report
 
 **Agent 11: QUIC Stream Implementation Specialist**
@@ -363,7 +369,7 @@ From test execution:
 
 ## Future Enhancements
 
-While the current implementation is production-ready, future improvements could include:
+While the current implementation is exploratory, future improvements could include:
 
 1. **Out-of-Order Reassembly** - Full buffering and gap-filling
 2. **Auto-Tuning Flow Control** - Dynamic window adjustment based on RTT and bandwidth

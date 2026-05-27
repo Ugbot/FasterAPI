@@ -1,6 +1,12 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # Algorithm Import Strategy - COMPLETE SUCCESS
 
-## 🎉 Mission Accomplished
+## 🎉 Experiment complete
 
 We've successfully imported core algorithms from external libraries and achieved **5-75x performance improvements** over using their APIs!
 
@@ -391,7 +397,7 @@ Code Added:              ~950 lines
 Performance Gain:        5-75x faster!
 Framework Overhead:      4.1µs (down 32%!)
 
-Status:                  ✅ PRODUCTION READY
+Status:                  ✅ EXPLORATORY
 Strategy:                ✅ VALIDATED & PROVEN
 ```
 

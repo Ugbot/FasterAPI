@@ -1,10 +1,25 @@
 # Migrating from FastAPI to FasterAPI
 
-A complete guide for FastAPI developers moving to FasterAPI.
+> **Stop — read this first.**
+> FasterAPI is an experimental testbed, not a supported framework, and
+> **not a drop-in replacement for FastAPI**. The API only *resembles*
+> FastAPI's in places because that was a convenient familiar shape
+> while building the C++ pieces. Do not migrate a real service to this
+> repo. If you want the actual web framework being built on top of this
+> toolkit, open an issue and ping
+> [@ugbot](https://github.com/ugbot).
+>
+> This doc is kept because it's a useful side-by-side reference for how
+> the pieces here line up against FastAPI patterns — not because
+> migration is recommended.
 
 ## Overview
 
-FasterAPI is designed to be familiar to FastAPI users while offering significantly better performance through C++ hot paths. This guide will help you understand the key differences and migrate your applications smoothly.
+The pieces in this repo cover roughly the same surface area as FastAPI
+(routing, dependency injection, async handlers, JSON responses) with
+C++ on the hot paths. This guide is a side-by-side reference for
+FastAPI users who want to *understand the mapping*, not a migration
+recipe for production code.
 
 ## Philosophy Differences
 
@@ -899,7 +914,7 @@ if __name__ == "__main__":
 2. **Try the [examples](../examples/)**
 3. **Check out [PostgreSQL docs](postgresql.md)**
 4. **Read the [Performance Guide](performance.md)**
-5. **Join the [Discord/Discussion](https://github.com/bengamble/FasterAPI/discussions)**
+5. **Join the [Discord/Discussion](https://github.com/ugbot/FasterAPI/discussions)**
 
 ## Getting Help
 

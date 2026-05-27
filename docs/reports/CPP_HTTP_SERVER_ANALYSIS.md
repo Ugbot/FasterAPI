@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # FasterAPI C++ HTTP Server Implementation Analysis
 
 ## Executive Summary
@@ -858,10 +864,10 @@ co_await socket.WriteSome(data, len);
 
 | Category | Status | Confidence |
 |----------|--------|------------|
-| HTTP/1.1 | PRODUCTION READY | 95% |
+| HTTP/1.1 | EXPLORATORY | 95% |
 | HTTP/2 | SUBSTANTIAL, MOSTLY FUNCTIONAL | 70% |
 | HTTP/3 | STUB/INCOMPLETE | 5% |
-| Routing | PRODUCTION READY | 95% |
+| Routing | EXPLORATORY | 95% |
 | Memory Management | FOLLOWS GUIDELINES | 90% |
 | Python Integration | PARTIAL (registration good, async TBD) | 60% |
 | Error Handling | GOOD (no exceptions, int codes) | 85% |

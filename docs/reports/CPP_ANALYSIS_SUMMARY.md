@@ -1,8 +1,14 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # C++ HTTP Server Analysis - Quick Summary
 
 ## Overview
 - **Total Code**: ~17,876 lines of C++ across 60+ files
-- **Core Status**: PRODUCTION READY for HTTP/1.1 and most of HTTP/2
+- **Core Status**: EXPLORATORY for HTTP/1.1 and most of HTTP/2
 - **Allocations**: 97 new/delete/malloc/free occurrences (mostly safe make_unique calls)
 - **Architecture**: Multi-threaded with coroutine-based async I/O
 
@@ -152,7 +158,7 @@ Router.match() → Handler → HttpResponse → send_response()
 ## Recommendations
 
 ### For Production Use
-1. ✅ HTTP/1.1 is production-ready
+1. ✅ HTTP/1.1 is exploratory
 2. ✅ HTTP/2 is mostly ready (test ALPN and TLS integration)
 3. ❌ Don't use HTTP/3 yet (8+ TODOs, not integrated)
 4. ⚠️ Replace debug logging (cerr) with proper logger before deployment

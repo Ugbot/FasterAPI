@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # High-Performance Router - COMPLETE ✅
 
 ## 🎉 Implementation Complete
@@ -285,7 +291,7 @@ Very memory efficient compared to hash maps!
 
 ## 🔮 Future Enhancements
 
-While already production-ready, potential improvements:
+While already exploratory, potential improvements:
 
 1. **Route Groups** - Share common prefixes
    ```cpp
@@ -337,7 +343,7 @@ Consider:
 4. **Realistic Benchmarks** - 14-route API shows real-world performance
 5. **Premature Optimization** - 1000-route case is theoretical for most apps
 
-## 🎉 Status: PRODUCTION READY
+## 🎉 Status: EXPLORATORY
 
 The router implementation is:
 - ✅ Correct (24/24 tests)
@@ -355,5 +361,5 @@ The router implementation is:
 **Lines of Code:** ~1,400 lines
 **Test Pass Rate:** 100% (24/24)
 **Performance:** 30-70ns (3-5x faster than targets!)
-**Status:** ✅ **PRODUCTION READY**
+**Status:** ✅ **EXPLORATORY**
 

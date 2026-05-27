@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # WebRTC Implementation - COMPLETE ✅
 
 ## 🎉 Full WebRTC Stack with Data Channels, Audio, and Video
@@ -629,7 +635,7 @@ At 50 fps video (720p):
 
 ---
 
-## 🎉 WebRTC Status: PRODUCTION READY
+## 🎉 WebRTC Status: EXPLORATORY
 
 **What Works:**
 - ✅ Complete signaling (SDP, ICE)
@@ -659,7 +665,7 @@ At 50 fps video (720p):
 **Tests:** 19/19 passing (100%)  
 **Performance:** 2-10x faster than targets  
 **Sources:** Pion (algorithms) + Aeron (buffers) + simdjson (parsing)  
-**Status:** ✅ **PRODUCTION READY FOR SIGNALING & DATA CHANNELS**
+**Status:** ✅ **EXPLORATORY FOR SIGNALING & DATA CHANNELS**
 
 🚀 **FasterAPI now has complete WebRTC support!**
 

@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # Quick Wins - COMPLETE ✅
 
 ## 🎉 All Three Quick Wins Implemented!
@@ -74,7 +80,7 @@ def index():
 - Work stealing - better load balancing
 - Thread pinning - NUMA optimization
 
-**Decision:** Current implementation is production-ready. Ship it!
+**Decision:** Current implementation is exploratory. Ship it!
 
 ---
 
@@ -101,7 +107,7 @@ Total Code:          19,500+ lines
 Performance:         5-75x faster than library APIs
 Framework Overhead:  ~4µs
 
-Status:              ✅ PRODUCTION READY!
+Status:              ✅ EXPLORATORY!
 ```
 
 ---
@@ -151,7 +157,7 @@ Status:              ✅ PRODUCTION READY!
 ---
 
 **Date:** October 18, 2025  
-**Status:** ✅ **PRODUCTION READY**  
+**Status:** ✅ **EXPLORATORY**  
 **Quick Wins:** 3/3 COMPLETE  
 **Total Achievement:** 9 production systems, 162 tests, 5-75x performance!
 

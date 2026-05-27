@@ -1,4 +1,10 @@
-# ✅ 1MRC + Async I/O - ULTIMATE ACHIEVEMENT!
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
+# ✅ 1MRC + Async I/O - experiment writeup!
 
 **Date:** October 20, 2025  
 **Challenge:** [1 Million Request Challenge](https://github.com/Kavishankarks/1mrc)  
@@ -403,7 +409,7 @@ Improvement: 40-167x faster than current!
 ```
 ╔══════════════════════════════════════════════════════════╗
 ║                                                          ║
-║              ULTIMATE ACHIEVEMENT UNLOCKED!              ║
+║              experiment writeup UNLOCKED!              ║
 ║                                                          ║
 ║  Built in ONE session:                                   ║
 ║    ✅ 4 complete 1MRC server implementations            ║
@@ -658,7 +664,7 @@ Status: Needs Linux + liburing ⏳
 ```
 ╔══════════════════════════════════════════════════════════╗
 ║                                                          ║
-║  🏆 MISSION ACCOMPLISHED! 🏆                            ║
+║  🏆 experiment complete! 🏆                            ║
 ║                                                          ║
 ║  In ONE session, we:                                     ║
 ║    ✅ Ran 1MRC on 2 different servers                   ║
@@ -683,7 +689,7 @@ Status: Needs Linux + liburing ⏳
 
 ---
 
-**FasterAPI: Now with world-class async I/O on all platforms!** ⚡🌍
+**FasterAPI: Now with ambitious async I/O on all platforms!** ⚡🌍
 
 **Challenge completed. Framework enhanced. Future secured.** 🎯🚀🔥
 

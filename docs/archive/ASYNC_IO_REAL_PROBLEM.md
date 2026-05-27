@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # 🔍 The REAL Problem With Async I/O Performance
 
 ## ❌ Results So Far
@@ -271,7 +277,7 @@ uv_loop_t* loop = uv_default_loop();
 
 ### Option 3: Accept Current Performance
 
-FastAPI/uvicorn at 12.8K req/s is already production-ready!
+FastAPI/uvicorn at 12.8K req/s is already exploratory!
 
 ---
 

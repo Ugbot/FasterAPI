@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # FasterAPI - Parallel Implementation Complete! 🎉
 
 **Date:** 2025-10-31  
@@ -362,4 +368,4 @@ This parallel implementation effort successfully:
 
 **All 4 agents completed their missions successfully with zero code conflicts!** 🎉
 
-The FasterAPI codebase is now significantly more complete, with production-ready implementations of HTTP/3, PostgreSQL, MCP, and WebSocket/SSE.
+The FasterAPI codebase is now significantly more complete, with exploratory implementations of HTTP/3, PostgreSQL, MCP, and WebSocket/SSE.

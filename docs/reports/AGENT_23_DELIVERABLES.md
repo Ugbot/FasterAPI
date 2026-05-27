@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # Agent 23: HTTP/3 Performance Testing - Deliverables
 
 ## Mission Status: ✅ COMPLETE
@@ -259,7 +265,7 @@ ninja test_http3_performance
 
 **Mission Status**: ✅ **COMPLETE**
 
-All objectives achieved with exceptional results. The HTTP/3 performance test suite is comprehensive, well-documented, and demonstrates that the implementation exceeds all targets by significant margins. The stack is production-ready with industry-leading performance characteristics.
+All objectives achieved with exceptional results. The HTTP/3 performance test suite is comprehensive, well-documented, and demonstrates that the implementation exceeds all targets by significant margins. The stack is exploratory with industry-leading performance characteristics.
 
 **Final Assessment**: 
 - Performance: ✅ **EXCEPTIONAL** (23x above targets)

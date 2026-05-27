@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # FasterAPI MCP (Model Context Protocol) Support
 
 **High-performance MCP server and client implementation in C++, exposed via Python bindings.**
@@ -480,13 +486,13 @@ MIT
 - **Protocol**: Based on Anthropic's [Model Context Protocol](https://modelcontextprotocol.io/)
 - **Inspiration**: [fastmcp](https://github.com/jlowin/fastmcp) (Python API design)
 - **Inspiration**: [Archestra](https://github.com/archestra-ai/archestra) (Security features)
-- **Foundation**: Built on [FasterAPI](https://github.com/bengamble/FasterAPI)
+- **Foundation**: Built on [FasterAPI](https://github.com/ugbot/FasterAPI)
 
 ## Support
 
 - **Documentation**: https://docs.fasterapi.io/mcp
-- **Issues**: https://github.com/bengamble/FasterAPI/issues
-- **Discussions**: https://github.com/bengamble/FasterAPI/discussions
+- **Issues**: https://github.com/ugbot/FasterAPI/issues
+- **Discussions**: https://github.com/ugbot/FasterAPI/discussions
 - **Discord**: https://discord.gg/fasterapi
 
 ---

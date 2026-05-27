@@ -1,8 +1,14 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # MCP Proxy Implementation Summary
 
 ## 🎉 What Was Delivered
 
-A **production-ready, high-performance MCP proxy layer** for FasterAPI, inspired by [Archestra](https://github.com/archestra-ai/archestra), built entirely in C++ with Python bindings.
+A **exploratory, high-performance MCP proxy layer** for FasterAPI, inspired by [Archestra](https://github.com/archestra-ai/archestra), built entirely in C++ with Python bindings.
 
 ## 📊 Implementation Statistics
 

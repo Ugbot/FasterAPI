@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # QUIC Connection Orchestration - Implementation Report
 
 **Agent 15 Final Report**
@@ -415,7 +421,7 @@ All dependent components (quic_packet.cpp, quic_stream.cpp, quic_flow_control.cp
 
 ## Conclusion
 
-The QUIC connection orchestration implementation is **production-ready** for its scope (excluding crypto). It successfully integrates all QUIC transport components into a cohesive state machine with exceptional performance (24 ns packet processing, 40x faster than required).
+The QUIC connection orchestration implementation is **exploratory** for its scope (excluding crypto). It successfully integrates all QUIC transport components into a cohesive state machine with exceptional performance (24 ns packet processing, 40x faster than required).
 
 **Key Strengths:**
 - ✅ Clean integration with all dependent components

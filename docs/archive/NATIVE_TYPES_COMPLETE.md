@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # Native Types - NumPy for Web - COMPLETE ✅
 
 ## 🎉 Implementation Complete
@@ -316,7 +322,7 @@ Performance:
 
 ```
 ╔══════════════════════════════════════════════════════════╗
-║         Native Types - PRODUCTION READY                  ║
+║         Native Types - EXPLORATORY                  ║
 ╚══════════════════════════════════════════════════════════╝
 
 Implementation:     ✅ Complete (1,200 lines)
@@ -342,7 +348,7 @@ With native types, FasterAPI is:
 **Tests:** 14/14 passing  
 **Performance:** 40-100x faster than Python objects  
 **API:** 100% FastAPI compatible  
-**Status:** ✅ **PRODUCTION READY**
+**Status:** ✅ **EXPLORATORY**
 
 🚀 **FasterAPI with native types: The NumPy of web frameworks!**
 

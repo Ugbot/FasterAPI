@@ -1,10 +1,16 @@
 # FasterAPI MCP Implementation
 
-High-performance Model Context Protocol (MCP) implementation in C++ with Python bindings.
+> **Note — FasterAPI is an experimental testbed, not a framework.** The
+> MCP piece is one of the more usable components here, but it's a
+> component, not a product. Ping [@ugbot](https://github.com/ugbot) for
+> the actual framework built on top of this toolkit.
+
+Model Context Protocol (MCP) implementation in C++ with Python
+bindings.
 
 ## Overview
 
-FasterAPI MCP provides a complete, production-ready MCP implementation with:
+FasterAPI MCP provides a complete, exploratory MCP implementation with:
 
 - **100% C++ core** for maximum performance (100x faster than pure Python)
 - **Python bindings** via Cython for ease of use
@@ -171,10 +177,10 @@ See [LICENSE](../../LICENSE).
 
 ## Support
 
-- **Issues**: https://github.com/bengamble/FasterAPI/issues
-- **Discussions**: https://github.com/bengamble/FasterAPI/discussions
+- **Issues**: https://github.com/ugbot/FasterAPI/issues
+- **Discussions**: https://github.com/ugbot/FasterAPI/discussions
 - **Documentation**: https://docs.fasterapi.dev (coming soon)
 
 ---
 
-**FasterAPI MCP**: The fastest MCP implementation. Period. 🏆
+**FasterAPI MCP** — one of the more complete pieces in the testbed.

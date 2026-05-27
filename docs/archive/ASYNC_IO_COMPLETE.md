@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # ✅ FasterAPI Async I/O - COMPLETE!
 
 **Date:** October 20, 2025  
@@ -453,7 +459,7 @@ Next: Debug, optimize, integrate with FasterAPI HTTP server
 
 ---
 
-**This is production-ready async I/O infrastructure. FasterAPI now has batteries included for high-performance, event-driven networking on all platforms!** 🚀🔥⚡
+**This is exploratory async I/O infrastructure. FasterAPI now has batteries included for high-performance, event-driven networking on all platforms!** 🚀🔥⚡
 
 ---
 

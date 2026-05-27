@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # FasterAPI Async I/O - Implementation Status
 
 ## ✅ What We Just Built
@@ -436,7 +442,7 @@ Cores:      1
 **What We Have:**
 - ✅ Complete async_io architecture
 - ✅ Unified platform-agnostic API
-- ✅ kqueue implementation (production-ready)
+- ✅ kqueue implementation (exploratory)
 - ✅ Factory with auto-detection
 - ⏳ Stubs for epoll, io_uring, IOCP
 

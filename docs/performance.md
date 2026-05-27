@@ -1,6 +1,13 @@
 # Performance Guide
 
-How to get the most out of FasterAPI's high-performance architecture.
+> **Note — these are component-level microbenchmarks on isolated
+> pieces.** Not end-to-end framework throughput. Do not quote them as
+> "FasterAPI does X req/s" — there is no single stable framework here
+> to quote. FasterAPI is an experimental testbed; ping
+> [@ugbot](https://github.com/ugbot) for the actual framework built on
+> top of this toolkit.
+
+How to get the most out of the fast pieces in this repo.
 
 ## Understanding FasterAPI Performance
 

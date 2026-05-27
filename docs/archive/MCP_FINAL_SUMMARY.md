@@ -1,10 +1,16 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # FasterAPI MCP - Final Implementation Summary
 
 Complete summary of the MCP proxy implementation with pure C++ backend.
 
 ## ✅ What Was Delivered
 
-A **production-ready, high-performance MCP proxy** with:
+A **exploratory, high-performance MCP proxy** with:
 
 1. **100% C++ Core** - All routing, security, and connection pooling in C++
 2. **Cython Bindings** - Type-safe FFI layer for Python control
@@ -396,7 +402,7 @@ python examples/mcp_proxy_example.py
 
 ## 🎉 Summary
 
-We've delivered a **complete, production-ready MCP proxy** with:
+We've delivered a **complete, exploratory MCP proxy** with:
 
 ✅ **Pure C++ core** for maximum performance (< 2 µs overhead)
 ✅ **Cython bindings** for type-safe Python integration

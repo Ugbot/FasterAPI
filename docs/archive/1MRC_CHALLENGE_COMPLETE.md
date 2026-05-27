@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # ✅ 1 Million Request Challenge - COMPLETED
 
 **Date:** October 20, 2025  
@@ -330,7 +336,7 @@ Zero code changes required!
 ║  Current:  12,842 req/s  (proven today)                   ║
 ║  Future:   700,000 req/s (C++ potential)                  ║
 ║                                                           ║
-║  Status: ✅ PRODUCTION READY                             ║
+║  Status: ✅ EXPLORATORY                             ║
 ║  Rating: ⭐⭐⭐⭐⭐ (5/5 stars)                           ║
 ║                                                           ║
 ╚═══════════════════════════════════════════════════════════╝

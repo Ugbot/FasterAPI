@@ -1,6 +1,10 @@
 # Building FasterAPI MCP
 
-Complete guide to building FasterAPI MCP from source.
+> **Note — FasterAPI is an experimental testbed, not a framework.**
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework built
+> on top of this toolkit.
+
+Guide to building the MCP piece from source.
 
 ## Prerequisites
 
@@ -39,7 +43,7 @@ pip install cython
 ### 1. Clone Repository
 
 ```bash
-git clone https://github.com/bengamble/FasterAPI.git
+git clone https://github.com/ugbot/FasterAPI.git
 cd FasterAPI
 ```
 

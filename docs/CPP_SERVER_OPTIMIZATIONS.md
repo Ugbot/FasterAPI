@@ -1,6 +1,15 @@
 # C++ HTTP Server Optimizations
 
-This document describes the performance optimizations implemented in FasterAPI's pure C++ HTTP server, which achieves **190,000+ requests/second** on a single machine.
+> **Note — FasterAPI is an experimental testbed, not a framework.** The
+> numbers below were measured on the C++ HTTP server piece in isolation
+> during this experiment. Treat them as component-level findings, not
+> end-to-end framework throughput. Ping
+> [@ugbot](https://github.com/ugbot) for the actual framework built on
+> top of this toolkit.
+
+This document describes the performance optimisations explored in the
+pure C++ HTTP server piece, which measured around **190,000
+requests/second** in isolated benchmarks on a single machine.
 
 ## Benchmark Results
 

@@ -1,5 +1,10 @@
 ## FasterAPI C++ User API Documentation
 
+> **Note — FasterAPI is an experimental testbed, not a framework.**
+> Describes the toolkit's internals; pieces vary in completeness. Ping
+> [@ugbot](https://github.com/ugbot) for the actual framework built on
+> top of this toolkit.
+
 ### Overview
 
 The FasterAPI C++ User API provides a clean, modern, FastAPI-style interface for building high-performance HTTP applications directly in C++. It combines the expressiveness of Python's FastAPI with the raw performance of C++.

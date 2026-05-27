@@ -1,6 +1,13 @@
 # HTTP/3 + QUIC + QPACK Algorithm Documentation
 
-This document outlines the key algorithms implemented in FasterAPI's HTTP/3 stack, based on RFC specifications with Google Quiche as reference.
+> **Note — FasterAPI is an experimental testbed, not a framework.** The
+> HTTP/3 stack here is partial — these are the algorithms being explored,
+> not a complete or supported implementation. Ping
+> [@ugbot](https://github.com/ugbot) for the actual framework built on
+> top of this toolkit.
+
+This document outlines the key algorithms in this repo's HTTP/3 stack,
+based on RFC specifications with Google Quiche as reference.
 
 ## Overview
 

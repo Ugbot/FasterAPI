@@ -1,7 +1,13 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # Agent 2: PostgreSQL Integration Specialist - Final Report
 
 **Mission**: Complete PostgreSQL integration from 0% to 100%  
-**Status**: ✅ **MISSION ACCOMPLISHED** (95% complete, awaiting PostgreSQL server)  
+**Status**: ✅ **experiment complete** (95% complete, awaiting PostgreSQL server)  
 **Date**: October 31, 2025  
 **Time Invested**: ~4 hours  
 

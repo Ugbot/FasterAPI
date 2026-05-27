@@ -1,6 +1,11 @@
 # PostgreSQL Integration Guide
 
-Complete guide to using FasterAPI's high-performance PostgreSQL driver.
+> **Note — FasterAPI is an experimental testbed, not a framework.** The
+> PG piece is one of the more complete components but is not a
+> supported product. Ping [@ugbot](https://github.com/ugbot) for the
+> actual framework built on top of this toolkit.
+
+Guide to using the native PostgreSQL driver piece in this repo.
 
 ## Overview
 
@@ -730,5 +735,5 @@ CREATE INDEX idx_users_email ON users(email);
 
 ---
 
-**Questions?** → [GitHub Discussions](https://github.com/bengamble/FasterAPI/discussions)
+**Questions?** → [GitHub Discussions](https://github.com/ugbot/FasterAPI/discussions)
 

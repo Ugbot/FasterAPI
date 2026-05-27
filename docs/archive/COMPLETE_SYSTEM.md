@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # FasterAPI - Complete System Overview
 
 ## 🎉 Four Major Components - All Production Ready
@@ -502,7 +508,7 @@ def sync_handler():
 
 ## 🔮 Future Enhancements
 
-While already production-ready, potential additions:
+While already exploratory, potential additions:
 
 ### Performance
 - [ ] Stack-only future allocation
@@ -557,18 +563,18 @@ While already production-ready, potential additions:
 ║                                                          ║
 ║           ✅ 4 MAJOR COMPONENTS COMPLETE                ║
 ║           ✅ 101/101 TESTS PASSING                      ║
-║           ✅ PRODUCTION READY                           ║
+║           ✅ EXPLORATORY                           ║
 ║                                                          ║
 ╚══════════════════════════════════════════════════════════╝
 
 Total Code:         12,873+ lines
 Total Tests:        101/101 passing (100%)
-Components:         4 production-ready systems
+Components:         4 exploratory systems
 Performance:        29ns routing, 0.7µs async, ~5µs overhead
 Documentation:      2,000+ lines across 7 guides
 Examples:           8 comprehensive demos
 
-Status:             ✅ PRODUCTION READY
+Status:             ✅ EXPLORATORY
 Recommendation:     Deploy with confidence!
 ```
 
@@ -607,7 +613,7 @@ Recommendation:     Deploy with confidence!
 
 ## 🚀 Ready to Deploy
 
-FasterAPI is now a **complete, production-ready, high-performance Python web framework** that combines:
+FasterAPI is now a **complete, exploratory, high-performance Python web framework** that combines:
 
 - ⚡ **Ultra-fast routing** (29ns)
 - 🔄 **Seastar-style futures**
@@ -618,7 +624,7 @@ FasterAPI is now a **complete, production-ready, high-performance Python web fra
 
 **Perfect for:** High-throughput APIs, real-time applications, microservices, database-heavy workloads
 
-**Status:** ✅ **PRODUCTION READY - DEPLOY WITH CONFIDENCE!**
+**Status:** ✅ **EXPLORATORY - DEPLOY WITH CONFIDENCE!**
 
 ---
 

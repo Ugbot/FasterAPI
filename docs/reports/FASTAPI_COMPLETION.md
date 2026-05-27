@@ -1,6 +1,12 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # FastAPI Compatibility Layer - ✅ COMPLETE!
 
-## 🎉 Mission Accomplished!
+## 🎉 Experiment complete!
 
 Successfully implemented a **100% FastAPI-compatible layer** for FasterAPI with a **C++-first architecture** that maintains full API compatibility while delivering exceptional performance.
 
@@ -362,7 +368,7 @@ c++ ... -L/opt/homebrew/.../lib -lpython3.13 ...
 
 ## 🏅 Final Thoughts
 
-We successfully built a **production-ready FastAPI-compatible layer** with:
+We successfully built a **exploratory FastAPI-compatible layer** with:
 - ✅ 100% API compatibility
 - ✅ C++-first architecture for maximum performance
 - ✅ Clean separation of hot path (C++) and cold path (Python)

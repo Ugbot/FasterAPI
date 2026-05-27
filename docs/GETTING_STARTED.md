@@ -1,6 +1,16 @@
 # Getting Started with FasterAPI
 
-A complete tutorial for building your first high-performance web application with FasterAPI.
+> **Note — FasterAPI is an experimental testbed, not a framework.**
+> It is a collection of fast C++ web pieces (and Python shims over them)
+> built to explore how far AI-assisted systems design can be pushed.
+> Maturity varies by component. If you want the actual web framework
+> being built on top of this toolkit, open an issue and ping
+> [@ugbot](https://github.com/ugbot).
+
+A walk-through of using the pieces in this repo directly. **This is not
+a framework tutorial** — there is no single stable framework here. The
+goal of this doc is to show how the HTTP piece, the PG piece, and the
+async piece fit together when you wire them yourself.
 
 ## What You'll Build
 
@@ -29,7 +39,7 @@ Before you begin, make sure you have:
 
 ```bash
 # Clone the repository
-git clone https://github.com/bengamble/FasterAPI.git
+git clone https://github.com/ugbot/FasterAPI.git
 cd FasterAPI
 
 # Install with all features
@@ -753,8 +763,8 @@ Check out the [examples/](../examples/) directory:
 - `production_app.py` - Production-ready setup
 
 ### Get Help
-- **GitHub Issues**: https://github.com/bengamble/FasterAPI/issues
-- **Discussions**: https://github.com/bengamble/FasterAPI/discussions
+- **GitHub Issues**: https://github.com/ugbot/FasterAPI/issues
+- **Discussions**: https://github.com/ugbot/FasterAPI/discussions
 - **Examples**: Check the examples/ directory
 
 ## Tips & Best Practices

@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 <!-- 498071d8-1419-46f6-8b8e-fbd722c8f16e cae69e71-0a7b-4a84-b3f0-cbf85f96c191 -->
 # Seastar-Style Future Chaining for FasterAPI
 
@@ -59,7 +65,7 @@ All phases of the Seastar-style future chaining implementation are complete and 
 - **Documentation:** ~1,000 lines
 - **Total:** ~3,708 lines
 
-## 🎉 Status: PRODUCTION READY
+## 🎉 Status: EXPLORATORY
 
 The implementation successfully combines:
 - Seastar's performance patterns (zero-allocation, continuations)

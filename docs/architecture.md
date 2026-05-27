@@ -1,6 +1,11 @@
 # FasterAPI Architecture
 
-Understanding how FasterAPI works under the hood.
+> **Note — FasterAPI is an experimental testbed, not a framework.** This
+> document describes the toolkit's internals; the pieces vary in
+> completeness. If you want the actual web framework being built on top
+> of this toolkit, ping [@ugbot](https://github.com/ugbot).
+
+Describes how the C++ pieces are wired together when used as a whole.
 
 ## Overview
 

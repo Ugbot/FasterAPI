@@ -1,9 +1,15 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # FasterAPI - Master Summary
 
 ## 🎉 PROJECT COMPLETE - REVOLUTIONARY PERFORMANCE
 
 **Date:** October 18, 2025  
-**Status:** ✅ **PRODUCTION READY**  
+**Status:** ✅ **EXPLORATORY**  
 **Achievement:** Built the **fastest Python web framework** by importing algorithms instead of using library APIs
 
 ---
@@ -427,7 +433,7 @@ Total Tests:         129/131 (98%)
 Components:          7 production systems
 Performance:         5-75x faster than using APIs
 Documentation:       2,500+ lines
-Status:              ✅ PRODUCTION READY
+Status:              ✅ EXPLORATORY
 
 Key Achievements:
   • 29ns routing (17x faster than others)
@@ -542,7 +548,7 @@ inline_optimized_version(...);  // 10-75x faster!
 
 ---
 
-## 🎉 PRODUCTION READY
+## 🎉 EXPLORATORY
 
 FasterAPI is the **fastest Python web framework ever built**, achieving unprecedented performance by:
 
@@ -564,7 +570,7 @@ FasterAPI is the **fastest Python web framework ever built**, achieving unpreced
 **Tests:** 129/131 passing (98%)  
 **Performance:** 5-75x faster than using library APIs  
 **Innovation:** Algorithm import strategy  
-**Status:** ✅ **PRODUCTION READY**
+**Status:** ✅ **EXPLORATORY**
 
 🏆 **Revolutionary performance achieved through correctness-first engineering!**
 

@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # QPACK Static Table Implementation Report
 
 **Agent 16: Production-Quality QPACK Static Table**
@@ -456,7 +462,7 @@ ALL TESTS PASSED ✓ (17/17)
 
 ### For Production Use
 
-1. **Current implementation is production-ready** ✅
+1. **Current implementation is exploratory** ✅
    - All requirements met
    - Excellent performance
    - Full RFC compliance

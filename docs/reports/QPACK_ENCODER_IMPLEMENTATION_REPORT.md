@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # QPACK Encoder Implementation Report
 
 **Agent 18 Mission Completion Report**
@@ -8,7 +14,7 @@
 
 ## Executive Summary
 
-✅ **MISSION ACCOMPLISHED**
+✅ **experiment complete**
 
 Production-quality QPACK encoder successfully implemented with full RFC 9204 compliance. All 14 comprehensive test suites pass with excellent compression ratios (50-82%) and performance close to target (<1.5μs per encode).
 
@@ -549,7 +555,7 @@ TOTAL: 14/14 PASSED ✅
 
 **Mission Status:** ✅ **COMPLETE**
 
-The QPACK encoder implementation is production-ready with:
+The QPACK encoder implementation is exploratory with:
 
 - **Full RFC 9204 compliance** - All required encoding formats
 - **Excellent compression** - 50-82% size reduction
@@ -573,4 +579,4 @@ The encoder successfully integrates with the HTTP/3 stack and provides efficient
 
 **Report compiled by Agent 18**
 **Implementation verified: 2024-10-31**
-**Status: MISSION ACCOMPLISHED ✅**
+**Status: experiment complete ✅**

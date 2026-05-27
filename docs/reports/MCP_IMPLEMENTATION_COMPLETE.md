@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # MCP Protocol Implementation - Complete
 
 ## Executive Summary
@@ -522,7 +528,7 @@ All requested MCP features have been successfully implemented:
 ✅ **Python Bindings**: All NotImplementedError removed
 ✅ **Build System**: CMakeLists.txt updated
 
-The implementation follows MCP specification 2024-11-05, JSON-RPC 2.0, and RFC 6455 (WebSocket). All code is production-ready with proper error handling, timeout management, and thread safety.
+The implementation follows MCP specification 2024-11-05, JSON-RPC 2.0, and RFC 6455 (WebSocket). All code is exploratory with proper error handling, timeout management, and thread safety.
 
 **Total Implementation**: ~2,025 lines of new/modified code across 11 files.
 

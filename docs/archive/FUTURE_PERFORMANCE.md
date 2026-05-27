@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # FasterAPI - Future Performance Potential
 
 ## Current Status: Already Exceptional ✅
@@ -259,7 +265,7 @@ def get_user(id: int):
 
 ### Recommendation
 
-**Ship current version now** (17-83x faster, production-ready), then:
+**Ship current version now** (17-83x faster, exploratory), then:
 - **Phase 2:** Add native types (optional `@app.get(native=True)`)
 - **Result:** 680x faster than FastAPI for opt-in handlers!
 

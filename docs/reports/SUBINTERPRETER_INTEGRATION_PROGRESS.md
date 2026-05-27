@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # Sub-Interpreter Integration - Progress Report
 
 ## Date: 2025-11-03
@@ -235,7 +241,7 @@ Remaining work focuses on:
 - Testing (Phase 4)
 - Performance validation (Phase 5)
 
-**Status:** On track for production-ready sub-interpreter integration in 8-12 hours of additional work.
+**Status:** On track for exploratory sub-interpreter integration in 8-12 hours of additional work.
 
 ---
 

@@ -1,9 +1,15 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # QPACK Dynamic Table Implementation Report
 
 ## Agent 17 Mission: Complete
 
 **Date:** 2025-10-31
-**Status:** ✅ MISSION ACCOMPLISHED
+**Status:** ✅ experiment complete
 **RFC Compliance:** RFC 9204 Section 3.2 (Dynamic Table)
 
 ---
@@ -408,9 +414,9 @@ dynamic_table.acknowledge_insert(ack_count);
 
 ## Agent 17 Sign-Off
 
-**MISSION ACCOMPLISHED**
+**experiment complete**
 
-The QPACK dynamic table implementation is production-ready, RFC 9204 compliant, and exceeds all performance targets. The implementation follows all CLAUDE.md guidelines for high-performance systems with zero-allocation design patterns.
+The QPACK dynamic table implementation is exploratory, RFC 9204 compliant, and exceeds all performance targets. The implementation follows all CLAUDE.md guidelines for high-performance systems with zero-allocation design patterns.
 
 **Ready for integration with HTTP/3 QPACK encoder/decoder.**
 

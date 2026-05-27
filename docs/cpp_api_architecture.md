@@ -1,5 +1,10 @@
 # FasterAPI C++ API Architecture
 
+> **Note — FasterAPI is an experimental testbed, not a framework.**
+> Describes the toolkit's internals; pieces vary in completeness. Ping
+> [@ugbot](https://github.com/ugbot) for the actual framework built on
+> top of this toolkit.
+
 ## Overview
 
 FasterAPI uses a **three-layer architecture** to provide high-performance functionality to Python while maintaining clean separation of concerns:

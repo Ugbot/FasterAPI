@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # QUIC Transport Layer Integration Test Report
 
 **Agent 21 Final Deliverable**
@@ -454,4 +460,4 @@ Integration Issues: Connection state management
 4. Integrate TLS 1.3 for full connection lifecycle
 5. Add packet protection for wire-level testing
 
-**Test suite is production-ready for component integration validation once connection state management is resolved.**
+**Test suite is exploratory for component integration validation once connection state management is resolved.**

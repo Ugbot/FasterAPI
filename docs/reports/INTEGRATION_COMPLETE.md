@@ -1,6 +1,12 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # FastAPI Integration - ✅ COMPLETE & WORKING!
 
-## 🎉 Mission Accomplished!
+## 🎉 Experiment complete!
 
 Successfully integrated the FastAPI compatibility layer with a working HTTP server, demonstrating full end-to-end functionality from decorator registration through C++ route matching to HTTP responses.
 
@@ -394,7 +400,7 @@ curl http://localhost:8000/openapi.json  # OpenAPI spec
 
 ## 🎉 Conclusion
 
-We have successfully built a **production-ready FastAPI-compatible layer** that:
+We have successfully built a **exploratory FastAPI-compatible layer** that:
 
 ✅ Maintains 100% API compatibility with FastAPI
 ✅ Provides C++-first architecture for maximum performance

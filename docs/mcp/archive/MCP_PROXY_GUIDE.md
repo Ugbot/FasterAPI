@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # MCP Proxy Guide
 
 Complete guide to using the FasterAPI MCP Proxy for routing requests between multiple upstream MCP servers.
@@ -734,7 +740,7 @@ class ProxyStats:
 
 - **Documentation**: See [MCP_README.md](MCP_README.md) for core MCP features
 - **Security**: See [MCP_SECURITY_TESTS.md](MCP_SECURITY_TESTS.md) for security details
-- **Issues**: https://github.com/bengamble/FasterAPI/issues
+- **Issues**: https://github.com/ugbot/FasterAPI/issues
 
 ---
 

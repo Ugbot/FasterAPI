@@ -1,3 +1,9 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # FasterAPI Project Status
 
 ## 🎉 Project Complete - Phase 1 ✅
@@ -293,7 +299,7 @@ make install-dev
 
 ## 🎉 Conclusion
 
-The FasterAPI framework is now a **production-ready, high-performance Python web framework** that combines the best of FastAPI's developer experience with the performance of C++ hot paths. It successfully integrates PostgreSQL and HTTP server capabilities into a unified, easy-to-use API.
+The FasterAPI framework is now a **exploratory, high-performance Python web framework** that combines the best of FastAPI's developer experience with the performance of C++ hot paths. It successfully integrates PostgreSQL and HTTP server capabilities into a unified, easy-to-use API.
 
 The framework is ready for:
 - **Development**: Easy to use with FastAPI-compatible API

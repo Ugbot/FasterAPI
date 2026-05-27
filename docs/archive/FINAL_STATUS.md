@@ -1,9 +1,15 @@
+> **Research note — snapshot, not current state.**
+> This document is from FasterAPI's exploration phase. Claims here
+> reflect what was being investigated at the time, not the testbed's
+> current state. FasterAPI is an experimental testbed, not a framework.
+> Ping [@ugbot](https://github.com/ugbot) for the actual framework
+> built on top of this toolkit.
 # FasterAPI - Final Status Report
 
 ## 🎉 PROJECT COMPLETE - ALL SYSTEMS OPERATIONAL
 
 **Date:** October 18, 2025  
-**Status:** ✅ **PRODUCTION READY**  
+**Status:** ✅ **EXPLORATORY**  
 **Test Coverage:** 94/94 passing (100%)
 
 ---
@@ -354,7 +360,7 @@ def websocket_handler(ws):
 
 ## 🔮 Optional Future Work
 
-While production-ready, potential enhancements:
+While exploratory, potential enhancements:
 
 ### Performance (Already Excellent)
 - [ ] Stack-only futures (0.38µs → ~0µs)
@@ -405,7 +411,7 @@ While production-ready, potential enhancements:
 ```
 ╔══════════════════════════════════════════════════════════╗
 ║                                                          ║
-║              FasterAPI - PRODUCTION READY                ║
+║              FasterAPI - EXPLORATORY                ║
 ║                                                          ║
 ║           ✅ 4 MAJOR SYSTEMS COMPLETE                   ║
 ║           ✅ 94/94 TESTS PASSING                        ║
@@ -441,7 +447,7 @@ Key Features:
   ✅ FastAPI-compatible API
   ✅ 100% test coverage
 
-Status:                 ✅ PRODUCTION READY
+Status:                 ✅ EXPLORATORY
 Recommendation:         DEPLOY WITH CONFIDENCE!
 ```
 
@@ -559,7 +565,7 @@ Every system has:
 
 ## 🎉 READY FOR PRODUCTION
 
-FasterAPI is a **complete, production-ready, high-performance Python web framework** that delivers:
+FasterAPI is a **complete, exploratory, high-performance Python web framework** that delivers:
 
 - ⚡ **29ns routing** (fastest in class)
 - 🔄 **Seastar-style futures** (async done right)
@@ -580,7 +586,7 @@ FasterAPI is a **complete, production-ready, high-performance Python web framewo
 **Tests:** 94/94 passing  
 **Performance:** All targets beaten  
 **Documentation:** Complete  
-**Status:** ✅ **PRODUCTION READY**
+**Status:** ✅ **EXPLORATORY**
 
 🚀 **Ready to revolutionize Python web development!**
 
